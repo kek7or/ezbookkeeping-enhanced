@@ -12,6 +12,12 @@ export class ImageUploadQualityType implements TypeAndName {
 
     public static readonly Default = ImageUploadQualityType.Original;
 
+    // Quality used for images sent to AI recognition. Receipts are dense small print, and at 720p
+    // a phone photo loses enough detail that the model starts reading a price from the neighbouring
+    // row. Raising this costs upload time and image tokens, so it is capped rather than Original:
+    // an oversized image can push the system prompt out of a small local model's context window.
+    public static readonly AIRecognitionDefault = ImageUploadQualityType.QHD2K;
+
     public readonly type: number;
     public readonly name: string;
     public readonly maxLongSidePixels: number | null;

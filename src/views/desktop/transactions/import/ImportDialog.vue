@@ -847,7 +847,7 @@ function reloadBasisData(): void {
 
 function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): Promise<ImportTransactionResponse[]> {
     return new Promise<ImportTransactionResponse[]>((resolve, reject) => {
-        compressJpgImageByQuality(item.file, ImageUploadQualityType.HD720P).then(blob => {
+        compressJpgImageByQuality(item.file, ImageUploadQualityType.AIRecognitionDefault).then(blob => {
             const compressedFile = KnownFileType.JPG.createFileFromBlob(blob, "image");
             importImageCancelRecognizingUuid.value = generateRandomUUID();
 

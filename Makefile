@@ -25,7 +25,9 @@ WEB_PORT     := 1337
 OLLAMA_PORT  := 11434
 OLLAMA_MODEL ?= qwen3-vl-16k
 
-GO_BUILD := PATH="$(MINGW_BIN):$$PATH" CGO_ENABLED=1 go build -tags timetzdata
+# CC is set explicitly rather than prepending to PATH: PATH is ";"-separated on Windows but
+# ":"-separated inside bash, and mixing the two silently produces an unusable entry.
+GO_BUILD := CGO_ENABLED=1 CC="$(MINGW_BIN)/gcc.exe" go build -tags timetzdata
 
 # Stop whatever holds a TCP port. Killing by port rather than by pid on purpose:
 # "npm run serve" exits without taking its vite child with it, orphaning the port.

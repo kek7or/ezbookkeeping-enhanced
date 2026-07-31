@@ -23,6 +23,7 @@ type RecognizedTransactionResponse struct {
 type RecognizedReceiptLineItem struct {
 	Name     string `json:"name,omitempty" jsonschema_description:"Item name exactly as printed on the receipt"`
 	Price    string `json:"price,omitempty" jsonschema_description:"Price printed on that same line"`
+	Deposit  bool   `json:"deposit,omitempty" jsonschema_description:"Whether this line is a deposit (Pfand) charged on the item above it"`
 	Reason   string `json:"reason,omitempty" jsonschema_description:"Short justification for the chosen category"`
 	Category string `json:"category,omitempty" jsonschema_description:"Category name for this single item"`
 }

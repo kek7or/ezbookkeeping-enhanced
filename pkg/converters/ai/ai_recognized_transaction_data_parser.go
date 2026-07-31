@@ -28,9 +28,14 @@ type aiTransactionDataParser struct {
 type aiTransactionDataParsedResult struct {
 	Transactions []*models.RecognizedTransactionResult `json:"transactions"`
 	LineItems    []*models.RecognizedReceiptLineItem   `json:"line_items"`
-	ReceiptTotal string                                `json:"receipt_total"`
-	Time         string                                `json:"time"`
-	AccountName  string                                `json:"account"`
+	// the verbatim transcription of the item block the model writes before it builds the line
+	// items; it is a scratchpad and is not imported, but comparing the two counts shows whether
+	// a printed line was lost between reading the receipt and structuring it
+	RawLines      []string `json:"raw_lines"`
+	ReceiptTotal  string   `json:"receipt_total"`
+	Time          string   `json:"time"`
+	AccountName   string   `json:"account"`
+	PaymentMethod string   `json:"payment_method"`
 }
 
 // parseText processes the input text data and returns the recognized transaction results using AI
@@ -120,7 +125,7 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 	// a receipt listing several purchased lines is returned as line items which are grouped and summed here,
 	// any other image (a single voucher, a transfer confirmation) is returned as transactions directly
 	if len(result.LineItems) > 0 {
-		transactions := p.aggregateReceiptLineItems(c, user, result, additionalOptions.GetWarningCollector())
+		transactions := p.aggregateReceiptLineItems(c, user, result, accountMap, additionalOptions.GetWarningCollector())
 
 		if len(transactions) > 0 {
 			return transactions, nil
@@ -136,7 +141,7 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 
 // buildRecognitionSystemPrompt returns the system prompt for AI recognition based on the provided template and user data
 func (p *aiTransactionDataParser) buildRecognitionSystemPrompt(c core.Context, user *models.User, templateName templates.KnownTemplate, additionalPrompt string, defaultTimezone *time.Location, accountMap map[string]*models.Account, expenseCategoryMap, incomeCategoryMap, transferCategoryMap map[string]map[string]*models.TransactionCategory, tagMap map[string]*models.TransactionTag) (string, error) {
-	accountNames := p.getAccountNames(accountMap)
+	accountNames := p.getAccountLines(accountMap)
 	expenseCategoryNames := p.getCategoryLines(c, user, expenseCategoryMap)
 	incomeCategoryNames := p.getCategoryLines(c, user, incomeCategoryMap)
 	transferCategoryNames := p.getCategoryLines(c, user, transferCategoryMap)
@@ -188,16 +193,37 @@ func (p *aiTransactionDataParser) parseRecognizedResult(c core.Context, user *mo
 	return result, nil
 }
 
-func (p *aiTransactionDataParser) getAccountNames(accountMap map[string]*models.Account) []string {
-	names := make([]string, 0, len(accountMap))
+// account category names as they are shown in the user interface, so that the model sees an
+// account list it can match a payment method against ("paid by card" -> the Credit Card account)
+var aiAccountCategoryNames = map[models.AccountCategory]string{
+	models.ACCOUNT_CATEGORY_CASH:                   "Cash",
+	models.ACCOUNT_CATEGORY_CHECKING_ACCOUNT:       "Checking Account",
+	models.ACCOUNT_CATEGORY_CREDIT_CARD:            "Credit Card",
+	models.ACCOUNT_CATEGORY_VIRTUAL:                "Virtual Account",
+	models.ACCOUNT_CATEGORY_DEBT:                   "Debt Account",
+	models.ACCOUNT_CATEGORY_RECEIVABLES:            "Receivables",
+	models.ACCOUNT_CATEGORY_INVESTMENT:             "Investment Account",
+	models.ACCOUNT_CATEGORY_SAVINGS_ACCOUNT:        "Savings Account",
+	models.ACCOUNT_CATEGORY_CERTIFICATE_OF_DEPOSIT: "Certificate of Deposit",
+}
+
+// getAccountLines returns the account list rendered for the system prompt, annotated with each
+// account's category, for example "Wallet (Cash)". Without the category the model has no way to
+// tell which account a cash or card payment belongs to, since account names are user chosen.
+func (p *aiTransactionDataParser) getAccountLines(accountMap map[string]*models.Account) []string {
+	lines := make([]string, 0, len(accountMap))
 
 	for _, account := range accountMap {
-		names = append(names, account.Name)
+		if categoryName, exists := aiAccountCategoryNames[account.Category]; exists {
+			lines = append(lines, account.Name+" ("+categoryName+")")
+		} else {
+			lines = append(lines, account.Name)
+		}
 	}
 
-	sort.Strings(names)
+	sort.Strings(lines)
 
-	return names
+	return lines
 }
 
 // getCategoryLines returns the category list rendered for the system prompt, grouped by their parent
