@@ -95,7 +95,7 @@ func (a *LargeLanguageModelsApi) RecognizeTransactionTextHandler(c *core.WebCont
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	systemPrompt, err := templates.GetTemplate(templates.SYSTEM_PROMPT_TRANSACTION_TEXT_RECOGNITION)
+	systemPrompt, err := templates.GetTextTemplate(templates.SYSTEM_PROMPT_TRANSACTION_TEXT_RECOGNITION)
 
 	if err != nil {
 		log.Errorf(c, "[large_language_models.RecognizeTransactionTextHandler] failed to get system prompt template for user \"uid:%d\", because %s", uid, err.Error())
@@ -229,7 +229,7 @@ func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	systemPrompt, err := templates.GetTemplate(templates.SYSTEM_PROMPT_RECEIPT_IMAGE_RECOGNITION)
+	systemPrompt, err := templates.GetTextTemplate(templates.SYSTEM_PROMPT_RECEIPT_IMAGE_RECOGNITION)
 
 	if err != nil {
 		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get system prompt template for user \"uid:%d\", because %s", uid, err.Error())

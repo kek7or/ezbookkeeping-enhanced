@@ -102,12 +102,12 @@ func (t *aiRecognizedTransactionDataRowIterator) Next(ctx core.Context, user *mo
 }
 
 func (t *aiRecognizedTransactionDataRowIterator) parseTransaction(ctx core.Context, user *models.User, result *models.RecognizedTransactionResult) (map[datatable.TransactionDataTableColumn]string, error) {
-	data := make(map[datatable.TransactionDataTableColumn]string, len(aiTransactionSupportedColumns))
-	data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TIME] = result.Time
-
 	if result == nil || len(result.Type) == 0 {
 		return nil, errs.ErrTransactionTypeInvalid
 	}
+
+	data := make(map[datatable.TransactionDataTableColumn]string, len(aiTransactionSupportedColumns))
+	data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TIME] = t.getLongDateTime(result.Time)
 
 	if result.Type == "income" {
 		data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TYPE] = utils.IntToString(int(models.TRANSACTION_TYPE_INCOME))

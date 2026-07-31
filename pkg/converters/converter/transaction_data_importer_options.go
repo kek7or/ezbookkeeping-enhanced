@@ -16,6 +16,7 @@ type TransactionDataImporterOptions struct {
 	merchantAsTag      bool
 	aiAdditionalPrompt string
 	aiImageContentType string
+	warningCollector   *ImportWarningCollector
 }
 
 // DefaultImporterOptions provides the default options for transaction data importer
@@ -28,6 +29,7 @@ var DefaultImporterOptions = TransactionDataImporterOptions{
 	merchantAsTag:      false,
 	aiAdditionalPrompt: "",
 	aiImageContentType: "",
+	warningCollector:   nil,
 }
 
 // GetCurrentConfig returns the current config
@@ -68,6 +70,11 @@ func (o TransactionDataImporterOptions) GetAIAdditionalPrompt() string {
 // GetAIImageContentType returns the content type of the AI recognition image
 func (o TransactionDataImporterOptions) GetAIImageContentType() string {
 	return o.aiImageContentType
+}
+
+// GetWarningCollector returns the collector which non-fatal parsing problems are reported to
+func (o TransactionDataImporterOptions) GetWarningCollector() *ImportWarningCollector {
+	return o.warningCollector
 }
 
 // WithPayeeAsTag sets the option to import payee as tag
@@ -119,6 +126,13 @@ func (o TransactionDataImporterOptions) WithAIImageContentType(contentType strin
 	return cloned
 }
 
+// WithWarningCollector sets the collector which non-fatal parsing problems are reported to
+func (o TransactionDataImporterOptions) WithWarningCollector(collector *ImportWarningCollector) TransactionDataImporterOptions {
+	cloned := o.Clone()
+	cloned.warningCollector = collector
+	return cloned
+}
+
 // Clone creates a copy of the options instance
 func (o TransactionDataImporterOptions) Clone() TransactionDataImporterOptions {
 	return TransactionDataImporterOptions{
@@ -130,6 +144,7 @@ func (o TransactionDataImporterOptions) Clone() TransactionDataImporterOptions {
 		merchantAsTag:      o.merchantAsTag,
 		aiAdditionalPrompt: o.aiAdditionalPrompt,
 		aiImageContentType: o.aiImageContentType,
+		warningCollector:   o.warningCollector,
 	}
 }
 

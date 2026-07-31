@@ -283,6 +283,16 @@
                         />
                     </v-window-item>
                     <v-window-item value="checkData">
+                        <v-alert type="warning" variant="tonal" class="mb-4"
+                                 :title="tt('Receipt Total Does Not Match')"
+                                 v-for="(warning, warningIndex) in receiptTotalMismatchWarnings" :key="warningIndex">
+                            {{ tt('format.misc.receiptTotalMismatch', {
+                                count: formatNumberToLocalizedNumerals(warning.lineItemCount || 0),
+                                calculated: warning.calculatedTotal,
+                                stated: warning.statedTotal,
+                                difference: warning.difference
+                            }) }}
+                        </v-alert>
                         <import-transaction-check-data-tab
                             ref="importTransactionCheckDataTab"
                             :import-transactions="importTransactions"
@@ -365,7 +375,7 @@ import {
 import { ImageUploadQualityType } from '@/core/image.ts';
 import { UTF_8 } from '@/consts/file.ts';
 
-import { type ImportTransactionResponse, ImportTransaction } from '@/models/imported_transaction.ts';
+import { type ImportTransactionResponse, type ImportTransactionWarningResponse, ImportTransaction } from '@/models/imported_transaction.ts';
 
 import { isDefined, isNumber } from '@/lib/common.ts';
 import { findExtensionByType, isFileExtensionSupported, detectFileEncoding } from '@/lib/file.ts';
@@ -470,6 +480,7 @@ const importAIAdditionalPrompt = ref<string>('');
 const importImageCancelRecognizingUuid = ref<string | undefined>(undefined);
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
+const importWarnings = ref<ImportTransactionWarningResponse[]>([]);
 
 const importedCount = ref<number | null>(null);
 const loading = ref<boolean>(true);
@@ -520,6 +531,7 @@ const isAIImageImport = computed<boolean>(() => fileType.value === 'ai_image');
 const needAIImageRecognition = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.needAIImageRecognition ?? false);
 const supportedAdditionalOptions = computed<ImportFileTypeSupportedAdditionalOptions | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.supportedAdditionalOptions);
 const supportedAIAdditionalPrompt = computed<boolean>(() => !!allSupportedImportFileTypesMap.value[fileType.value]?.supportedAIAdditionalPrompt);
+const receiptTotalMismatchWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptTotalMismatch'));
 
 const allSteps = computed<StepBarItem[]>(() => {
     const steps: StepBarItem[] = [
@@ -690,6 +702,7 @@ function open(): Promise<void> {
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
+    importWarnings.value = [];
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
     clientSessionId.value = generateRandomUUID();
@@ -844,6 +857,11 @@ function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): 
                 importFile: compressedFile,
                 cancelableUuid: importImageCancelRecognizingUuid.value
             }).then(response => {
+                // each image is a receipt of its own, so the warnings accumulate over the whole batch
+                if (response.warnings) {
+                    importWarnings.value.push(...response.warnings);
+                }
+
                 resolve(response.items || []);
             }).catch(error => {
                 reject(error);
@@ -951,6 +969,7 @@ function parseData(): void {
         currentStep.value = 'recognizeImages';
         submitting.value = true;
         importTransactions.value = undefined;
+        importWarnings.value = [];
 
         batchRecognizeImages().then(() => {
             if (!importTransactions.value || importTransactions.value.length < 1) {
@@ -1131,6 +1150,7 @@ function parseData(): void {
             tagSeparator: tagSeparator
         }).then(response => {
             const parsedTransactions: ImportTransaction[] = [];
+            importWarnings.value = response.warnings ?? [];
 
             if (response.items) {
                 for (const [importTransaction, index] of itemAndIndex(response.items)) {
@@ -1288,6 +1308,7 @@ watch(fileType, (newValue) => {
     parsedFileData.value = undefined;
     importAdditionalOptions.value = Object.assign({}, supportedAdditionalOptions.value ?? {});
     importTransactions.value = undefined;
+    importWarnings.value = [];
     clearImportImageFiles();
 });
 

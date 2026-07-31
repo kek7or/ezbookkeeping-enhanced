@@ -2522,6 +2522,9 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 
 	tagMap := a.transactionTags.GetVisibleTagNameMapByList(tags)
 
+	warningCollector := converter.NewImportWarningCollector()
+	additionalOptions = additionalOptions.WithWarningCollector(warningCollector)
+
 	parsedTransactions, _, _, _, _, _, err := dataImporter.ParseImportedData(c, user, fileData, clientTimezone, additionalOptions, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
 
 	if err != nil {
@@ -2538,6 +2541,7 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 	parsedTransactionResps := &models.ImportTransactionResponsePageWrapper{
 		Items:      parsedTransactionRespsList,
 		TotalCount: int64(len(parsedTransactionRespsList)),
+		Warnings:   warningCollector.GetWarnings(),
 	}
 
 	return parsedTransactionResps, nil

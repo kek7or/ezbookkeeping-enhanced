@@ -286,7 +286,7 @@ export default defineConfig(() => {
         },
         server: {
             host: '0.0.0.0',
-            port: 8081,
+            port: 1337,
             strictPort: true,
             proxy: {
                 '/server_settings.js': {

@@ -146,7 +146,18 @@ export interface ImportTransactionResponse {
     readonly geoLocation?: TransactionGeoLocationResponse;
 }
 
+export type ImportTransactionWarningType = 'receiptTotalMismatch';
+
+export interface ImportTransactionWarningResponse {
+    readonly type: ImportTransactionWarningType;
+    readonly lineItemCount?: number;
+    readonly calculatedTotal?: string;
+    readonly statedTotal?: string;
+    readonly difference?: string;
+}
+
 export interface ImportTransactionResponsePageWrapper {
     readonly items: ImportTransactionResponse[];
     readonly totalCount: number;
+    readonly warnings?: ImportTransactionWarningResponse[];
 }

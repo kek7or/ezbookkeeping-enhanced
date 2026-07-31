@@ -55,10 +55,29 @@ type ImportTransactionResponse struct {
 	GeoLocation                        *TransactionGeoLocationResponse `json:"geoLocation,omitempty"`
 }
 
+// ImportTransactionWarningType represents the type of a non-fatal problem detected when parsing imported data
+type ImportTransactionWarningType string
+
+// Import transaction warning types
+const (
+	IMPORT_TRANSACTION_WARNING_RECEIPT_TOTAL_MISMATCH ImportTransactionWarningType = "receiptTotalMismatch"
+)
+
+// ImportTransactionWarningResponse represents a non-fatal problem detected when parsing imported data.
+// The parsed transactions are still returned, so the user can correct them before importing.
+type ImportTransactionWarningResponse struct {
+	Type            ImportTransactionWarningType `json:"type"`
+	LineItemCount   int                          `json:"lineItemCount,omitempty"`
+	CalculatedTotal string                       `json:"calculatedTotal,omitempty"`
+	StatedTotal     string                       `json:"statedTotal,omitempty"`
+	Difference      string                       `json:"difference,omitempty"`
+}
+
 // ImportTransactionResponsePageWrapper represents a response of imported transaction which contains items and count
 type ImportTransactionResponsePageWrapper struct {
-	Items      []*ImportTransactionResponse `json:"items"`
-	TotalCount int64                        `json:"totalCount"`
+	Items      []*ImportTransactionResponse        `json:"items"`
+	TotalCount int64                               `json:"totalCount"`
+	Warnings   []*ImportTransactionWarningResponse `json:"warnings,omitempty"`
 }
 
 // ToImportTransactionResponse returns the a view-objects according to imported transaction data
