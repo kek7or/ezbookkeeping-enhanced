@@ -129,6 +129,12 @@
                 </template>
             </f7-list-item>
 
+            <f7-list-item :title="tt('Exclude from Statistics')">
+                <template #after>
+                    <f7-toggle :checked="category.excludeFromStatistics" @toggle:change="category.excludeFromStatistics = $event"></f7-toggle>
+                </template>
+            </f7-list-item>
+
             <f7-list-item :title="tt('Visible')" v-if="editCategoryId">
                 <template #after>
                     <f7-toggle :checked="category.visible" @toggle:change="category.visible = $event"></f7-toggle>

@@ -210,21 +210,23 @@ func (a *TransactionCategoriesApi) CategoryModifyHandler(c *core.WebContext) (an
 	}
 
 	newCategory := &models.TransactionCategory{
-		CategoryId:       category.CategoryId,
-		Uid:              uid,
-		ParentCategoryId: categoryModifyReq.ParentId,
-		Name:             categoryModifyReq.Name,
-		DisplayOrder:     category.DisplayOrder,
-		Icon:             categoryModifyReq.Icon,
-		Color:            categoryModifyReq.Color,
-		Comment:          categoryModifyReq.Comment,
-		Hidden:           categoryModifyReq.Hidden,
+		CategoryId:            category.CategoryId,
+		Uid:                   uid,
+		ParentCategoryId:      categoryModifyReq.ParentId,
+		Name:                  categoryModifyReq.Name,
+		DisplayOrder:          category.DisplayOrder,
+		Icon:                  categoryModifyReq.Icon,
+		Color:                 categoryModifyReq.Color,
+		ExcludeFromStatistics: categoryModifyReq.ExcludeFromStatistics,
+		Comment:               categoryModifyReq.Comment,
+		Hidden:                categoryModifyReq.Hidden,
 	}
 
 	if newCategory.ParentCategoryId == category.ParentCategoryId &&
 		newCategory.Name == category.Name &&
 		newCategory.Icon == category.Icon &&
 		newCategory.Color == category.Color &&
+		newCategory.ExcludeFromStatistics == category.ExcludeFromStatistics &&
 		newCategory.Comment == category.Comment &&
 		newCategory.Hidden == category.Hidden {
 		return nil, errs.ErrNothingWillBeUpdated
@@ -419,14 +421,15 @@ func (a *TransactionCategoriesApi) createBatchCategories(c *core.WebContext, uid
 
 func (a *TransactionCategoriesApi) createNewCategoryModel(uid int64, categoryCreateReq *models.TransactionCategoryCreateRequest, order int32) *models.TransactionCategory {
 	return &models.TransactionCategory{
-		Uid:              uid,
-		Name:             categoryCreateReq.Name,
-		Type:             categoryCreateReq.Type,
-		ParentCategoryId: categoryCreateReq.ParentId,
-		DisplayOrder:     order,
-		Icon:             categoryCreateReq.Icon,
-		Color:            categoryCreateReq.Color,
-		Comment:          categoryCreateReq.Comment,
+		Uid:                   uid,
+		Name:                  categoryCreateReq.Name,
+		Type:                  categoryCreateReq.Type,
+		ParentCategoryId:      categoryCreateReq.ParentId,
+		DisplayOrder:          order,
+		Icon:                  categoryCreateReq.Icon,
+		Color:                 categoryCreateReq.Color,
+		ExcludeFromStatistics: categoryCreateReq.ExcludeFromStatistics,
+		Comment:               categoryCreateReq.Comment,
 	}
 }
 

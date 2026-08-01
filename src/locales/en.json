@@ -2565,6 +2565,8 @@
     "Category Icon": "Category Icon",
     "Category Color": "Category Color",
     "Your category description (optional)": "Your category description (optional)",
+    "Exclude from Statistics": "Exclude from Statistics",
+    "Transactions in this category will not be counted in statistics, but still affect account balance": "Transactions in this category will not be counted in statistics, but still affect account balance",
     "No available primary category": "No available primary category",
     "Category name cannot be blank": "Category name cannot be blank",
     "Unable to retrieve category": "Unable to retrieve category",

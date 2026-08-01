@@ -2256,10 +2256,99 @@ func (s *TransactionService) GetRelatedTransferTransaction(originalTransaction *
 	return relatedTransaction
 }
 
+// GetStatisticsExcludedCategoryIds returns the ids of the categories that the user has marked as excluded from statistics
+//
+// Only income and expense analysis honours this flag. Account balances and asset trends are
+// deliberately left alone, so a balance correction still counts towards net worth.
+func (s *TransactionService) GetStatisticsExcludedCategoryIds(c core.Context, uid int64) ([]int64, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var categories []*models.TransactionCategory
+	err := s.UserDataDB(uid).NewSession(c).Select("category_id, parent_category_id").Where("uid=? AND deleted=? AND exclude_from_statistics=?", uid, false, true).Find(&categories)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(categories) < 1 {
+		return nil, nil
+	}
+
+	excludedCategoryIdMap := make(map[int64]bool, len(categories))
+	var excludedPrimaryCategoryIds []int64
+
+	for i := 0; i < len(categories); i++ {
+		excludedCategoryIdMap[categories[i].CategoryId] = true
+
+		if categories[i].ParentCategoryId == models.LevelOneTransactionCategoryParentId {
+			excludedPrimaryCategoryIds = append(excludedPrimaryCategoryIds, categories[i].CategoryId)
+		}
+	}
+
+	// transactions always reference a secondary category, so excluding a primary category
+	// only has any effect if it cascades down to the sub-categories underneath it
+	if len(excludedPrimaryCategoryIds) > 0 {
+		var subCategories []*models.TransactionCategory
+		err = s.UserDataDB(uid).NewSession(c).Select("category_id").Where("uid=? AND deleted=?", uid, false).In("parent_category_id", excludedPrimaryCategoryIds).Find(&subCategories)
+
+		if err != nil {
+			return nil, err
+		}
+
+		for i := 0; i < len(subCategories); i++ {
+			excludedCategoryIdMap[subCategories[i].CategoryId] = true
+		}
+	}
+
+	categoryIds := make([]int64, 0, len(excludedCategoryIdMap))
+
+	for categoryId := range excludedCategoryIdMap {
+		categoryIds = append(categoryIds, categoryId)
+	}
+
+	return categoryIds, nil
+}
+
+// appendExcludedCategoryIdsCondition appends a condition that filters out the given category ids
+func appendExcludedCategoryIdsCondition(condition string, conditionParams []any, categoryIds []int64) (string, []any) {
+	if len(categoryIds) < 1 {
+		return condition, conditionParams
+	}
+
+	var categoryIdsCondition strings.Builder
+
+	for i := 0; i < len(categoryIds); i++ {
+		if i > 0 {
+			categoryIdsCondition.WriteString(",")
+		}
+
+		categoryIdsCondition.WriteString("?")
+		conditionParams = append(conditionParams, categoryIds[i])
+	}
+
+	return condition + " AND category_id NOT IN (" + categoryIdsCondition.String() + ")", conditionParams
+}
+
 // GetAccountsTotalIncomeAndExpense returns the every accounts total income and expense amount by specific date range
 func (s *TransactionService) GetAccountsTotalIncomeAndExpense(c core.Context, uid int64, startUnixTime int64, endUnixTime int64, excludeAccountIds []int64, excludeCategoryIds []int64, clientTimezone *time.Location, useTransactionTimezone bool) (map[int64]int64, map[int64]int64, error) {
 	if uid <= 0 {
 		return nil, nil, errs.ErrUserIdInvalid
+	}
+
+	statisticsExcludedCategoryIds, err := s.GetStatisticsExcludedCategoryIds(c, uid)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(statisticsExcludedCategoryIds) > 0 {
+		// a new slice on purpose, appending in place could write into the caller's backing array
+		mergedExcludeCategoryIds := make([]int64, 0, len(excludeCategoryIds)+len(statisticsExcludedCategoryIds))
+		mergedExcludeCategoryIds = append(mergedExcludeCategoryIds, excludeCategoryIds...)
+		mergedExcludeCategoryIds = append(mergedExcludeCategoryIds, statisticsExcludedCategoryIds...)
+		excludeCategoryIds = mergedExcludeCategoryIds
 	}
 
 	startLocalDateTime := utils.FormatUnixTimeToNumericLocalDateTime(startUnixTime, clientTimezone)
@@ -2409,6 +2498,14 @@ func (s *TransactionService) GetAccountsAndCategoriesTotalInflowAndOutflow(c cor
 	conditionParams = append(conditionParams, models.TRANSACTION_DB_TYPE_TRANSFER_OUT)
 	conditionParams = append(conditionParams, models.TRANSACTION_DB_TYPE_TRANSFER_IN)
 
+	statisticsExcludedCategoryIds, err := s.GetStatisticsExcludedCategoryIds(c, uid)
+
+	if err != nil {
+		return nil, err
+	}
+
+	condition, conditionParams = appendExcludedCategoryIdsCondition(condition, conditionParams, statisticsExcludedCategoryIds)
+
 	minTransactionTime := startTransactionTime
 	maxTransactionTime := endTransactionTime
 	var allTransactions []*models.Transaction
@@ -2539,6 +2636,14 @@ func (s *TransactionService) GetAccountsAndCategoriesMonthlyInflowAndOutflow(c c
 	conditionParams = append(conditionParams, models.TRANSACTION_DB_TYPE_EXPENSE)
 	conditionParams = append(conditionParams, models.TRANSACTION_DB_TYPE_TRANSFER_OUT)
 	conditionParams = append(conditionParams, models.TRANSACTION_DB_TYPE_TRANSFER_IN)
+
+	statisticsExcludedCategoryIds, err := s.GetStatisticsExcludedCategoryIds(c, uid)
+
+	if err != nil {
+		return nil, err
+	}
+
+	condition, conditionParams = appendExcludedCategoryIdsCondition(condition, conditionParams, statisticsExcludedCategoryIds)
 
 	minTransactionTime := startTransactionTime
 	maxTransactionTime := endTransactionTime
