@@ -290,47 +290,47 @@ export default defineConfig(() => {
             strictPort: true,
             proxy: {
                 '/server_settings.js': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/mobile/server_settings.js': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/desktop/server_settings.js': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/oauth2': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/api': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/mcp': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/avatar': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/pictures': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/qrcode': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/proxy': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 },
                 '/_AMapService': {
-                    target: 'http://127.0.0.1:8080/',
+                    target: 'http://127.0.0.1:4242/',
                     changeOrigin: true
                 }
             }

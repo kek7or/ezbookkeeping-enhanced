@@ -20,7 +20,7 @@ MINGW_BIN := C:/Users/Viktor/AppData/Local/Microsoft/WinGet/Packages/BrechtSande
 OLLAMA    := C:/Users/Viktor/AppData/Local/Programs/Ollama/ollama.exe
 
 BINARY       := ezbookkeeping.exe
-API_PORT     := 8080
+API_PORT     := 4242
 WEB_PORT     := 1337
 OLLAMA_PORT  := 11434
 OLLAMA_MODEL ?= qwen3-vl-16k
@@ -100,11 +100,11 @@ package: build ## Build, then stage dist/ into public/ so the binary serves the 
 ## ---------------------------------------------------------------- run
 
 .PHONY: server
-server: $(BINARY) dirs ## Run the backend in the foreground (:8080)
+server: $(BINARY) dirs ## Run the backend in the foreground (:4242)
 	./$(BINARY) server run
 
 .PHONY: web
-web: ## Run the Vite dev server in the foreground (:8081)
+web: ## Run the Vite dev server in the foreground (:1337)
 	npm run serve
 
 .PHONY: up
