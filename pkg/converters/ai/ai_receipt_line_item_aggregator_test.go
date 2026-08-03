@@ -169,7 +169,7 @@ func TestAggregateReceiptLineItems_UnknownCategoryIsNotDropped(t *testing.T) {
 	assert.Equal(t, "2.50", transactions[1].Amount)
 }
 
-func TestAggregateReceiptLineItems_NegativeAndUnparseablePricesAreSkipped(t *testing.T) {
+func TestAggregateReceiptLineItems_UnparseablePriceIsSkippedAndOversizedCreditIsNotImported(t *testing.T) {
 	transactions, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
 		ReceiptTotal: "1.49",
 		LineItems: []*models.RecognizedReceiptLineItem{
@@ -179,12 +179,43 @@ func TestAggregateReceiptLineItems_NegativeAndUnparseablePricesAreSkipped(t *tes
 		},
 	})
 
+	// the credit is larger than the item above it, so it is a refund for something else rather than a
+	// discount on the broccoli - subtracting it there would turn a real purchase negative and lose both
 	assert.Equal(t, 1, len(transactions))
 	assert.Equal(t, "Food", transactions[0].CategoryName)
 	assert.Equal(t, "1.49", transactions[0].Amount)
 	assert.Equal(t, "Broccoli", transactions[0].Description)
 
-	// only the kept line item counts towards the receipt total, so it still matches
+	// the credit still counts towards what the receipt totals to, so the unreadable line shows up as a
+	// gap instead of silently disappearing
+	assert.Equal(t, 1, len(warnings))
+	assert.Equal(t, models.IMPORT_TRANSACTION_WARNING_RECEIPT_TOTAL_MISMATCH, warnings[0].Type)
+	assert.Equal(t, "-2.26", warnings[0].CalculatedTotal)
+	assert.Equal(t, "-3.75", warnings[0].Difference)
+}
+
+func TestAggregateReceiptLineItems_DiscountReducesTheItemItWasPrintedUnder(t *testing.T) {
+	// a Lidl "Preisvorteil" is printed as its own negative line under the item it applies to. Skipping
+	// it would overstate that category and leave the sum permanently above the printed total.
+	transactions, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
+		ReceiptTotal: "4.38",
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Bioland Strauchtoma.", Price: "2.59", Category: "Food"},
+			{Name: "Möhren", Price: "1.99", Category: "Vegetables"},
+			{Name: "Preisvorteil", Price: "-0.20", Category: "Vegetables"},
+		},
+	})
+
+	assert.Equal(t, 2, len(transactions))
+	assert.Equal(t, "Food", transactions[0].CategoryName)
+	assert.Equal(t, "2.59", transactions[0].Amount)
+
+	assert.Equal(t, "Vegetables", transactions[1].CategoryName)
+	assert.Equal(t, "1.79", transactions[1].Amount)
+
+	// the discount is not a purchase, so it never shows up in the description
+	assert.Equal(t, "Möhren", transactions[1].Description)
+
 	assert.Nil(t, warnings)
 }
 
@@ -354,6 +385,71 @@ func TestAggregateReceiptLineItems_LeadingDepositIsKeptSoNoMoneyIsLost(t *testin
 	assert.Equal(t, 1, len(transactions))
 	assert.Equal(t, "2.84", transactions[0].Amount)
 	assert.Equal(t, "Pfand 0,25 EM, Frischer O-Saft o.F.", transactions[0].Description)
+}
+
+// the failure this whole two stage prompt exists to catch, taken from a real Lidl receipt: the model
+// transcribed all 18 printed lines and then itemized only 16 of them, so 2.40 EUR left the import
+// without a word. The line item sum still looks plausible on its own - only the transcript proves
+// which lines went missing.
+func TestAggregateReceiptLineItems_TranscribedButUnitemizedLinesAreReported(t *testing.T) {
+	_, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
+		RawLines: []string{
+			"Toastbrötchen Weizen        0,99 A",
+			"Papiertragetasc  0,20 x 2   0,40 B",
+			"Biokompost Papierb.         1,49 B",
+			"Haushaltshel-0492476        2,00 B",
+		},
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Toastbrötchen Weizen", Price: "0.99", Category: "Food"},
+			{Name: "Biokompost Papierb.", Price: "1.49", Category: "Houseware"},
+		},
+	})
+
+	assert.Equal(t, 1, len(warnings))
+	assert.Equal(t, models.IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED, warnings[0].Type)
+	assert.Equal(t, 2, warnings[0].LineItemCount)
+	assert.Equal(t, []string{
+		"Papiertragetasc  0,20 x 2   0,40 B",
+		"Haushaltshel-0492476        2,00 B",
+	}, warnings[0].MissingLines)
+}
+
+func TestAggregateReceiptLineItems_FullyItemizedTranscriptIsNotReported(t *testing.T) {
+	_, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
+		RawLines: []string{
+			"Broccoli               1,49 A",
+			"Frischer O-Saft o.F.   2,59 B",
+			"Pfand 0,25 EM          0,25 B",
+		},
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Broccoli", Price: "1.49", Category: "Food"},
+			{Name: "Frischer O-Saft o.F.", Price: "2.59", Category: "Drink"},
+			{Name: "Pfand 0,25 EM", Price: "0.25", Deposit: true, Category: "Drink"},
+		},
+	})
+
+	assert.Nil(t, warnings)
+}
+
+// the model does not always copy a name across the two stages character for character. The count is
+// still trustworthy and worth reporting, but naming lines from a pairing that did not line up would
+// accuse the wrong ones.
+func TestAggregateReceiptLineItems_UnreliablePairingReportsCountWithoutNamingLines(t *testing.T) {
+	_, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
+		RawLines: []string{
+			"Broccoli               1,49 A",
+			"Kiwi                   2,29 A",
+			"Akku Ni-MH             6,99 B",
+		},
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Brokkoli", Price: "1.49", Category: "Food"},
+		},
+	})
+
+	assert.Equal(t, 1, len(warnings))
+	assert.Equal(t, models.IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED, warnings[0].Type)
+	assert.Equal(t, 2, warnings[0].LineItemCount)
+	assert.Nil(t, warnings[0].MissingLines)
 }
 
 func TestParseReceiptAmount(t *testing.T) {

@@ -146,14 +146,19 @@ export interface ImportTransactionResponse {
     readonly geoLocation?: TransactionGeoLocationResponse;
 }
 
-export type ImportTransactionWarningType = 'receiptTotalMismatch';
+export type ImportTransactionWarningType = 'receiptTotalMismatch' | 'receiptLinesNotItemized';
 
 export interface ImportTransactionWarningResponse {
     readonly type: ImportTransactionWarningType;
+    // how many lines the warning is about: the recognized ones for "receiptTotalMismatch",
+    // the lost ones for "receiptLinesNotItemized"
     readonly lineItemCount?: number;
     readonly calculatedTotal?: string;
     readonly statedTotal?: string;
     readonly difference?: string;
+    // the printed lines that were read off the receipt but never turned into a transaction, absent
+    // when they could not be identified individually
+    readonly missingLines?: string[];
 }
 
 export interface ImportTransactionResponsePageWrapper {

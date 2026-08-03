@@ -281,6 +281,8 @@ type LLMConfig struct {
 	OpenRouterModelID                       string
 	OllamaServerURL                         string
 	OllamaModelID                           string
+	OllamaNumCtx                            uint32
+	OllamaNumPredict                        uint32
 	LMStudioServerURL                       string
 	LMStudioToken                           string
 	LMStudioModelID                         string
@@ -954,6 +956,8 @@ func loadLLMConfiguration(configFile *ini.File, sectionName string) (*LLMConfig,
 
 	llmConfig.OllamaServerURL = getConfigItemStringValue(configFile, sectionName, "ollama_server_url")
 	llmConfig.OllamaModelID = getConfigItemStringValue(configFile, sectionName, "ollama_model_id")
+	llmConfig.OllamaNumCtx = getConfigItemUint32Value(configFile, sectionName, "ollama_num_ctx", 0)
+	llmConfig.OllamaNumPredict = getConfigItemUint32Value(configFile, sectionName, "ollama_num_predict", 0)
 
 	llmConfig.LMStudioServerURL = getConfigItemStringValue(configFile, sectionName, "lm_studio_server_url")
 	llmConfig.LMStudioToken = getConfigItemStringValue(configFile, sectionName, "lm_studio_token")

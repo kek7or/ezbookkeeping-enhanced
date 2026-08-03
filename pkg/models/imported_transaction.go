@@ -60,17 +60,23 @@ type ImportTransactionWarningType string
 
 // Import transaction warning types
 const (
-	IMPORT_TRANSACTION_WARNING_RECEIPT_TOTAL_MISMATCH ImportTransactionWarningType = "receiptTotalMismatch"
+	IMPORT_TRANSACTION_WARNING_RECEIPT_TOTAL_MISMATCH     ImportTransactionWarningType = "receiptTotalMismatch"
+	IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED ImportTransactionWarningType = "receiptLinesNotItemized"
 )
 
 // ImportTransactionWarningResponse represents a non-fatal problem detected when parsing imported data.
 // The parsed transactions are still returned, so the user can correct them before importing.
+//
+// LineItemCount is how many lines the warning is about, which each type counts its own way:
+// "receiptTotalMismatch" counts the lines that were recognized, "receiptLinesNotItemized" counts the
+// lines that were lost.
 type ImportTransactionWarningResponse struct {
 	Type            ImportTransactionWarningType `json:"type"`
 	LineItemCount   int                          `json:"lineItemCount,omitempty"`
 	CalculatedTotal string                       `json:"calculatedTotal,omitempty"`
 	StatedTotal     string                       `json:"statedTotal,omitempty"`
 	Difference      string                       `json:"difference,omitempty"`
+	MissingLines    []string                     `json:"missingLines,omitempty"`
 }
 
 // ImportTransactionResponsePageWrapper represents a response of imported transaction which contains items and count

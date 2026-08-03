@@ -293,6 +293,18 @@
                                 difference: warning.difference
                             }) }}
                         </v-alert>
+                        <v-alert type="warning" variant="tonal" class="mb-4"
+                                 :title="tt('Some Receipt Lines Were Not Imported')"
+                                 v-for="(warning, warningIndex) in receiptLinesNotItemizedWarnings" :key="`notItemized-${warningIndex}`">
+                            {{ tt(warning.missingLines && warning.missingLines.length
+                                ? 'format.misc.receiptLinesNotItemizedWithLines'
+                                : 'format.misc.receiptLinesNotItemized', {
+                                count: formatNumberToLocalizedNumerals(warning.lineItemCount || 0)
+                            }) }}
+                            <ul class="receipt-missing-lines mt-2" v-if="warning.missingLines && warning.missingLines.length">
+                                <li :key="lineIndex" v-for="(missingLine, lineIndex) in warning.missingLines">{{ missingLine }}</li>
+                            </ul>
+                        </v-alert>
                         <import-transaction-check-data-tab
                             ref="importTransactionCheckDataTab"
                             :import-transactions="importTransactions"
@@ -532,6 +544,7 @@ const needAIImageRecognition = computed<boolean>(() => allSupportedImportFileTyp
 const supportedAdditionalOptions = computed<ImportFileTypeSupportedAdditionalOptions | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.supportedAdditionalOptions);
 const supportedAIAdditionalPrompt = computed<boolean>(() => !!allSupportedImportFileTypesMap.value[fileType.value]?.supportedAIAdditionalPrompt);
 const receiptTotalMismatchWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptTotalMismatch'));
+const receiptLinesNotItemizedWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptLinesNotItemized'));
 
 const allSteps = computed<StepBarItem[]>(() => {
     const steps: StepBarItem[] = [
@@ -1334,6 +1347,15 @@ defineExpose({
 </script>
 
 <style>
+/* the lines are copied off the receipt with its own column padding, so they only line up in a
+   monospaced font, and a long one scrolls inside the alert rather than widening the dialog */
+.receipt-missing-lines {
+    padding-inline-start: 1.5rem;
+    font-family: monospace;
+    white-space: pre;
+    overflow-x: auto;
+}
+
 .import-transaction-images {
     .import-image {
         .picture-control-icon {

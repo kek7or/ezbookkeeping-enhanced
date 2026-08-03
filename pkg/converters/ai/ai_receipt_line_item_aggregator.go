@@ -51,14 +51,15 @@ var receiptPaymentMethodAccountCategories = map[string][]models.AccountCategory{
 func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user *models.User, result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, warningCollector *converter.ImportWarningCollector) []*models.RecognizedTransactionResult {
 	accountName := p.resolveReceiptAccountName(c, user, result, accountMap)
 
-	if len(result.RawLines) > len(result.LineItems) {
-		log.Warnf(c, "[ai_receipt_line_item_aggregator.aggregateReceiptLineItems] the model transcribed %d receipt lines but only itemized %d of them for user \"uid:%d\", so %d printed line(s) were lost: %s", len(result.RawLines), len(result.LineItems), user.Uid, len(result.RawLines)-len(result.LineItems), strings.Join(result.RawLines, " | "))
-	}
+	p.checkAllRawLinesWereItemized(c, user, result, warningCollector)
 
-	parsedLineItems := p.parseReceiptLineItems(c, user, result.LineItems)
+	parsedLineItems, unallocatedAdjustments := p.parseReceiptLineItems(c, user, result.LineItems)
 	groups := make([]*receiptCategoryGroup, 0, len(parsedLineItems))
 	groupsByCategoryName := make(map[string]*receiptCategoryGroup, len(parsedLineItems))
-	lineItemsTotalAmount := int64(0)
+
+	// credits that belong to the receipt rather than to any one purchase are not imported, but the
+	// receipt still totals to less because of them, so they count here
+	lineItemsTotalAmount := unallocatedAdjustments
 
 	for _, lineItem := range parsedLineItems {
 		price := lineItem.amount
@@ -85,7 +86,9 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 	transactions := make([]*models.RecognizedTransactionResult, 0, len(groups))
 
 	for _, group := range groups {
-		if group.totalAmount == 0 {
+		// no item is ever negative, because a discount is only charged to a line large enough to absorb
+		// it, so a group is either a real expense or one that came to nothing and is not worth importing
+		if group.totalAmount <= 0 {
 			continue
 		}
 
@@ -105,9 +108,21 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 }
 
 // parseReceiptLineItems turns the recognized lines into parsed items with exact minor unit amounts,
-// dropping what cannot be used and folding each deposit into the item it was charged on.
-func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *models.User, lineItems []*models.RecognizedReceiptLineItem) []*receiptLineItem {
+// dropping what cannot be used and folding every adjustment into the item it was charged against.
+//
+// It also returns the adjustments that no single item could absorb - a returned crate of empties, a
+// coupon written off the whole basket. Those belong to the receipt rather than to any one purchase,
+// so they never become a transaction, but they are still part of what the receipt totals to and the
+// caller counts them when it checks the sum against the printed total.
+func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *models.User, lineItems []*models.RecognizedReceiptLineItem) ([]*receiptLineItem, int64) {
 	parsedLineItems := make([]*receiptLineItem, 0, len(lineItems))
+	unallocatedAdjustments := int64(0)
+
+	// a deposit or discount belongs to the line printed directly above it, so folding it into the
+	// last item only lands on the right one while nothing in between was thrown away. Once a line
+	// has been dropped the item above is no longer known, and the adjustment is left unallocated
+	// instead of being quietly charged to an unrelated purchase.
+	precedingLineDropped := false
 
 	for _, lineItem := range lineItems {
 		if lineItem == nil {
@@ -118,21 +133,29 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 
 		if err != nil {
 			log.Warnf(c, "[ai_receipt_line_item_aggregator.parseReceiptLineItems] skipping receipt line item \"%s\" for user \"uid:%d\", because its price \"%s\" cannot be parsed", lineItem.Name, user.Uid, lineItem.Price)
+			precedingLineDropped = true
 			continue
 		}
 
-		if price < 0 {
-			log.Warnf(c, "[ai_receipt_line_item_aggregator.parseReceiptLineItems] skipping receipt line item \"%s\" for user \"uid:%d\", because its price \"%s\" is negative", lineItem.Name, user.Uid, lineItem.Price)
-			continue
-		}
+		// a deposit is not a purchase of its own and a discount is not a purchase at all: both are
+		// part of what the item above them cost, so they are added to that item (a discount with its
+		// negative price subtracting itself) and never named separately. The category is inherited
+		// too, which also repairs an adjustment the model filed under the wrong one.
+		if isReceiptAdjustmentLineItem(lineItem, price) {
+			if p.chargeReceiptAdjustment(c, user, parsedLineItems, lineItem, price, precedingLineDropped) {
+				continue
+			}
 
-		// a deposit is not a purchase of its own, it is part of what the drink above it cost, so it
-		// is added to that item and never named separately. Its category is inherited too, which
-		// also repairs a deposit the model filed under the wrong category.
-		if isReceiptDepositLineItem(lineItem) && len(parsedLineItems) > 0 {
-			previousLineItem := parsedLineItems[len(parsedLineItems)-1]
-			previousLineItem.amount += price
-			continue
+			// a credit that found nothing to reduce is not a purchase, so it stays out of the import
+			// and only counts towards the receipt total
+			if price < 0 {
+				unallocatedAdjustments += price
+				continue
+			}
+
+			// a charge that found nothing to attach to is still money the customer paid - a deposit
+			// printed above its drink, or below an item that was dropped - so it is kept as a line
+			// item of its own rather than dropped
 		}
 
 		parsedLineItems = append(parsedLineItems, &receiptLineItem{
@@ -140,15 +163,53 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 			categoryName: strings.TrimSpace(lineItem.Category),
 			amount:       price,
 		})
+		precedingLineDropped = false
 	}
 
-	return parsedLineItems
+	return parsedLineItems, unallocatedAdjustments
 }
 
-// isReceiptDepositLineItem reports whether a line is a deposit charged on the item above it. The
-// model is asked to flag these, and the name is checked as well because a missing flag would put a
-// "Pfand 0,25 EM" entry back into the description.
-func isReceiptDepositLineItem(lineItem *models.RecognizedReceiptLineItem) bool {
+// chargeReceiptAdjustment adds a deposit or discount onto the item it was printed under and reports
+// whether that item could take it.
+//
+// An adjustment is only charged to an item that can absorb it. A credit bigger than the line above it
+// is not a discount on that line - it is a refund for something else entirely, most often a crate of
+// empties handed in at the till - and subtracting it there would turn a real purchase into a negative
+// amount and lose it from the import along with the credit.
+func (p *aiTransactionDataParser) chargeReceiptAdjustment(c core.Context, user *models.User, parsedLineItems []*receiptLineItem, lineItem *models.RecognizedReceiptLineItem, price int64, precedingLineDropped bool) bool {
+	if len(parsedLineItems) < 1 {
+		log.Warnf(c, "[ai_receipt_line_item_aggregator.chargeReceiptAdjustment] leaving receipt adjustment \"%s\" (%s) of user \"uid:%d\" unallocated, because no item precedes it to charge it against", lineItem.Name, lineItem.Price, user.Uid)
+		return false
+	}
+
+	previousLineItem := parsedLineItems[len(parsedLineItems)-1]
+
+	if previousLineItem.amount+price < 0 {
+		log.Warnf(c, "[ai_receipt_line_item_aggregator.chargeReceiptAdjustment] leaving receipt adjustment \"%s\" (%s) of user \"uid:%d\" unallocated, because the item above it (\"%s\", %s) is not large enough to absorb it", lineItem.Name, lineItem.Price, user.Uid, previousLineItem.name, utils.FormatAmount(previousLineItem.amount))
+		return false
+	}
+
+	if precedingLineDropped {
+		log.Warnf(c, "[ai_receipt_line_item_aggregator.chargeReceiptAdjustment] charging receipt adjustment \"%s\" (%s) of user \"uid:%d\" against \"%s\", which may not be the item it was printed under, because the line between them was dropped", lineItem.Name, lineItem.Price, user.Uid, previousLineItem.name)
+	}
+
+	previousLineItem.amount += price
+
+	return true
+}
+
+// isReceiptAdjustmentLineItem reports whether a line adjusts what the item above it cost rather than
+// being a purchase of its own - a charged deposit, or a discount printed as its own negative line.
+//
+// Deposits are flagged by the model, and the name is checked as well because a missing flag would
+// put a "Pfand 0,25 EM" entry back into the description. Discounts are recognized by their negative
+// price alone: German receipts name them a dozen ways ("Rabatt", "Nachlass", "Preisvorteil",
+// "Coupon", a bare "Aktion"), and the minus sign is the one thing they all share.
+func isReceiptAdjustmentLineItem(lineItem *models.RecognizedReceiptLineItem, price int64) bool {
+	if price < 0 {
+		return true
+	}
+
 	return lineItem.Deposit || strings.Contains(strings.ToLower(lineItem.Name), "pfand")
 }
 
@@ -204,6 +265,80 @@ func (p *aiTransactionDataParser) resolveReceiptAccountName(c core.Context, user
 	log.Warnf(c, "[ai_receipt_line_item_aggregator.resolveReceiptAccountName] payment method \"%s\" of user \"uid:%d\" matches no account, falling back to the recognized account name \"%s\"", paymentMethod, user.Uid, result.AccountName)
 
 	return result.AccountName
+}
+
+// checkAllRawLinesWereItemized reports the printed lines the model transcribed but never turned into a
+// line item. The two stage prompt exists precisely so that a dropped line leaves a trace: stage 1 copies
+// the receipt out verbatim, stage 2 interprets that copy, and anything present in the first list and
+// missing from the second is money that would otherwise disappear from the import without a word.
+//
+// A total mismatch alone cannot replace this - it says the sum is wrong but not which line is gone, and
+// it stays silent when the lost lines happen to fall under the mismatch threshold.
+func (p *aiTransactionDataParser) checkAllRawLinesWereItemized(c core.Context, user *models.User, result *aiTransactionDataParsedResult, warningCollector *converter.ImportWarningCollector) {
+	if len(result.RawLines) <= len(result.LineItems) {
+		return
+	}
+
+	missingLineCount := len(result.RawLines) - len(result.LineItems)
+	missingLines := findUnitemizedRawLines(result.RawLines, result.LineItems)
+
+	log.Warnf(c, "[ai_receipt_line_item_aggregator.checkAllRawLinesWereItemized] the model transcribed %d receipt lines but only itemized %d of them for user \"uid:%d\", so %d printed line(s) were lost: %s", len(result.RawLines), len(result.LineItems), user.Uid, missingLineCount, strings.Join(result.RawLines, " | "))
+
+	warningCollector.Add(&models.ImportTransactionWarningResponse{
+		Type:          models.IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED,
+		LineItemCount: missingLineCount,
+		MissingLines:  missingLines,
+	})
+}
+
+// findUnitemizedRawLines pairs the transcribed lines against the recognized items and returns the lines
+// that never got one. Both lists are in receipt order, so a single walk pairs them up: a transcribed
+// line belongs to the next item still waiting when it contains that item's name.
+//
+// The pairing is only reported when it consumed every line item. If it did not, the model renamed
+// something on its way from one stage to the other and the leftovers would name innocent lines, so
+// nothing is returned and the caller falls back to reporting the count alone.
+func findUnitemizedRawLines(rawLines []string, lineItems []*models.RecognizedReceiptLineItem) []string {
+	unitemizedLines := make([]string, 0, len(rawLines)-len(lineItems))
+	itemIndex := 0
+
+	for _, rawLine := range rawLines {
+		if itemIndex < len(lineItems) && rawLineMatchesLineItem(rawLine, lineItems[itemIndex]) {
+			itemIndex++
+			continue
+		}
+
+		unitemizedLines = append(unitemizedLines, rawLine)
+	}
+
+	if itemIndex < len(lineItems) {
+		return nil
+	}
+
+	return unitemizedLines
+}
+
+// rawLineMatchesLineItem reports whether a transcribed line is the one a recognized item came from,
+// which it is when the printed line still contains the item's name. Whitespace is collapsed because
+// receipts pad the gap between name and price, and the comparison ignores case.
+func rawLineMatchesLineItem(rawLine string, lineItem *models.RecognizedReceiptLineItem) bool {
+	if lineItem == nil {
+		return false
+	}
+
+	name := normalizeReceiptText(lineItem.Name)
+
+	if name == "" {
+		return false
+	}
+
+	return strings.Contains(normalizeReceiptText(rawLine), name)
+}
+
+// normalizeReceiptText lowercases a receipt line and collapses every run of whitespace into a single
+// space, so that the padding a receipt printer inserts does not decide whether two texts match
+func normalizeReceiptText(text string) string {
+	return strings.ToLower(strings.Join(strings.Fields(text), " "))
 }
 
 // checkReceiptTotal compares the sum of the recognized line items against the total printed on the receipt

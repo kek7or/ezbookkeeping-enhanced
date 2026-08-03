@@ -40,8 +40,8 @@ If the image contains no financial information at all, return `{"line_items": []
   "account": "string (source account name, only if the receipt names one directly)",
   "line_items": [
     {
-      "name": "string (item name exactly as printed on the receipt, in German)",
-      "price": "string (the price printed on that same line, numeric, up to 2 decimals)",
+      "name": "string (article name as printed on the receipt, in German, without price or quantity)",
+      "price": "string (the price printed on that same line, numeric, up to 2 decimals, negative for a discount)",
       "deposit": "boolean (true only for a Pfand line charged on the item above it)",
       "reason": "string (one short clause on why this item belongs in the category you chose)",
       "category": "string (category name for this one item)"
@@ -92,17 +92,20 @@ Example of what `raw_lines` looks like:
 Now work from the list you just wrote, not from the image. Turn every entry of `raw_lines`
 into one entry of `line_items`, in the same order.
 
-`line_items` must have exactly as many entries as `raw_lines`, minus only the negative lines
-described under "Negative lines" below. If the two counts do not match, you dropped something -
-go back to `raw_lines` and convert the entry you missed.
+`line_items` must have exactly as many entries as `raw_lines` - every printed line becomes one
+entry, including deposits and including the negative lines described below. If the two counts do
+not match, you dropped something - go back to `raw_lines` and convert the entry you missed.
 
 Because the pairing of a name to its price was already fixed in stage 1, do not look up prices
 in the image again here. Take each price from its own `raw_lines` entry.
 
-- `name` is the item text of that entry, `price` is the number in it, written as a plain
-  decimal with a dot.
+- `name` is the item text of that entry - the article name only. Leave out the price, the
+  trailing A or B, and any quantity multiplier: "Haltbare Sahne 0,89 x 2   1,78 A" has the name
+  "Haltbare Sahne".
+- `price` is the number in it, written as a plain decimal with a dot.
 - If an entry shows a quantity multiplier ("2 x 1,49", "0,532 kg x 2,99 EUR/kg"), use the line
-  total printed at the right, not the unit price.
+  total printed at the right, not the unit price. On "Haltbare Sahne 0,89 x 2   1,78" the price
+  is 1.78, because 0,89 is what one costs and 1,78 is what this line cost.
 - Never invent an entry that is not in `raw_lines`, and never drop one that is.
 
 `receipt_total` is read from the total line, verbatim. It is a reading, not a calculation. If
@@ -161,11 +164,18 @@ The single letters "A" and "B" at the end of an item line are VAT rate markers. 
 prices and not categories - ignore them.
 
 ### Negative lines
-Skip these entirely. Do not write them into `line_items` and do not adjust any other line
-because of them:
+A receipt line that takes money off rather than adding it is still part of what the receipt
+comes to, so it gets its own entry like every other line - with the minus sign kept:
 
+- Discounts: "Rabatt", "Nachlass", "Aktion", "Coupon", "Sofortrabatt", "Treuerabatt",
+  "Preisvorteil"
 - Deposit returns: "Leergut", "Pfandrückgabe", "Pfand Rücknahme", "Leergutbon"
-- Discounts: "Rabatt", "Nachlass", "Aktion", "Coupon", "Sofortrabatt", "Treuerabatt"
+
+Write `price` as the printed negative number ("-0.20"). Give it the same category as the item it
+was printed under, and never subtract it from that item's price yourself - the server does that.
+
+A discount is usually printed on the line directly below the item it applies to, often indented.
+Keep it in that position in `line_items` so the server can tell what it belongs to.
 
 ### Pfand (deposit)
 On German receipts a charged Pfand is not included in the price of the drink, it is printed as
@@ -232,51 +242,86 @@ Watch especially for these non-food items hidden among groceries:
   "Glühbirne", "Leuchtmittel", "Kopfhörer")
 - Bags, cleaning and kitchen supplies ("Papiertragetasche", "Tragetasche", "Beutel",
   "Spülmittel", "Waschmittel", "Müllbeutel", "Alufolie", "Küchenrolle", "Servietten")
-- Toiletries and cosmetics ("Zahnpasta", "Shampoo", "Duschgel", "Deo", "Rasierer",
+- Toiletries and cosmetics ("Zahnpasta", "Shampoo", "Duschgel", "Seife", "Deo", "Rasierer",
   "Windeln", "Creme")
 - Medicines and health items ("Tabletten", "Pflaster", "Vitamine")
-- Drinks, which belong in a drink category rather than a food one ("Saft", "Wasser", "Cola",
+- Drinks, which belong in a drink category rather than a grocery one ("Saft", "Wasser", "Cola",
   "Bier", "Wein", "Energy", "Limonade", "Kaffee")
 - Fruit and snacks, if a separate category for them exists ("Obst", "Kiwi", "Beeren",
   "Äpfel", "Bananen", "Chips", "Kekse", "Schokolade")
 - Pet food ("Katzenfutter", "Hundefutter"), plants and flowers ("Blumen", "Pflanze"),
   clothing ("Socken", "Shirt"), stationery, toys, magazines and newspapers
 
+### Sweets and desserts are snacks, not groceries
+When a snack category exists, everything eaten for pleasure rather than as part of a meal goes
+there, whatever the article is called:
+
+- chocolate and confectionery: "Schokolade", "Milka", "Riegel", "Praline", "Bonbon", "Gummi",
+  "Lakritz", "Kaugummi"
+- biscuits, cake and crisps: "Keks", "Waffel", "Schnitte", "Chips", "Flips", "Cracker"
+- puddings, desserts and ice cream: "Milchreis", "Pudding", "Grießbrei", "Dessert", "Eis",
+  "Quarkspeise"
+
+Only put these in a general grocery category when the user has no snack category at all.
+
+### A word in the name is not what the product is
+Decide by what the item actually is, not by a word it happens to contain:
+
+- "Milch" inside a name does not make something a drink. "Milka Tender Milch" is a chocolate
+  bar, "Milchschnitte" is a cake bar and "Milchreis" is a rice pudding - all three are sweets,
+  so they follow the snack rule above. "Haltbare Sahne" is cream for cooking, an ordinary
+  grocery. Only actually drinkable milk is a drink.
+- "Camembert", "Gouda", "Frischkäse" and the like are cheese, so they are everyday groceries -
+  a snack category is for sweets and crisps, not for cheese.
+- "Bio", "Fr.", "Fam.", "Alpenh." and similar prefixes describe the brand, origin or quality,
+  never the category.
+
+### Names cut off by the till
+German receipts truncate long article names to fit the paper, so the printed name is often a
+word broken off in the middle: "Papiertragetasc" is a "Papiertragetasche" (a carrier bag, a
+household supply), "Haushaltshel" is a "Haushaltshelfer", "Toastbrötchen Weiz" is
+"Toastbrötchen Weizen". Recognize an article from the beginning of its name and categorize it
+as the full word it obviously is - never fall back to a general grocery category just because
+the printed name is not a complete word.
+
 ## Worked example
 A receipt printing these lines:
 ```
 Broccoli               1,49 A
-Kiwi                   2,29 A
+Kiwi           1,49 x 2 2,98 A
+   Preisvorteil        -0,20
 Frischer O-Saft o.F.   2,59 B
 Pfand 0,25 EM          0,25 B
 Papiertragetasc        0,20 B
 Akku Ni-MH             6,99 B
 Akku Ni-MH             6,99 B
-Zu zahlen             20,80
-Kreditkarte           20,80
+Zu zahlen             21,29
+Kreditkarte           21,29
 MWST%   MWST   Netto  Brutto
-A  7 %  0,25    3,53    3,78
+A  7 %  0,28    3,99    4,27
 B 19 %  2,72   14,30   17,02
 ```
-must produce exactly this - every purchased line copied, including BOTH Akku lines, and
-nothing taken from the totals or the MWST table:
+must produce exactly this - every purchased line copied, including BOTH Akku lines and the
+discount, and nothing taken from the totals or the MWST table:
 ```
 {
   "raw_lines": [
     "Broccoli               1,49 A",
-    "Kiwi                   2,29 A",
+    "Kiwi           1,49 x 2 2,98 A",
+    "   Preisvorteil        -0,20",
     "Frischer O-Saft o.F.   2,59 B",
     "Pfand 0,25 EM          0,25 B",
     "Papiertragetasc        0,20 B",
     "Akku Ni-MH             6,99 B",
     "Akku Ni-MH             6,99 B"
   ],
-  "receipt_total": "20.80",
+  "receipt_total": "21.29",
   "payment_method": "credit",
   "account": "Card",
   "line_items": [
     {"name": "Broccoli", "price": "1.49", "reason": "vegetable, an everyday grocery", "category": "Food"},
-    {"name": "Kiwi", "price": "2.29", "reason": "fresh fruit", "category": "Fruit & Snack"},
+    {"name": "Kiwi", "price": "2.98", "reason": "fresh fruit, two of them at 1,49 each", "category": "Fruit & Snack"},
+    {"name": "Preisvorteil", "price": "-0.20", "reason": "discount printed under the kiwi, so it takes the same category", "category": "Fruit & Snack"},
     {"name": "Frischer O-Saft o.F.", "price": "2.59", "reason": "orange juice, a beverage", "category": "Drink"},
     {"name": "Pfand 0,25 EM", "price": "0.25", "deposit": true, "reason": "deposit charged on the juice bottle above", "category": "Drink"},
     {"name": "Papiertragetasc", "price": "0.20", "reason": "carrier bag, a household supply", "category": "Houseware"},
@@ -285,10 +330,13 @@ nothing taken from the totals or the MWST table:
   ]
 }
 ```
-Note that `raw_lines` and `line_items` both have seven entries, that no line item price was
-added to any other, that the repeated Akku line produced two entries and not one, and that
-"20,80" appears only as `receipt_total`, never as an item price. The Pfand keeps its own entry and its own printed price
-with `"deposit": true` - the server adds it onto the juice. `payment_method` is "credit" because
+Note that `raw_lines` and `line_items` both have eight entries, that no line item price was
+added to or subtracted from any other, that the repeated Akku line produced two entries and not
+one, and that "21,29" appears only as `receipt_total`, never as an item price. The kiwi line
+keeps the line total 2,98 and not the unit price 1,49, and its name is just "Kiwi" without the
+"1,49 x 2". The Preisvorteil keeps its minus sign and stays where it was printed - the server
+subtracts it from the kiwi. The Pfand keeps its own entry and its own printed price with
+`"deposit": true` - the server adds it onto the juice. `payment_method` is "credit" because
 the payment line reads "Kreditkarte", and `account` is the card-like account from the list.
 ("time" is omitted here only to keep the example short - include it in your real answer.)
 
