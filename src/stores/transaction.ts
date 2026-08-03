@@ -330,6 +330,30 @@ export const useTransactionsStore = defineStore('transactions', () => {
         }
     }
 
+    // whether a transaction is left out of the income and expense totals because the user marked its
+    // category as excluded from statistics. A balance correction is the case this exists for: it moves an
+    // account onto its real balance and is not money earned or spent, so counting it would drown the
+    // month's real figures.
+    //
+    // The flag cascades from a primary category down to the sub-categories under it, the same way the
+    // server resolves it, because a transaction always references a sub-category - excluding only the
+    // primary one would otherwise have no effect at all.
+    function isTransactionExcludedFromTotalAmount(transaction: Transaction): boolean {
+        const category = transactionCategoriesStore.allTransactionCategoriesMap[transaction.categoryId];
+
+        if (!category) {
+            return false;
+        }
+
+        if (category.excludeFromStatistics) {
+            return true;
+        }
+
+        const parentCategory = transactionCategoriesStore.allTransactionCategoriesMap[category.parentId];
+
+        return !!parentCategory && parentCategory.excludeFromStatistics;
+    }
+
     function calculateMonthTotalAmount(transactionMonthList: TransactionMonthList | null, defaultCurrency: string, accountIds: string, incomplete: boolean): void {
         if (!transactionMonthList) {
             return;
@@ -356,6 +380,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
         }
 
         for (const transaction of transactionMonthList.items) {
+            if (isTransactionExcludedFromTotalAmount(transaction)) {
+                continue;
+            }
+
             const transactionDay = isNumber(transaction.gregorianCalendarDayOfMonth) ? transaction.gregorianCalendarDayOfMonth.toString() : '0';
             let dailyTotalAmount = dailyTotalAmounts[transactionDay];
 
