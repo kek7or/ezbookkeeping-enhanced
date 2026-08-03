@@ -414,6 +414,21 @@ func TestAggregateReceiptLineItems_TranscribedButUnitemizedLinesAreReported(t *t
 	}, warnings[0].MissingLines)
 }
 
+// without a transcript there is nothing to compare the items against, so the check cannot run. It must
+// not invent a warning out of the missing list either - a model that skipped stage 1 has not told us
+// that anything was lost, only that it cannot be checked, and that distinction lives in the log.
+func TestAggregateReceiptLineItems_MissingTranscriptRaisesNoWarning(t *testing.T) {
+	transactions, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Broccoli", Price: "1.49", Category: "Food"},
+			{Name: "Kiwi", Price: "2.29", Category: "Fruit & Snack"},
+		},
+	})
+
+	assert.Equal(t, 2, len(transactions))
+	assert.Nil(t, warnings)
+}
+
 func TestAggregateReceiptLineItems_FullyItemizedTranscriptIsNotReported(t *testing.T) {
 	_, warnings := aggregateTestLineItems(&aiTransactionDataParsedResult{
 		RawLines: []string{

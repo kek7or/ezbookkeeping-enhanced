@@ -275,6 +275,14 @@ func (p *aiTransactionDataParser) resolveReceiptAccountName(c core.Context, user
 // A total mismatch alone cannot replace this - it says the sum is wrong but not which line is gone, and
 // it stays silent when the lost lines happen to fall under the mismatch threshold.
 func (p *aiTransactionDataParser) checkAllRawLinesWereItemized(c core.Context, user *models.User, result *aiTransactionDataParsedResult, warningCollector *converter.ImportWarningCollector) {
+	// a model that answers without the transcript leaves nothing to compare the items against, so
+	// this check cannot run at all. That is worth saying out loud: silence here would otherwise read
+	// as "no line was lost" when it actually means "nobody looked".
+	if len(result.RawLines) < 1 {
+		log.Warnf(c, "[ai_receipt_line_item_aggregator.checkAllRawLinesWereItemized] the model returned %d receipt line item(s) for user \"uid:%d\" but no transcript, so lines it dropped before itemizing them cannot be detected", len(result.LineItems), user.Uid)
+		return
+	}
+
 	if len(result.RawLines) <= len(result.LineItems) {
 		return
 	}
