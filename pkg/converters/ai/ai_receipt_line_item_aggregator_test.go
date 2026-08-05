@@ -9,6 +9,7 @@ import (
 	"github.com/mayswind/ezbookkeeping/pkg/converters/converter"
 	"github.com/mayswind/ezbookkeeping/pkg/core"
 	"github.com/mayswind/ezbookkeeping/pkg/models"
+	"github.com/mayswind/ezbookkeeping/pkg/utils"
 )
 
 // the Lidl Berlin receipt of 2026-07-28, 14 purchased lines, 32.79 EUR in total
@@ -36,11 +37,17 @@ func aggregateTestLineItems(result *aiTransactionDataParsedResult) ([]*models.Re
 }
 
 func aggregateTestLineItemsWithAccounts(result *aiTransactionDataParsedResult, accountMap map[string]*models.Account) ([]*models.RecognizedTransactionResult, []*models.ImportTransactionWarningResponse) {
+	transactions, warnings, _ := aggregateTestLineItemsWithReceipt(result, accountMap)
+	return transactions, warnings
+}
+
+func aggregateTestLineItemsWithReceipt(result *aiTransactionDataParsedResult, accountMap map[string]*models.Account) ([]*models.RecognizedTransactionResult, []*models.ImportTransactionWarningResponse, *models.ImportReceiptResponse) {
 	parser := &aiTransactionDataParser{}
 	warningCollector := converter.NewImportWarningCollector()
-	transactions := parser.aggregateReceiptLineItems(core.NewNullContext(), &models.User{Uid: 1}, result, accountMap, warningCollector)
+	receiptCollector := converter.NewImportReceiptCollector()
+	transactions := parser.aggregateReceiptLineItems(core.NewNullContext(), &models.User{Uid: 1}, result, accountMap, warningCollector, receiptCollector)
 
-	return transactions, warningCollector.GetWarnings()
+	return transactions, warningCollector.GetWarnings(), receiptCollector.GetReceipt()
 }
 
 func createTestAccountMap() map[string]*models.Account {
@@ -98,6 +105,51 @@ func TestAggregateReceiptLineItems(t *testing.T) {
 		assert.Equal(t, "2026-07-28 20:12:00", transactions[i].Time)
 		assert.Equal(t, "Checking account", transactions[i].AccountName)
 	}
+}
+
+func TestAggregateReceiptLineItems_ReportsTheLinesEachTransactionWasSummedFrom(t *testing.T) {
+	transactions, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		ReceiptTotal: "32.79",
+		Time:         "2026-07-28 20:12:00",
+		AccountName:  "Checking account",
+		LineItems:    createTestReceiptLineItems(),
+	}, nil)
+
+	assert.NotNil(t, receipt)
+	assert.Equal(t, 12, len(receipt.LineItems)) // 14 printed lines, of which the 2 deposits were merged
+
+	// the lines keep the order they are printed in, so that the user can follow them down the receipt
+	assert.Equal(t, "Broccoli", receipt.LineItems[0].Name)
+	assert.Equal(t, int64(149), receipt.LineItems[0].Amount)
+	assert.Equal(t, "Food", receipt.LineItems[0].CategoryName)
+
+	// a deposit is not a line of its own, it is part of what the drink above it cost
+	assert.Equal(t, "Frischer O-Saft o.F.", receipt.LineItems[6].Name)
+	assert.Equal(t, int64(284), receipt.LineItems[6].Amount)
+	assert.Equal(t, "Drink", receipt.LineItems[6].CategoryName)
+
+	// every category's lines add up to exactly the transaction that category produced
+	amountsByCategoryName := make(map[string]int64, len(transactions))
+
+	for _, lineItem := range receipt.LineItems {
+		amountsByCategoryName[lineItem.CategoryName] += lineItem.Amount
+	}
+
+	assert.Equal(t, len(transactions), len(amountsByCategoryName))
+
+	for _, transaction := range transactions {
+		assert.Equal(t, transaction.Amount, utils.FormatAmount(amountsByCategoryName[transaction.CategoryName]))
+	}
+}
+
+func TestAggregateReceiptLineItems_ReportsNoReceiptWhenNoLineCouldBeParsed(t *testing.T) {
+	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Broccoli", Price: "unreadable", Category: "Food"},
+		},
+	}, nil)
+
+	assert.Nil(t, receipt)
 }
 
 func TestAggregateReceiptLineItems_TotalMismatchReportsWarning(t *testing.T) {

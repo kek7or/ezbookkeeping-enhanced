@@ -48,12 +48,13 @@ var receiptPaymentMethodAccountCategories = map[string][]models.AccountCategory{
 // aggregateReceiptLineItems groups the recognized receipt line items by their category and sums each group,
 // producing one expense transaction per category. The large language model is only asked to read and
 // categorize the individual lines, all arithmetic is done here with exact minor unit integers.
-func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user *models.User, result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, warningCollector *converter.ImportWarningCollector) []*models.RecognizedTransactionResult {
+func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user *models.User, result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, warningCollector *converter.ImportWarningCollector, receiptCollector *converter.ImportReceiptCollector) []*models.RecognizedTransactionResult {
 	accountName := p.resolveReceiptAccountName(c, user, result, accountMap)
 
 	p.checkAllRawLinesWereItemized(c, user, result, warningCollector)
 
 	parsedLineItems, unallocatedAdjustments := p.parseReceiptLineItems(c, user, result.LineItems)
+	reportReceiptLineItems(parsedLineItems, receiptCollector)
 	groups := make([]*receiptCategoryGroup, 0, len(parsedLineItems))
 	groupsByCategoryName := make(map[string]*receiptCategoryGroup, len(parsedLineItems))
 
@@ -167,6 +168,31 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 	}
 
 	return parsedLineItems, unallocatedAdjustments
+}
+
+// reportReceiptLineItems hands the parsed lines back to the caller, in the order they are printed on
+// the receipt, so that the import UI can show what each transaction was summed from and let the user
+// move a line the model filed under the wrong category.
+//
+// The lines are reported as they are after parsing, with every deposit and discount already charged
+// against the item above it, so that a line the user sees is a purchase they can point at on the
+// receipt and the lines of a category always add up to that category's transaction.
+func reportReceiptLineItems(parsedLineItems []*receiptLineItem, receiptCollector *converter.ImportReceiptCollector) {
+	if receiptCollector == nil || len(parsedLineItems) < 1 {
+		return
+	}
+
+	lineItems := make([]*models.ImportReceiptLineItemResponse, 0, len(parsedLineItems))
+
+	for _, lineItem := range parsedLineItems {
+		lineItems = append(lineItems, &models.ImportReceiptLineItemResponse{
+			Name:         lineItem.name,
+			Amount:       lineItem.amount,
+			CategoryName: lineItem.categoryName,
+		})
+	}
+
+	receiptCollector.Set(lineItems)
 }
 
 // chargeReceiptAdjustment adds a deposit or discount onto the item it was printed under and reports

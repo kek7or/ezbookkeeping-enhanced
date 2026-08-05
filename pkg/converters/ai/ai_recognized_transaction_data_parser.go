@@ -125,7 +125,7 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 	// a receipt listing several purchased lines is returned as line items which are grouped and summed here,
 	// any other image (a single voucher, a transfer confirmation) is returned as transactions directly
 	if len(result.LineItems) > 0 {
-		transactions := p.aggregateReceiptLineItems(c, user, result, accountMap, additionalOptions.GetWarningCollector())
+		transactions := p.aggregateReceiptLineItems(c, user, result, accountMap, additionalOptions.GetWarningCollector(), additionalOptions.GetReceiptCollector())
 
 		if len(transactions) > 0 {
 			return transactions, nil

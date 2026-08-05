@@ -161,8 +161,24 @@ export interface ImportTransactionWarningResponse {
     readonly missingLines?: string[];
 }
 
+// a single line read off a receipt, with the deposits and discounts printed under it already charged
+// against it. The amount is in minor units, exactly like ImportTransactionResponse.sourceAmount, so
+// that regrouping the lines is integer arithmetic and cannot drift from what the server parsed.
+export interface ImportReceiptLineItemResponse {
+    readonly name: string;
+    readonly amount: number;
+    readonly categoryName: string;
+}
+
+export interface ImportReceiptResponse {
+    readonly lineItems: ImportReceiptLineItemResponse[];
+}
+
 export interface ImportTransactionResponsePageWrapper {
     readonly items: ImportTransactionResponse[];
     readonly totalCount: number;
     readonly warnings?: ImportTransactionWarningResponse[];
+    // the individual receipt lines the items were aggregated from, absent for every import that is
+    // not a receipt image
+    readonly receipt?: ImportReceiptResponse;
 }

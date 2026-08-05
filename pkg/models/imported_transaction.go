@@ -79,11 +79,33 @@ type ImportTransactionWarningResponse struct {
 	MissingLines    []string                     `json:"missingLines,omitempty"`
 }
 
+// ImportReceiptLineItemResponse represents a single line read off a receipt, after the deposits and
+// discounts printed under it have been charged against it.
+//
+// The server groups these lines by category and sums each group into a transaction, but it returns
+// them as well, so that the user can correct a line the model filed under the wrong category and see
+// the amounts follow. Amount is in minor units, exactly like ImportTransactionResponse.SourceAmount,
+// so that regrouping on the client is integer arithmetic and cannot drift from what was parsed here.
+type ImportReceiptLineItemResponse struct {
+	Name         string `json:"name"`
+	Amount       int64  `json:"amount"`
+	CategoryName string `json:"categoryName"`
+}
+
+// ImportReceiptResponse represents the lines one receipt image was read as, in the order they are
+// printed on the receipt
+type ImportReceiptResponse struct {
+	LineItems []*ImportReceiptLineItemResponse `json:"lineItems"`
+}
+
 // ImportTransactionResponsePageWrapper represents a response of imported transaction which contains items and count
 type ImportTransactionResponsePageWrapper struct {
 	Items      []*ImportTransactionResponse        `json:"items"`
 	TotalCount int64                               `json:"totalCount"`
 	Warnings   []*ImportTransactionWarningResponse `json:"warnings,omitempty"`
+	// the individual receipt lines the items were aggregated from, absent for every import that is
+	// not a receipt image
+	Receipt *ImportReceiptResponse `json:"receipt,omitempty"`
 }
 
 // ToImportTransactionResponse returns the a view-objects according to imported transaction data

@@ -2525,6 +2525,9 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 	warningCollector := converter.NewImportWarningCollector()
 	additionalOptions = additionalOptions.WithWarningCollector(warningCollector)
 
+	receiptCollector := converter.NewImportReceiptCollector()
+	additionalOptions = additionalOptions.WithReceiptCollector(receiptCollector)
+
 	parsedTransactions, _, _, _, _, _, err := dataImporter.ParseImportedData(c, user, fileData, clientTimezone, additionalOptions, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
 
 	if err != nil {
@@ -2542,6 +2545,7 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 		Items:      parsedTransactionRespsList,
 		TotalCount: int64(len(parsedTransactionRespsList)),
 		Warnings:   warningCollector.GetWarnings(),
+		Receipt:    receiptCollector.GetReceipt(),
 	}
 
 	return parsedTransactionResps, nil
