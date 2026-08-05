@@ -6,6 +6,7 @@ import (
 
 	"github.com/mayswind/ezbookkeeping/pkg/avatars"
 	"github.com/mayswind/ezbookkeeping/pkg/core"
+	"github.com/mayswind/ezbookkeeping/pkg/cryptoprices"
 	"github.com/mayswind/ezbookkeeping/pkg/datastore"
 	"github.com/mayswind/ezbookkeeping/pkg/duplicatechecker"
 	"github.com/mayswind/ezbookkeeping/pkg/exchangerates"
@@ -145,6 +146,19 @@ func initializeSystem(c *core.CliContext) (*settings.Config, error) {
 		return nil, err
 	}
 
+	err = cryptoprices.InitializeCryptoPricesDataSource(config)
+
+	if err != nil {
+		if !isDisableBootLog {
+			log.BootErrorf(c, "[initializer.initializeSystem] initializes crypto prices data source failed, because %s", err.Error())
+		}
+		return nil, err
+	}
+
+	if !cryptoprices.Container.IsConfigured() && !isDisableBootLog {
+		log.BootWarnf(c, "[initializer.initializeSystem] crypto data source has no api key or share token, so the crypto portfolio cannot be refreshed")
+	}
+
 	cfgJson, _ := json.Marshal(getConfigWithoutSensitiveData(config))
 
 	if !isDisableBootLog {
@@ -180,6 +194,10 @@ func getConfigWithoutSensitiveData(config *settings.Config) *settings.Config {
 
 	if clonedConfig.AmapApplicationSecret != "" {
 		clonedConfig.AmapApplicationSecret = "****"
+	}
+
+	if clonedConfig.CoinStatsApiKey != "" {
+		clonedConfig.CoinStatsApiKey = "****"
 	}
 
 	if clonedConfig.WebDAVConfig != nil && clonedConfig.WebDAVConfig.Password != "" {

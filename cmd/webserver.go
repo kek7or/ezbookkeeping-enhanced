@@ -490,6 +490,10 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/exchange_rates/user_custom/update.json", bindApi(api.ExchangeRates.UserCustomExchangeRateUpdateHandler, config))
 			apiV1Route.POST("/exchange_rates/user_custom/delete.json", bindApi(api.ExchangeRates.UserCustomExchangeRateDeleteHandler, config))
 
+			// Crypto Assets
+			apiV1Route.GET("/crypto/portfolio.json", bindApi(api.CryptoAssets.CryptoPortfolioHandler, config))
+			apiV1Route.POST("/crypto/portfolio/refresh.json", bindApi(api.CryptoAssets.CryptoPortfolioRefreshHandler, config))
+
 			// System
 			apiV1Route.GET("/systems/version.json", bindApi(api.Systems.VersionHandler, config))
 		}

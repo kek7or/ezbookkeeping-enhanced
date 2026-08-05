@@ -46,6 +46,9 @@ import type {
     RegisterResponse
 } from '@/models/auth_response.ts';
 import type {
+    CryptoPortfolioResponse
+} from '@/models/crypto_asset.ts';
+import type {
     ExportTransactionDataRequest,
     ClearDataRequest,
     ClearAccountTransactionsRequest,
@@ -879,6 +882,18 @@ export default {
     },
     deleteUserCustomExchangeRate: (req: UserCustomExchangeRateDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/exchange_rates/user_custom/delete.json', req);
+    },
+    getCryptoPortfolio: (): ApiResponsePromise<CryptoPortfolioResponse> => {
+        return axios.get<ApiResponse<CryptoPortfolioResponse>>('v1/crypto/portfolio.json', {
+            // the request refreshes the snapshot when it has expired, which waits on the crypto
+            // data source rather than on this server
+            timeout: getExchangeRatesRequestTimeout() || DEFAULT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
+    refreshCryptoPortfolio: (): ApiResponsePromise<CryptoPortfolioResponse> => {
+        return axios.post<ApiResponse<CryptoPortfolioResponse>>('v1/crypto/portfolio/refresh.json', {}, {
+            timeout: getExchangeRatesRequestTimeout() || DEFAULT_API_TIMEOUT
+        } as ApiRequestConfig);
     },
     getServerVersion: (): ApiResponsePromise<VersionInfo> => {
         return axios.get<ApiResponse<VersionInfo>>('v1/systems/version.json');

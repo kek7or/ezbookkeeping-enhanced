@@ -163,6 +163,11 @@ const (
 	UserCustomExchangeRatesDataSource  string = "user_custom"
 )
 
+// Crypto prices data source types
+const (
+	CoinStatsCryptoPricesDataSource string = "coinstats"
+)
+
 const (
 	defaultHttpAddr string = "0.0.0.0"
 	defaultHttpPort uint16 = 8080
@@ -207,6 +212,12 @@ const (
 	defaultImportFileMaxSize uint32 = 10485760 // 10MB
 
 	defaultExchangeRatesDataRequestTimeout uint32 = 10000 // 10 seconds
+
+	defaultCryptoPriceCurrency      string = "USD"
+	defaultCryptoPriceCacheLifetime uint32 = 86400 // 1 day
+	defaultCryptoMinRefreshInterval uint32 = 300   // 5 minutes
+	defaultCryptoMaxRequestsPerDay  uint16 = 4
+	defaultCryptoDataRequestTimeout uint32 = 10000 // 10 seconds
 )
 
 // DatabaseConfig represents the database setting config
@@ -475,6 +486,20 @@ type Config struct {
 	ExchangeRatesRequestTimeoutExceedDefaultValue bool
 	ExchangeRatesProxy                            string
 	ExchangeRatesSkipTLSVerify                    bool
+
+	// Crypto Assets
+	CryptoPricesDataSource   string
+	CoinStatsApiKey          string
+	CoinStatsShareToken      string
+	CoinStatsPortfolioId     string
+	CoinStatsPasscode        string
+	CryptoPriceCurrency      string
+	CryptoPriceCacheLifetime uint32
+	CryptoMinRefreshInterval uint32
+	CryptoMaxRequestsPerDay  uint16
+	CryptoRequestTimeout     uint32
+	CryptoProxy              string
+	CryptoSkipTLSVerify      bool
 }
 
 // LoadConfiguration loads setting config from given config file path
@@ -495,6 +520,10 @@ func LoadConfiguration(configFilePath string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// every setting below can be supplied by an environment variable, so the environment file has
+	// to be in the environment before any of them is read
+	loadEnvironmentFile(config.WorkingPath)
 
 	err = loadGlobalConfiguration(config, cfgFile, "global")
 
@@ -617,6 +646,12 @@ func LoadConfiguration(configFilePath string) (*Config, error) {
 	}
 
 	err = loadExchangeRatesConfiguration(config, cfgFile, "exchange_rates")
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = loadCryptoConfiguration(config, cfgFile, "crypto")
 
 	if err != nil {
 		return nil, err
@@ -1286,6 +1321,30 @@ func loadExchangeRatesConfiguration(config *Config, configFile *ini.File, sectio
 	}
 
 	config.ExchangeRatesSkipTLSVerify = getConfigItemBoolValue(configFile, sectionName, "skip_tls_verify", false)
+
+	return nil
+}
+
+func loadCryptoConfiguration(config *Config, configFile *ini.File, sectionName string) error {
+	dataSource := getConfigItemStringValue(configFile, sectionName, "data_source", CoinStatsCryptoPricesDataSource)
+
+	if dataSource == CoinStatsCryptoPricesDataSource {
+		config.CryptoPricesDataSource = dataSource
+	} else {
+		return errs.ErrInvalidCryptoPricesDataSource
+	}
+
+	config.CoinStatsApiKey = getConfigItemStringValue(configFile, sectionName, "coinstats_api_key")
+	config.CoinStatsShareToken = getConfigItemStringValue(configFile, sectionName, "coinstats_share_token")
+	config.CoinStatsPortfolioId = getConfigItemStringValue(configFile, sectionName, "coinstats_portfolio_id")
+	config.CoinStatsPasscode = getConfigItemStringValue(configFile, sectionName, "coinstats_passcode")
+	config.CryptoPriceCurrency = getConfigItemStringValue(configFile, sectionName, "price_currency", defaultCryptoPriceCurrency)
+	config.CryptoPriceCacheLifetime = getConfigItemUint32Value(configFile, sectionName, "price_cache_lifetime", defaultCryptoPriceCacheLifetime)
+	config.CryptoMinRefreshInterval = getConfigItemUint32Value(configFile, sectionName, "min_refresh_interval", defaultCryptoMinRefreshInterval)
+	config.CryptoMaxRequestsPerDay = getConfigItemUint16Value(configFile, sectionName, "max_requests_per_day", defaultCryptoMaxRequestsPerDay)
+	config.CryptoProxy = getConfigItemStringValue(configFile, sectionName, "proxy", "system")
+	config.CryptoRequestTimeout = getConfigItemUint32Value(configFile, sectionName, "request_timeout", defaultCryptoDataRequestTimeout)
+	config.CryptoSkipTLSVerify = getConfigItemBoolValue(configFile, sectionName, "skip_tls_verify", false)
 
 	return nil
 }
