@@ -21,7 +21,7 @@ OLLAMA    := C:/Users/Viktor/AppData/Local/Programs/Ollama/ollama.exe
 
 BINARY       := ezbookkeeping.exe
 API_PORT     := 4242
-WEB_PORT     := 1337
+WEB_PORT     := 5173
 OLLAMA_PORT  := 11434
 OLLAMA_MODEL ?= qwen3-vl-16k
 
@@ -104,7 +104,7 @@ server: $(BINARY) dirs ## Run the backend in the foreground (:4242)
 	./$(BINARY) server run
 
 .PHONY: web
-web: ## Run the Vite dev server in the foreground (:1337)
+web: ## Run the Vite dev server in the foreground (:5173)
 	npm run serve
 
 .PHONY: up

@@ -482,6 +482,12 @@ func startWebServer(c *core.CliContext) error {
 			if config.ReceiptImageRecognitionLLMConfig != nil && config.ReceiptImageRecognitionLLMConfig.LLMProvider != "" {
 				if config.TransactionFromAIImageRecognition {
 					apiV1Route.POST("/llm/transactions/recognize_receipt_image.json", bindApi(api.LargeLanguageModels.RecognizeReceiptImageHandler, config))
+
+					// Queued recognition. Submitting returns as soon as the image
+					// is stored, so a client never waits on a model round-trip.
+					apiV1Route.POST("/receipt/jobs/submit.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobSubmitHandler, config))
+					apiV1Route.GET("/receipt/jobs/list.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobListHandler, config))
+					apiV1Route.POST("/receipt/jobs/resolve.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobResolveHandler, config))
 				}
 			}
 

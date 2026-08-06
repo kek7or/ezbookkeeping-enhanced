@@ -286,7 +286,11 @@ export default defineConfig(() => {
         },
         server: {
             host: '0.0.0.0',
-            port: 1337,
+            // 5173 is Vite's default. Avoid the 1000-1400 range on Windows:
+            // Hyper-V/WSL reserve blocks in there, and a bind lands on EACCES
+            // even though nothing is listening.
+            // Check with: netsh interface ipv4 show excludedportrange protocol=tcp
+            port: 5173,
             strictPort: true,
             proxy: {
                 '/server_settings.js': {

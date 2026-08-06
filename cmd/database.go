@@ -189,5 +189,13 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] crypto data source state table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.ReceiptRecognitionJob))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] receipt recognition job table maintained successfully")
+
 	return nil
 }
