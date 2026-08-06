@@ -189,6 +189,23 @@ func (s *ReceiptRecognitionService) RecognizeReceiptImage(c core.Context, uid in
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
+	// Models routinely return non-ASCII with its bytes corrupted, writing
+	// "NestlÃ©" where the receipt printed "Nestlé". The raw response body
+	// already contains it, so it has to be repaired here rather than upstream.
+	if result != nil {
+		repaired := utils.RepairMojibakeInAllFields(
+			&result.Description,
+			&result.CategoryName,
+			&result.AccountName,
+			&result.DestinationAccountName,
+		)
+		utils.RepairMojibakeSlice(result.TagNames)
+
+		if repaired {
+			log.Warnf(c, "[receipt_recognitions.RecognizeReceiptImage] repaired mojibake in the model response for user \"uid:%d\"", uid)
+		}
+	}
+
 	return s.ParseRecognizedTransactionResult(c, clientTimezone, result, essentialData)
 }
 

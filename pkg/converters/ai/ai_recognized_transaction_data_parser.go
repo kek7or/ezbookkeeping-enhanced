@@ -190,7 +190,57 @@ func (p *aiTransactionDataParser) parseRecognizedResult(c core.Context, user *mo
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
 
+	repairMojibakeInParsedResult(c, user, result)
+
 	return result, nil
+}
+
+// repairMojibakeInParsedResult fixes text the model returned with its non-ASCII
+// characters corrupted, writing "HÃ¤hnchen-Brustfilet" where the receipt printed
+// "Hähnchen-Brustfilet".
+//
+// The corruption is the model's own: the raw response body already contains it,
+// so there is nothing upstream to correct. It shows up reliably on receipts in
+// languages with accented characters, which makes every affected item name and
+// category wrong in the imported transaction.
+func repairMojibakeInParsedResult(c core.Context, user *models.User, result *aiTransactionDataParsedResult) {
+	repaired := false
+
+	for i := 0; i < len(result.LineItems); i++ {
+		lineItem := result.LineItems[i]
+
+		if lineItem == nil {
+			continue
+		}
+
+		repaired = utils.RepairMojibakeInAllFields(&lineItem.Name, &lineItem.Category, &lineItem.Reason) || repaired
+	}
+
+	for i := 0; i < len(result.Transactions); i++ {
+		transaction := result.Transactions[i]
+
+		if transaction == nil {
+			continue
+		}
+
+		repaired = utils.RepairMojibakeInAllFields(
+			&transaction.Description,
+			&transaction.CategoryName,
+			&transaction.AccountName,
+			&transaction.DestinationAccountName,
+		) || repaired
+
+		utils.RepairMojibakeSlice(transaction.TagNames)
+	}
+
+	repaired = utils.RepairMojibakeInAllFields(&result.AccountName) || repaired
+	utils.RepairMojibakeSlice(result.RawLines)
+
+	if repaired {
+		// Logged rather than fixed silently: a model that keeps doing this is
+		// one worth replacing, and that is invisible if the repair hides it.
+		log.Warnf(c, "[ai_recognized_transaction_data_parser.repairMojibakeInParsedResult] repaired mojibake in the model response for user \"uid:%d\"", user.Uid)
+	}
 }
 
 // account category names as they are shown in the user interface, so that the model sees an
