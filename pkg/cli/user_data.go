@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"sort"
 	"strings"
 	"time"
 
@@ -22,14 +23,15 @@ const pageCountForDataExport = 1000
 // UserDataCli represents user data cli
 type UserDataCli struct {
 	CliUsingConfig
-	accounts                *services.AccountService
-	transactions            *services.TransactionService
-	categories              *services.TransactionCategoryService
-	tags                    *services.TransactionTagService
-	users                   *services.UserService
-	twoFactorAuthorizations *services.TwoFactorAuthorizationService
-	tokens                  *services.TokenService
-	forgetPasswords         *services.ForgetPasswordService
+	accounts                  *services.AccountService
+	transactions              *services.TransactionService
+	categories                *services.TransactionCategoryService
+	tags                      *services.TransactionTagService
+	users                     *services.UserService
+	twoFactorAuthorizations   *services.TwoFactorAuthorizationService
+	tokens                    *services.TokenService
+	forgetPasswords           *services.ForgetPasswordService
+	receiptLineItemCategories *services.ReceiptLineItemCategoryService
 }
 
 // Initialize a user data cli singleton instance
@@ -38,14 +40,15 @@ var (
 		CliUsingConfig: CliUsingConfig{
 			container: settings.Container,
 		},
-		accounts:                services.Accounts,
-		transactions:            services.Transactions,
-		categories:              services.TransactionCategories,
-		tags:                    services.TransactionTags,
-		users:                   services.Users,
-		twoFactorAuthorizations: services.TwoFactorAuthorizations,
-		tokens:                  services.Tokens,
-		forgetPasswords:         services.ForgetPasswords,
+		accounts:                  services.Accounts,
+		transactions:              services.Transactions,
+		categories:                services.TransactionCategories,
+		tags:                      services.TransactionTags,
+		users:                     services.Users,
+		twoFactorAuthorizations:   services.TwoFactorAuthorizations,
+		tokens:                    services.Tokens,
+		forgetPasswords:           services.ForgetPasswords,
+		receiptLineItemCategories: services.ReceiptLineItemCategories,
 	}
 )
 
@@ -877,6 +880,177 @@ func (l *UserDataCli) ImportTransaction(c *core.CliContext, username string, fil
 	}
 
 	return nil
+}
+
+// LearnReceiptLineItemCategoriesFromTransactions teaches the receipt import where articles belong by
+// reading the receipts the user has already imported.
+//
+// A receipt import writes the names of the lines it summed into the comment of the transaction it
+// created, joined by ", ", so every receipt imported so far still records which articles were filed
+// under which category. That is exactly what the memory holds, and it can be recovered without the
+// user importing anything again.
+//
+// The cutoff exists because those names were not always written correctly: before the mojibake repair
+// of 2026-08-06 every non-ASCII name reached the comment already corrupted, and "KartoffelnÂ frÃ¼h"
+// would be recorded as an article that can never be matched again. Nothing before the cutoff is read.
+//
+// Only expense transactions are considered, because that is all a receipt produces, and a comment is
+// only read where every part of it looks like an article name. A comment the user wrote themselves can
+// still be misread as a list of articles, which is why this reports what it found and can be asked to
+// change nothing.
+func (l *UserDataCli) LearnReceiptLineItemCategoriesFromTransactions(c *core.CliContext, username string, minCreatedUnixTime int64, dryRun bool) (int, int, error) {
+	if username == "" {
+		log.CliErrorf(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] user name is empty")
+		return 0, 0, errs.ErrUsernameIsEmpty
+	}
+
+	uid, err := l.getUserIdByUsername(c, username)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] error occurs when getting user id by user name")
+		return 0, 0, err
+	}
+
+	categories, err := l.categories.GetAllCategoriesByUid(c, uid, 0, -1)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] failed to get categories for user \"%s\", because %s", username, err.Error())
+		return 0, 0, err
+	}
+
+	expenseCategoryNames := make(map[int64]string, len(categories))
+
+	for _, category := range categories {
+		// only a sub-category can hold a transaction, and only an expense category can hold a receipt
+		if category.Type == models.CATEGORY_TYPE_EXPENSE && category.ParentCategoryId != models.LevelOneTransactionCategoryParentId {
+			expenseCategoryNames[category.CategoryId] = category.Name
+		}
+	}
+
+	allTransactions, err := l.transactions.GetAllTransactions(c, uid, pageCountForGettingTransactions, false)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] failed to get all transactions for user \"%s\", because %s", username, err.Error())
+		return 0, 0, err
+	}
+
+	// the transactions arrive newest first by transaction time, which is not the order they were
+	// imported in. Sorting by when they were created is what makes the newest answer the winning one,
+	// the same way importing a receipt twice leaves the second answer standing.
+	learnableTransactions := make([]*models.Transaction, 0, len(allTransactions))
+
+	for _, transaction := range allTransactions {
+		if transaction.Type != models.TRANSACTION_DB_TYPE_EXPENSE || transaction.CreatedUnixTime < minCreatedUnixTime || transaction.Comment == "" {
+			continue
+		}
+
+		if _, exists := expenseCategoryNames[transaction.CategoryId]; !exists {
+			continue
+		}
+
+		learnableTransactions = append(learnableTransactions, transaction)
+	}
+
+	sort.SliceStable(learnableTransactions, func(i, j int) bool {
+		return learnableTransactions[i].CreatedUnixTime < learnableTransactions[j].CreatedUnixTime
+	})
+
+	items := make([]*models.ReceiptLineItemCategoryRememberItem, 0, len(learnableTransactions)*4)
+	readTransactionCount := 0
+
+	for _, transaction := range learnableTransactions {
+		lineItemNames := parseReceiptTransactionComment(transaction.Comment)
+
+		if len(lineItemNames) < 1 {
+			continue
+		}
+
+		readTransactionCount++
+
+		for _, lineItemName := range lineItemNames {
+			items = append(items, &models.ReceiptLineItemCategoryRememberItem{
+				Name:       lineItemName,
+				CategoryId: transaction.CategoryId,
+			})
+		}
+	}
+
+	if len(items) < 1 {
+		log.CliInfof(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] found no receipt line items to learn for user \"%s\"", username)
+		return 0, 0, nil
+	}
+
+	// what is reported is what will actually be kept, so the counts have to be over the articles the
+	// memory will end up holding rather than over the lines they were read from
+	distinctNames := make(map[string]bool, len(items))
+
+	for _, item := range items {
+		distinctNames[models.NormalizeReceiptLineItemName(item.Name)] = true
+	}
+
+	if dryRun {
+		for _, item := range items {
+			log.CliInfof(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] would remember \"%s\" as \"%s\"", item.Name, expenseCategoryNames[item.CategoryId])
+		}
+
+		log.CliInfof(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] would remember %d articles read from %d transactions of user \"%s\", nothing was changed", len(distinctNames), readTransactionCount, username)
+		return len(distinctNames), readTransactionCount, nil
+	}
+
+	err = l.receiptLineItemCategories.Remember(c, uid, items)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] failed to remember receipt line item categories for user \"%s\", because %s", username, err.Error())
+		return 0, 0, err
+	}
+
+	log.CliInfof(c, "[user_data.LearnReceiptLineItemCategoriesFromTransactions] remembered %d articles read from %d transactions of user \"%s\"", len(distinctNames), readTransactionCount, username)
+
+	return len(distinctNames), readTransactionCount, nil
+}
+
+// parseReceiptTransactionComment splits the comment a receipt import wrote back into the article names
+// it was joined from, or returns nothing when the comment does not look like such a list.
+//
+// The separator is ", " rather than ",", which is what makes this safe on German receipts: a price or
+// a weight printed in an article name carries its comma without a space after it ("Pfand 0,25 EM").
+//
+// A comment too long for the column was cut on an article boundary and marked with an ellipsis, so
+// every name before the ellipsis is whole and only the articles beyond it were lost. A single name
+// that was itself cut short has no boundary to fall back on and is dropped entirely, because half an
+// article name would be remembered as an article of its own.
+func parseReceiptTransactionComment(comment string) []string {
+	truncated := strings.HasSuffix(comment, "…")
+	comment = strings.TrimSuffix(comment, "…")
+	parts := strings.Split(comment, ", ")
+
+	if truncated && len(parts) < 2 {
+		return nil
+	}
+
+	lineItemNames := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		lineItemName := strings.TrimSpace(part)
+
+		if lineItemName == "" {
+			continue
+		}
+
+		// a name whose bytes were corrupted before it was stored can never be matched against a
+		// correctly read receipt again, so it is left out rather than kept as an article of its own
+		if utils.ContainsMojibake(lineItemName) {
+			continue
+		}
+
+		if models.NormalizeReceiptLineItemName(lineItemName) == "" {
+			continue
+		}
+
+		lineItemNames = append(lineItemNames, lineItemName)
+	}
+
+	return lineItemNames
 }
 
 func (l *UserDataCli) getUserIdByUsername(c *core.CliContext, username string) (int64, error) {

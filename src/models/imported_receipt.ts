@@ -4,7 +4,8 @@ import {
     ImportTransaction,
     type ImportTransactionResponse,
     type ImportTransactionResponsePageWrapper,
-    type ImportReceiptLineItemResponse
+    type ImportReceiptLineItemResponse,
+    type ReceiptLineItemCategoryRememberItem
 } from './imported_transaction.ts';
 
 let nextLineItemId: number = 0;
@@ -18,6 +19,9 @@ export class ImportReceiptLineItem {
     public readonly id: string;
     public readonly originalCategoryName: string;
     public readonly refund: boolean;
+    // whether this line was already filed where the user put it the last time they bought this
+    // article, rather than where the model guessed it belonged
+    public readonly remembered: boolean;
     public name: string;
     public amount: number;
 
@@ -25,6 +29,7 @@ export class ImportReceiptLineItem {
         this.id = `receiptLineItem_${nextLineItemId++}`;
         this.originalCategoryName = response.categoryName;
         this.refund = !!response.refund;
+        this.remembered = !!response.remembered;
         this.name = response.name;
         this.amount = response.amount;
     }
@@ -168,6 +173,37 @@ export class ImportReceipt {
         }
 
         return transactions;
+    }
+
+    // toRememberedLineItemCategories returns what this receipt taught the import: every line that will
+    // be imported, and the category it ended up in.
+    //
+    // Every line is reported rather than only the ones the user moved. A line the model happened to
+    // file correctly this time is no more certain to be filed correctly the next time - the whole
+    // point is that a category once settled stops depending on the model at all.
+    //
+    // A group the user emptied or unselected teaches nothing, because they did not accept it.
+    public toRememberedLineItemCategories(): ReceiptLineItemCategoryRememberItem[] {
+        const items: ReceiptLineItemCategoryRememberItem[] = [];
+
+        for (const categoryGroup of this.categoryGroups) {
+            if (!categoryGroup.isImportable || !categoryGroup.selected || !categoryGroup.categoryId || categoryGroup.categoryId === '0') {
+                continue;
+            }
+
+            for (const lineItem of categoryGroup.lineItems) {
+                if (!lineItem.name) {
+                    continue;
+                }
+
+                items.push({
+                    name: lineItem.name,
+                    categoryId: categoryGroup.categoryId
+                });
+            }
+        }
+
+        return items;
     }
 
     // of returns the receipt one recognized image was read as, or undefined when the response holds

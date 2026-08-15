@@ -93,6 +93,9 @@ type ImportReceiptLineItemResponse struct {
 	// whether this line hands money back rather than charging for a purchase, which keeps it in a
 	// transaction of its own instead of cancelling out the purchases of the same category
 	Refund bool `json:"refund,omitempty"`
+	// whether the category is the user's own answer from an earlier receipt rather than the model's
+	// guess, so that the client can say which lines it did not have to categorize
+	Remembered bool `json:"remembered,omitempty"`
 }
 
 // ImportReceiptResponse represents the lines one receipt image was read as, in the order they are

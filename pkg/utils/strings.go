@@ -87,6 +87,79 @@ func GetFirstLowerCharString(s string) string {
 	return string(chars)
 }
 
+// StringSimilarity returns how alike two strings are, from 0 for nothing in common to 1 for equal.
+//
+// It is the edit distance between them measured against the longer of the two, so the score says what
+// share of the longer string the two agree on. That is what makes a threshold meaningful across names
+// of different lengths: a single misread letter matters far more in a four-letter name than in a
+// twenty-letter one, and it should.
+func StringSimilarity(a string, b string) float64 {
+	if a == b {
+		return 1
+	}
+
+	aChars := []rune(a)
+	bChars := []rune(b)
+
+	if len(aChars) < 1 || len(bChars) < 1 {
+		return 0
+	}
+
+	longerLength := len(aChars)
+
+	if len(bChars) > longerLength {
+		longerLength = len(bChars)
+	}
+
+	return 1 - float64(levenshteinDistance(aChars, bChars))/float64(longerLength)
+}
+
+// levenshteinDistance returns how many single character insertions, deletions or substitutions turn
+// one string into the other.
+//
+// Only two rows of the distance matrix are ever needed at once - the row being filled and the one
+// above it - so the whole matrix is never held, which is what keeps comparing one name against a
+// long list of them cheap.
+func levenshteinDistance(aChars []rune, bChars []rune) int {
+	previousRow := make([]int, len(bChars)+1)
+	currentRow := make([]int, len(bChars)+1)
+
+	for j := 0; j <= len(bChars); j++ {
+		previousRow[j] = j
+	}
+
+	for i := 1; i <= len(aChars); i++ {
+		currentRow[0] = i
+
+		for j := 1; j <= len(bChars); j++ {
+			substitutionCost := previousRow[j-1]
+
+			if aChars[i-1] != bChars[j-1] {
+				substitutionCost++
+			}
+
+			deletionCost := previousRow[j] + 1
+			insertionCost := currentRow[j-1] + 1
+
+			minimalCost := substitutionCost
+
+			if deletionCost < minimalCost {
+				minimalCost = deletionCost
+			}
+
+			if insertionCost < minimalCost {
+				minimalCost = insertionCost
+			}
+
+			currentRow[j] = minimalCost
+		}
+
+		previousRow, currentRow = currentRow, previousRow
+	}
+
+	return previousRow[len(bChars)]
+}
+
 // ContainsOnlyOneRune returns the source string only contains one character
 func ContainsOnlyOneRune(s string, r rune) bool {
 	if len(s) < 1 {

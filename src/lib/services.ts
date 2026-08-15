@@ -64,7 +64,8 @@ import type {
     ForgetPasswordRequest
 } from '@/models/forget_password.ts';
 import type {
-    ImportTransactionResponsePageWrapper
+    ImportTransactionResponsePageWrapper,
+    ReceiptLineItemCategoryRememberRequest
 } from '@/models/imported_transaction.ts';
 import type {
     TransactionCreateRequest,
@@ -731,6 +732,9 @@ export default {
         return axios.post<ApiResponse<number>>('v1/transactions/import.json', req, {
             timeout: DEFAULT_IMPORT_API_TIMEOUT
         } as ApiRequestConfig);
+    },
+    rememberReceiptLineItemCategories: (req: ReceiptLineItemCategoryRememberRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/transactions/import/receipt_line_item_categories/remember.json', req);
     },
     getImportTransactionsProcess: (clientSessionId: string): ApiResponsePromise<number | null> => {
         return axios.get<ApiResponse<number | null>>('v1/transactions/import/process.json?client_session_id=' + clientSessionId, {

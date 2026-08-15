@@ -197,5 +197,13 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] receipt recognition job table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.ReceiptLineItemCategory))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] receipt line item category table maintained successfully")
+
 	return nil
 }

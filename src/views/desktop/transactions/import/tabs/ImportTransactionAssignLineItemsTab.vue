@@ -171,6 +171,11 @@
                                     <span class="text-truncate">{{ element.name }}</span>
                                     <v-tooltip activator="parent" open-delay="500">{{ element.name }}</v-tooltip>
                                 </div>
+                                <span class="import-receipt-line-item-remembered d-flex align-center ms-1"
+                                      v-if="element.remembered">
+                                    <v-icon size="16" :icon="mdiHistory"/>
+                                    <v-tooltip activator="parent" open-delay="500">{{ tt('Filed here from an earlier receipt, drag it away to change that') }}</v-tooltip>
+                                </span>
                                 <div class="import-receipt-line-item-amount ms-2">
                                     <amount-input density="compact" variant="plain"
                                                   :currency="getReceiptCurrency(receipt)"
@@ -224,6 +229,7 @@ import {
     mdiClose,
     mdiAlertOutline,
     mdiReceiptTextOutline,
+    mdiHistory,
     mdiUnfoldLessHorizontal,
     mdiUnfoldMoreHorizontal
 } from '@mdi/js';
@@ -449,6 +455,14 @@ defineExpose({
 
     .import-receipt-line-item-ghost {
         opacity: 0.5;
+    }
+
+    /* a line filed from an earlier receipt is marked, not highlighted: the user still has to be able
+       to run their eye down a column of names, and most lines carry this mark once a few shops have
+       been imported */
+    .import-receipt-line-item-remembered {
+        flex: 0 0 auto;
+        color: rgba(var(--v-theme-on-surface), var(--v-disabled-opacity));
     }
 
     .import-receipt-category-tags {

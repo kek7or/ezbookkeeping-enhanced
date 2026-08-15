@@ -257,6 +257,77 @@ downstream code.
 | **Multiple images in one batch** | Each image is its own receipt: aggregate per image, never across images. `receipt_total` validation is per image. |
 | **Non-receipt image** (single voucher, transfer) | Model returns `transactions`, not `line_items`; old path handles it. Prompt must permit this. |
 | **Duplicate identical lines** (`Akku` ×2) | Both are real purchases. Keep both, sum both. Do not deduplicate. |
+| **An article bought before** | Implemented: filed under the category the user last put it in, overriding the model. See §5.1. |
+
+---
+
+### 5.1 Remembered categories
+
+The model re-guesses the category of the same weekly shop every time, and guesses differently
+from run to run — the same image produced 41.74 and 42.94 on consecutive runs. Categorizing is
+the one part of reading a receipt where the answer does not have to be re-derived at all: the
+user already gave it, the last time they bought the article.
+
+Every line of an imported receipt is recorded as `article name → category id`, in
+`receipt_line_item_category` (one row per user per article, `UQE_..._uid_normalized_name`).
+Recording happens after the import succeeds, so what is kept is what the user accepted; a
+receipt they cancelled teaches nothing. Every line is recorded rather than only the ones they
+dragged — an article filed correctly by chance should not be left to chance next time.
+
+On the next recognition the lines are looked up before they are grouped:
+
+- The name is normalized first — lowercased, diacritics folded (`früh` → `fruh`), punctuation
+  dropped, whitespace collapsed. Most re-encounters are an exact hit on that key and never
+  reach the fuzzy pass at all.
+- Otherwise the closest remembered name within `ReceiptLineItemNameSimilarityThreshold` (0.9,
+  normalized Levenshtein) wins, which absorbs a genuine misread of about one character in ten.
+- A fuzzy match must agree on **every digit**. `Pfand 0,25` and `Pfand 0,15` are 90% alike and
+  are not the same thing; neither are two article numbers differing in the last place.
+- The user's answer beats the model's whenever it exists. Where they have said nothing, the
+  model's choice stands.
+
+The lookup runs **after** parsing, so it acts on exactly the lines the user can see and drag: a
+deposit already folded into its drink is never looked up on its own and cannot be filed
+somewhere the drink is not. Refunds are looked up too, and stay in a group of their own.
+
+The category is remembered by **id** and resolved to its current name at recognition time, so
+renaming a category keeps everything filed under it. An entry whose category has since been
+deleted or hidden resolves to nothing and is skipped — which is also how the memory forgets.
+
+Lines placed from memory come back flagged (`remembered` on the line item response) and are
+marked in the assignment board, so the mechanism is visible rather than magic. Dragging such a
+line away and importing overwrites the entry: correcting a wrong memory is the same gesture as
+teaching it in the first place.
+
+#### Seeding it from the receipts already imported
+
+The memory starts empty, but the answers are not lost — a receipt import writes the names of the
+lines it summed into the comment of the transaction it created, joined by `", "`, so every receipt
+imported so far already records which articles were filed under which category.
+
+```
+ezbookkeeping userdata receipt-line-item-category-learn -n <username> [--dry-run] [--since <time>]
+```
+
+`--since` defaults to **2026-08-06 21:43:07**, the mojibake repair (`3ef95920`). The aggregation
+itself landed on 2026-07-31 (`ae0dbedd`), but for that first week every non-ASCII name reached the
+comment already corrupted — `Kartoffeln frÃ¼h` normalizes to `kartoffeln frã¼h` and could never
+match a correctly read receipt again. Names are filtered through `utils.ContainsMojibake` as well,
+so a corrupted one is skipped rather than stored even if the cutoff is moved back.
+
+Parsing the comment back into names:
+
+- The separator is `", "`, never a bare comma — a German price or weight inside a name carries its
+  comma with no space after it (`Pfand 0,25 EM`).
+- A comment that hit the 255-character limit ends in `…` and was cut **on an article boundary**, so
+  every name before the ellipsis is whole and only the articles beyond it were lost.
+- A single name that was itself cut short has no boundary to fall back on and is dropped entirely.
+- Transactions are read oldest-created first, so the most recent answer is the one that survives —
+  the same rule as importing the same receipt twice.
+
+Only expense transactions in an existing expense sub-category are read. Nothing marks a transaction
+as receipt-derived, so a hand-written comment containing `", "` can still be misread as a list of
+articles; `--dry-run` prints every pair it would record and changes nothing.
 
 ---
 

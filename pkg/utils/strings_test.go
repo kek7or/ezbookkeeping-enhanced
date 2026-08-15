@@ -165,3 +165,30 @@ func TestEncryptSecretAndDecryptSecret(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, expectedValue, actualValue)
 }
+
+func TestStringSimilarity(t *testing.T) {
+	assert.Equal(t, 1.0, StringSimilarity("broccoli", "broccoli"))
+	assert.Equal(t, 1.0, StringSimilarity("", ""))
+
+	// nothing is alike to nothing in particular
+	assert.Equal(t, 0.0, StringSimilarity("broccoli", ""))
+	assert.Equal(t, 0.0, StringSimilarity("", "broccoli"))
+	assert.Equal(t, 0.0, StringSimilarity("abcd", "wxyz"))
+
+	// one substitution in four characters costs a quarter, in eight an eighth
+	assert.Equal(t, 0.75, StringSimilarity("abcd", "abcx"))
+	assert.Equal(t, 0.875, StringSimilarity("broccoli", "broccols"))
+
+	// an insertion and a deletion cost the same as a substitution
+	assert.Equal(t, 0.8, StringSimilarity("kiwi", "kiwis"))
+	assert.Equal(t, 0.8, StringSimilarity("kiwis", "kiwi"))
+
+	// the order of the arguments cannot change how alike two strings are
+	assert.Equal(t, StringSimilarity("kartoffeln fruh", "kartoffeln frueh"), StringSimilarity("kartoffeln frueh", "kartoffeln fruh"))
+}
+
+func TestStringSimilarity_CountsCharactersRatherThanBytes(t *testing.T) {
+	// one letter differs out of six, and it happens to be one that takes two bytes to write. Counted
+	// in bytes the two would be seven long and differ by two, which is a different answer entirely.
+	assert.Equal(t, 1-1.0/6.0, StringSimilarity("möhren", "mohren"))
+}

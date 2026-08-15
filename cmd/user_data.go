@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -336,6 +337,30 @@ var UserData = &cli.Command{
 					Aliases:  []string{"n"},
 					Required: true,
 					Usage:    "Specific user name",
+				},
+			},
+		},
+		{
+			Name:   "receipt-line-item-category-learn",
+			Usage:  "Teach the receipt import where articles belong, by reading the receipts already imported",
+			Action: bindAction(learnReceiptLineItemCategories),
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:     "username",
+					Aliases:  []string{"n"},
+					Required: true,
+					Usage:    "Specific user name",
+				},
+				&cli.StringFlag{
+					Name:    "since",
+					Aliases: []string{"s"},
+					Value:   defaultReceiptLineItemCategoryLearnSince,
+					Usage:   "Only read transactions imported at or after this time, in server timezone (e.g. \"2026-08-06\" or \"2026-08-06 21:43:07\"). Earlier receipt imports stored corrupted item names.",
+				},
+				&cli.BoolFlag{
+					Name:    "dry-run",
+					Aliases: []string{"d"},
+					Usage:   "Report what would be remembered without changing anything",
 				},
 			},
 		},
@@ -818,6 +843,61 @@ func checkUserTransactionAndAccount(c *core.CliContext) error {
 	log.CliInfof(c, "[user_data.checkUserTransactionAndAccount] user transactions and accounts data has been checked successfully, there is no problem with user data")
 
 	return nil
+}
+
+// defaultReceiptLineItemCategoryLearnSince is when receipt imports began storing item names that can
+// still be matched. The line item aggregation itself landed a week earlier, but until the mojibake
+// repair of this date every non-ASCII name reached the transaction comment already corrupted.
+const defaultReceiptLineItemCategoryLearnSince = "2026-08-06 21:43:07"
+
+func learnReceiptLineItemCategories(c *core.CliContext) error {
+	_, err := initializeSystem(c)
+
+	if err != nil {
+		return err
+	}
+
+	username := c.String("username")
+	since := c.String("since")
+	dryRun := c.Bool("dry-run")
+
+	sinceTime, err := parseCliTimeInServerTimezone(since)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.learnReceiptLineItemCategories] \"%s\" is not a time, expected \"2026-08-06\" or \"2026-08-06 21:43:07\"", since)
+		return err
+	}
+
+	minCreatedUnixTime := sinceTime.Unix()
+
+	log.CliInfof(c, "[user_data.learnReceiptLineItemCategories] starting reading the receipts of user \"%s\" imported at or after %s", username, utils.FormatUnixTimeToLongDateTimeInServerTimezone(minCreatedUnixTime))
+
+	articleCount, transactionCount, err := clis.UserData.LearnReceiptLineItemCategoriesFromTransactions(c, username, minCreatedUnixTime, dryRun)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.learnReceiptLineItemCategories] error occurs when reading the receipts of user \"%s\"", username)
+		return err
+	}
+
+	if dryRun {
+		log.CliInfof(c, "[user_data.learnReceiptLineItemCategories] %d articles read from %d transactions would be remembered, nothing was changed", articleCount, transactionCount)
+	} else {
+		log.CliInfof(c, "[user_data.learnReceiptLineItemCategories] %d articles read from %d transactions have been remembered for user \"%s\"", articleCount, transactionCount, username)
+	}
+
+	return nil
+}
+
+// parseCliTimeInServerTimezone reads a time given on the command line, as a whole day or to the
+// second. The server timezone is used, because that is the clock the operator running this reads.
+func parseCliTimeInServerTimezone(t string) (time.Time, error) {
+	parsedTime, err := utils.ParseFromLongDateTimeInTimeZone(t, time.Local)
+
+	if err == nil {
+		return parsedTime, nil
+	}
+
+	return time.ParseInLocation("2006-01-02", t, time.Local)
 }
 
 func fixTransactionTagIndexNotHaveTransactionTime(c *core.CliContext) error {

@@ -182,6 +182,54 @@ describe('ImportReceipt', () => {
         expect(receipt.toImportTransactions(0).length).toBe(3);
     });
 
+    test('teaches every line that was imported, not only the ones that were moved', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+        const foodGroup = receipt.categoryGroups[0]!;
+        const drinkGroup = receipt.categoryGroups[1]!;
+
+        // the model read "Milchcreme Cookies" as food, the user moves it where it belongs
+        drinkGroup.lineItems.push(...foodGroup.lineItems.splice(2, 1));
+
+        const remembered = receipt.toRememberedLineItemCategories();
+
+        expect(remembered.length).toBe(7);
+        expect(remembered).toContainEqual({ name: 'Milchcreme Cookies', categoryId: '12' });
+        // the lines the model already had right are recorded too, so they stop depending on it
+        expect(remembered).toContainEqual({ name: 'Broccoli', categoryId: '11' });
+        expect(remembered).toContainEqual({ name: 'Frischer O-Saft o.F.', categoryId: '12' });
+
+        // the same article twice is taught twice, which is what it is
+        expect(remembered.filter(item => item.name === 'Akku Ni-MH-0532273').length).toBe(2);
+    });
+
+    test('teaches nothing about a category that will not be imported', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+        const electronicsGroup = receipt.categoryGroups[2]!;
+
+        // the user unselected the batteries, so they said nothing about where batteries belong
+        electronicsGroup.selected = false;
+        // and emptied the drinks entirely
+        receipt.categoryGroups[1]!.lineItems = [];
+
+        const remembered = receipt.toRememberedLineItemCategories();
+
+        expect(remembered.length).toBe(3);
+
+        for (const item of remembered) {
+            expect(item.categoryId).toBe('11');
+        }
+    });
+
+    test('marks the lines that were filed from an earlier receipt', () => {
+        const response = createReceiptResponse();
+        (response.receipt!.lineItems[0] as { remembered?: boolean }).remembered = true;
+
+        const receipt = ImportReceipt.of(response, 0, 'receipt.jpg')!;
+
+        expect(receipt.categoryGroups[0]!.lineItems[0]!.remembered).toBe(true);
+        expect(receipt.categoryGroups[0]!.lineItems[1]!.remembered).toBe(false);
+    });
+
     test('leaves an import that is not a receipt to the ordinary import table', () => {
         const withoutLineItems = createReceiptResponse();
         expect(ImportReceipt.of({ items: withoutLineItems.items, totalCount: 3 }, 0, 'receipt.jpg')).toBeUndefined();

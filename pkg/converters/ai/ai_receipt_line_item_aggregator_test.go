@@ -42,10 +42,21 @@ func aggregateTestLineItemsWithAccounts(result *aiTransactionDataParsedResult, a
 }
 
 func aggregateTestLineItemsWithReceipt(result *aiTransactionDataParsedResult, accountMap map[string]*models.Account) ([]*models.RecognizedTransactionResult, []*models.ImportTransactionWarningResponse, *models.ImportReceiptResponse) {
+	return aggregateTestLineItemsWithMemory(result, accountMap, nil)
+}
+
+func aggregateTestLineItemsWithMemory(result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, categoryNamesByLineItemName map[string]string) ([]*models.RecognizedTransactionResult, []*models.ImportTransactionWarningResponse, *models.ImportReceiptResponse) {
 	parser := &aiTransactionDataParser{}
 	warningCollector := converter.NewImportWarningCollector()
 	receiptCollector := converter.NewImportReceiptCollector()
-	transactions := parser.aggregateReceiptLineItems(core.NewNullContext(), &models.User{Uid: 1}, result, accountMap, warningCollector, receiptCollector)
+
+	var lineItemCategories *converter.ReceiptLineItemCategoryMemory
+
+	if categoryNamesByLineItemName != nil {
+		lineItemCategories = converter.NewReceiptLineItemCategoryMemory(categoryNamesByLineItemName)
+	}
+
+	transactions := parser.aggregateReceiptLineItems(core.NewNullContext(), &models.User{Uid: 1}, result, accountMap, warningCollector, receiptCollector, lineItemCategories)
 
 	return transactions, warningCollector.GetWarnings(), receiptCollector.GetReceipt()
 }
@@ -795,4 +806,138 @@ func TestTruncateTransactionDescription(t *testing.T) {
 	assert.True(t, strings.HasSuffix(truncated, "…"))
 	// the cut lands on an item boundary, so no item name is left half written
 	assert.True(t, strings.HasSuffix(truncated, "Kartoffeln früh…"))
+}
+
+func TestAggregateReceiptLineItems_RememberedCategoryOverridesTheModel(t *testing.T) {
+	// the user moved the cookies out of Food and into Sweets on an earlier receipt, so that is where
+	// they belong now, however confidently the model files them back under Food
+	transactions, _, receipt := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Milchcreme Cookies", Price: "1.49", Category: "Food"},
+			{Name: "Broccoli", Price: "1.49", Category: "Food"},
+		},
+	}, nil, map[string]string{
+		"Milchcreme Cookies": "Sweets",
+	})
+
+	assert.Equal(t, 2, len(transactions))
+	assert.Equal(t, "Sweets", transactions[0].CategoryName)
+	assert.Equal(t, "1.49", transactions[0].Amount)
+	assert.Equal(t, "Food", transactions[1].CategoryName)
+
+	// the user is told which lines they did not have to categorize
+	assert.Equal(t, 2, len(receipt.LineItems))
+	assert.True(t, receipt.LineItems[0].Remembered)
+	assert.False(t, receipt.LineItems[1].Remembered)
+}
+
+func TestAggregateReceiptLineItems_RememberedCategorySurvivesAMisreadName(t *testing.T) {
+	// the same article, printed and read a little differently each time
+	for _, name := range []string{"Kartoffeln früh", "KARTOFFELN FRUH", "Kartoffeln  früh.", "Kartoffeln frün"} {
+		transactions, _, _ := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+			LineItems: []*models.RecognizedReceiptLineItem{
+				{Name: name, Price: "2.99", Category: "Food"},
+			},
+		}, nil, map[string]string{
+			"Kartoffeln früh": "Vegetables",
+		})
+
+		assert.Equal(t, 1, len(transactions), "line item %s", name)
+		assert.Equal(t, "Vegetables", transactions[0].CategoryName, "line item %s", name)
+	}
+}
+
+func TestAggregateReceiptLineItems_ANeighbouringArticleIsNotTheRememberedOne(t *testing.T) {
+	transactions, _, receipt := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Vollmilch Bio", Price: "1.29", Category: "Food"},
+		},
+	}, nil, map[string]string{
+		"Vollmilch": "Drink",
+	})
+
+	assert.Equal(t, 1, len(transactions))
+	assert.Equal(t, "Food", transactions[0].CategoryName)
+	assert.False(t, receipt.LineItems[0].Remembered)
+}
+
+func TestAggregateReceiptLineItems_RememberedCategoryRegroupsWhatIsSummed(t *testing.T) {
+	// two lines the model split across categories are summed into one transaction once the memory
+	// puts them back together, which is the whole point of remembering
+	transactions, _, _ := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Kiwi", Price: "2.29", Category: "Fruit & Snack"},
+			{Name: "Heidelbeeren", Price: "2.19", Category: "Food"},
+		},
+	}, nil, map[string]string{
+		"Kiwi":         "Fruit",
+		"Heidelbeeren": "Fruit",
+	})
+
+	assert.Equal(t, 1, len(transactions))
+	assert.Equal(t, "Fruit", transactions[0].CategoryName)
+	assert.Equal(t, "4.48", transactions[0].Amount)
+	assert.Equal(t, "Kiwi, Heidelbeeren", transactions[0].Description)
+}
+
+func TestAggregateReceiptLineItems_DepositIsNotLookedUpApartFromItsDrink(t *testing.T) {
+	// the deposit has already been charged against the juice by the time the memory is applied, so it
+	// cannot be filed anywhere the juice is not, whatever a stray entry for it might say
+	transactions, _, receipt := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Frischer O-Saft o.F.", Price: "2.59", Category: "Drink"},
+			{Name: "Pfand 0,25 EM", Price: "0.25", Deposit: true, Category: "Drink"},
+		},
+	}, nil, map[string]string{
+		"Pfand 0,25 EM": "Houseware",
+	})
+
+	assert.Equal(t, 1, len(transactions))
+	assert.Equal(t, "Drink", transactions[0].CategoryName)
+	assert.Equal(t, "2.84", transactions[0].Amount)
+	assert.Equal(t, 1, len(receipt.LineItems))
+	assert.False(t, receipt.LineItems[0].Remembered)
+}
+
+func TestAggregateReceiptLineItems_RefundIsFiledWhereItsArticleIsRemembered(t *testing.T) {
+	// the empties are still kept apart from the purchases of that category, they are only filed under
+	// the category the user chose for them
+	transactions, _, receipt := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: []*models.RecognizedReceiptLineItem{
+			{Name: "Monster Mango Loco", Price: "1.49", Category: "Drink"},
+			{Name: "Pfandrückgabe -10 x 0,25", Price: "0.25", Category: "Food"},
+		},
+	}, nil, map[string]string{
+		"Pfandrückgabe -10 x 0,25": "Drink",
+	})
+
+	assert.Equal(t, 2, len(transactions))
+	assert.Equal(t, "Drink", transactions[0].CategoryName)
+	assert.Equal(t, "1.49", transactions[0].Amount)
+	assert.Equal(t, "Drink", transactions[1].CategoryName)
+	assert.Equal(t, "-2.50", transactions[1].Amount)
+
+	assert.True(t, receipt.LineItems[1].Refund)
+	assert.True(t, receipt.LineItems[1].Remembered)
+}
+
+func TestAggregateReceiptLineItems_NothingRememberedLeavesTheModelAlone(t *testing.T) {
+	withoutMemory, _, _ := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		LineItems: createTestReceiptLineItems(),
+	}, nil)
+
+	withEmptyMemory, _, receipt := aggregateTestLineItemsWithMemory(&aiTransactionDataParsedResult{
+		LineItems: createTestReceiptLineItems(),
+	}, nil, map[string]string{})
+
+	assert.Equal(t, len(withoutMemory), len(withEmptyMemory))
+
+	for i := range withoutMemory {
+		assert.Equal(t, withoutMemory[i].CategoryName, withEmptyMemory[i].CategoryName)
+		assert.Equal(t, withoutMemory[i].Amount, withEmptyMemory[i].Amount)
+	}
+
+	for _, lineItem := range receipt.LineItems {
+		assert.False(t, lineItem.Remembered)
+	}
 }

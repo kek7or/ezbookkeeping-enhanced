@@ -171,6 +171,21 @@ export interface ImportReceiptLineItemResponse {
     // whether this line hands money back rather than charging for a purchase, which keeps it in a
     // transaction of its own instead of cancelling out the purchases of the same category
     readonly refund?: boolean;
+    // whether the category is the user's own answer from an earlier receipt rather than the model's
+    // guess, so that the lines they did not have to categorize can be marked as such
+    readonly remembered?: boolean;
+}
+
+// ReceiptLineItemCategoryRememberRequest is what the import learned from a receipt the user imported:
+// which category each of its lines ended up in, which is where a line of that article will start next
+// time it is bought
+export interface ReceiptLineItemCategoryRememberRequest {
+    readonly items: ReceiptLineItemCategoryRememberItem[];
+}
+
+export interface ReceiptLineItemCategoryRememberItem {
+    readonly name: string;
+    readonly categoryId: string;
 }
 
 export interface ImportReceiptResponse {

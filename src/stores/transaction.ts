@@ -33,6 +33,7 @@ import type {
 } from '@/models/transaction_picture_info.ts';
 import {
     type ImportTransactionResponsePageWrapper,
+    type ReceiptLineItemCategoryRememberItem,
     ImportTransaction
 } from '@/models/imported_transaction.ts';
 import {
@@ -1623,6 +1624,28 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
+    // rememberReceiptLineItemCategories teaches the import where the lines of an imported receipt
+    // belong, so that the next receipt starts from the user's answer instead of the model's guess.
+    //
+    // Nothing here is worth interrupting the user over. The transactions are already imported by the
+    // time this runs, and failing to remember them costs nothing but having to drag the same line
+    // again next time, so the failure is logged and swallowed.
+    function rememberReceiptLineItemCategories({ items }: { items: ReceiptLineItemCategoryRememberItem[] }): Promise<boolean> {
+        if (!items || items.length < 1) {
+            return Promise.resolve(false);
+        }
+
+        return new Promise(resolve => {
+            services.rememberReceiptLineItemCategories({ items }).then(response => {
+                const data = response.data;
+                resolve(!!data && !!data.success && !!data.result);
+            }).catch(error => {
+                logger.error('Unable to remember receipt line item categories', error);
+                resolve(false);
+            });
+        });
+    }
+
     function getImportTransactionsProcess({ clientSessionId }: { clientSessionId: string }): Promise<number | null> {
         return new Promise((resolve, reject) => {
             services.getImportTransactionsProcess(clientSessionId).then(response => {
@@ -1762,6 +1785,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         parseImportCustomFile,
         parseImportTransaction,
         importTransactions,
+        rememberReceiptLineItemCategories,
         getImportTransactionsProcess,
         uploadTransactionPicture,
         removeUnusedTransactionPicture,

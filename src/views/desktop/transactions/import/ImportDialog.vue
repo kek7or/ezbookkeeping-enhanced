@@ -396,7 +396,7 @@ import {
 import { ImageUploadQualityType } from '@/core/image.ts';
 import { UTF_8 } from '@/consts/file.ts';
 
-import { type ImportTransactionResponsePageWrapper, type ImportTransactionWarningResponse, ImportTransaction } from '@/models/imported_transaction.ts';
+import { type ImportTransactionResponsePageWrapper, type ImportTransactionWarningResponse, type ReceiptLineItemCategoryRememberItem, ImportTransaction } from '@/models/imported_transaction.ts';
 import { ImportReceipt } from '@/models/imported_receipt.ts';
 
 import { isDefined, isNumber } from '@/lib/common.ts';
@@ -560,7 +560,8 @@ const isAIImageImport = computed<boolean>(() => fileType.value === 'ai_image');
 const needAIImageRecognition = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.needAIImageRecognition ?? false);
 const supportedAdditionalOptions = computed<ImportFileTypeSupportedAdditionalOptions | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.supportedAdditionalOptions);
 const supportedAIAdditionalPrompt = computed<boolean>(() => !!allSupportedImportFileTypesMap.value[fileType.value]?.supportedAIAdditionalPrompt);
-const isReceiptLineItemEditorActive = computed<boolean>(() => currentStep.value === 'checkData' && importReceipts.value.length > 0 && !hasNonReceiptRecognizedTransactions.value);
+const hasEditableReceipts = computed<boolean>(() => importReceipts.value.length > 0 && !hasNonReceiptRecognizedTransactions.value);
+const isReceiptLineItemEditorActive = computed<boolean>(() => currentStep.value === 'checkData' && hasEditableReceipts.value);
 const receiptTotalMismatchWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptTotalMismatch'));
 const receiptLinesNotItemizedWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptLinesNotItemized'));
 
@@ -1226,6 +1227,29 @@ function parseData(): void {
     }
 }
 
+// rememberReceiptLineItemCategories teaches the import where the lines of the receipts just imported
+// belong, so that the same articles start in the right category the next time they are bought.
+//
+// It runs only once the import has succeeded, because what the user accepted is the answer worth
+// keeping - a receipt they looked at and then cancelled says nothing about where anything belongs.
+function rememberReceiptLineItemCategories(): void {
+    if (!hasEditableReceipts.value) {
+        return;
+    }
+
+    const items: ReceiptLineItemCategoryRememberItem[] = [];
+
+    for (const receipt of importReceipts.value) {
+        items.push(...receipt.toRememberedLineItemCategories());
+    }
+
+    if (items.length < 1) {
+        return;
+    }
+
+    transactionsStore.rememberReceiptLineItemCategories({ items });
+}
+
 function submit(): void {
     if (importTransactionCheckDataTab.value?.isEditing) {
         return;
@@ -1298,6 +1322,8 @@ function submit(): void {
 
             importedCount.value = response;
             currentStep.value = 'finalResult';
+
+            rememberReceiptLineItemCategories();
 
             accountsStore.updateAccountListInvalidState(true);
             transactionsStore.updateTransactionListInvalidState(true);

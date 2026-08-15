@@ -42,6 +42,9 @@ type receiptLineItem struct {
 	categoryName string
 	amount       int64
 	refund       bool
+	// remembered records that the category was not the model's choice but the user's own, taken from
+	// where they filed this article the last time they bought it
+	remembered bool
 }
 
 // receiptCategoryGroupKey is what decides which lines are summed together: their category, and whether
@@ -126,12 +129,13 @@ var receiptPaymentMethodAccountCategories = map[string][]models.AccountCategory{
 // aggregateReceiptLineItems groups the recognized receipt line items by their category and sums each group,
 // producing one expense transaction per category. The large language model is only asked to read and
 // categorize the individual lines, all arithmetic is done here with exact minor unit integers.
-func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user *models.User, result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, warningCollector *converter.ImportWarningCollector, receiptCollector *converter.ImportReceiptCollector) []*models.RecognizedTransactionResult {
+func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user *models.User, result *aiTransactionDataParsedResult, accountMap map[string]*models.Account, warningCollector *converter.ImportWarningCollector, receiptCollector *converter.ImportReceiptCollector, lineItemCategories *converter.ReceiptLineItemCategoryMemory) []*models.RecognizedTransactionResult {
 	accountName := p.resolveReceiptAccountName(c, user, result, accountMap)
 
 	p.checkAllRawLinesWereItemized(c, user, result, warningCollector)
 
 	parsedLineItems := p.parseReceiptLineItems(c, user, result.LineItems)
+	applyRememberedReceiptCategories(c, user, parsedLineItems, lineItemCategories)
 	reportReceiptLineItems(parsedLineItems, receiptCollector)
 	groups := make([]*receiptCategoryGroup, 0, len(parsedLineItems))
 	groupsByKey := make(map[receiptCategoryGroupKey]*receiptCategoryGroup, len(parsedLineItems))
@@ -326,6 +330,51 @@ func refundAmountFromQuantity(name string) (int64, bool) {
 	return -quantity * unitPrice, true
 }
 
+// applyRememberedReceiptCategories files each line under the category the user put it in the last
+// time they bought it, wherever they have bought it before.
+//
+// This runs after the lines have been parsed and before they are grouped, so it acts on exactly the
+// lines the user is shown and can drag - a deposit already folded into its drink is not looked up on
+// its own, and cannot be filed anywhere the drink is not.
+//
+// The user's own answer beats the model's every time it exists. The model is guessing from an article
+// name and a list of category names; the user is stating what they decided about this very article,
+// and they decided it by looking at the receipt. Where they have said nothing, the model's choice is
+// left alone.
+func applyRememberedReceiptCategories(c core.Context, user *models.User, parsedLineItems []*receiptLineItem, lineItemCategories *converter.ReceiptLineItemCategoryMemory) {
+	if lineItemCategories.Len() < 1 || len(parsedLineItems) < 1 {
+		return
+	}
+
+	rememberedCount := 0
+	correctedCount := 0
+
+	for _, lineItem := range parsedLineItems {
+		if lineItem.name == "" {
+			continue
+		}
+
+		categoryName, exists := lineItemCategories.FindCategoryName(lineItem.name)
+
+		if !exists {
+			continue
+		}
+
+		rememberedCount++
+
+		if categoryName != lineItem.categoryName {
+			correctedCount++
+			lineItem.categoryName = categoryName
+		}
+
+		lineItem.remembered = true
+	}
+
+	if rememberedCount > 0 {
+		log.Infof(c, "[ai_receipt_line_item_aggregator.applyRememberedReceiptCategories] filed %d of %d receipt lines of user \"uid:%d\" under a category remembered from an earlier receipt, %d of which the model had put elsewhere", rememberedCount, len(parsedLineItems), user.Uid, correctedCount)
+	}
+}
+
 // reportReceiptLineItems hands the parsed lines back to the caller, in the order they are printed on
 // the receipt, so that the import UI can show what each transaction was summed from and let the user
 // move a line the model filed under the wrong category.
@@ -346,6 +395,7 @@ func reportReceiptLineItems(parsedLineItems []*receiptLineItem, receiptCollector
 			Amount:       lineItem.amount,
 			CategoryName: lineItem.categoryName,
 			Refund:       lineItem.refund,
+			Remembered:   lineItem.remembered,
 		})
 	}
 

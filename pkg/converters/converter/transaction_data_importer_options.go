@@ -18,6 +18,9 @@ type TransactionDataImporterOptions struct {
 	aiImageContentType string
 	warningCollector   *ImportWarningCollector
 	receiptCollector   *ImportReceiptCollector
+	// lineItemCategories is what the user already decided about the articles of their earlier
+	// receipts, applied to the lines of this one before the model's own categorizing is used
+	lineItemCategories *ReceiptLineItemCategoryMemory
 }
 
 // DefaultImporterOptions provides the default options for transaction data importer
@@ -32,6 +35,7 @@ var DefaultImporterOptions = TransactionDataImporterOptions{
 	aiImageContentType: "",
 	warningCollector:   nil,
 	receiptCollector:   nil,
+	lineItemCategories: nil,
 }
 
 // GetCurrentConfig returns the current config
@@ -82,6 +86,12 @@ func (o TransactionDataImporterOptions) GetWarningCollector() *ImportWarningColl
 // GetReceiptCollector returns the collector which the recognized receipt lines are reported to
 func (o TransactionDataImporterOptions) GetReceiptCollector() *ImportReceiptCollector {
 	return o.receiptCollector
+}
+
+// GetReceiptLineItemCategories returns what the user already decided about the articles of their
+// earlier receipts
+func (o TransactionDataImporterOptions) GetReceiptLineItemCategories() *ReceiptLineItemCategoryMemory {
+	return o.lineItemCategories
 }
 
 // WithPayeeAsTag sets the option to import payee as tag
@@ -147,6 +157,14 @@ func (o TransactionDataImporterOptions) WithReceiptCollector(collector *ImportRe
 	return cloned
 }
 
+// WithReceiptLineItemCategories sets what the user already decided about the articles of their
+// earlier receipts
+func (o TransactionDataImporterOptions) WithReceiptLineItemCategories(lineItemCategories *ReceiptLineItemCategoryMemory) TransactionDataImporterOptions {
+	cloned := o.Clone()
+	cloned.lineItemCategories = lineItemCategories
+	return cloned
+}
+
 // Clone creates a copy of the options instance
 func (o TransactionDataImporterOptions) Clone() TransactionDataImporterOptions {
 	return TransactionDataImporterOptions{
@@ -160,6 +178,7 @@ func (o TransactionDataImporterOptions) Clone() TransactionDataImporterOptions {
 		aiImageContentType: o.aiImageContentType,
 		warningCollector:   o.warningCollector,
 		receiptCollector:   o.receiptCollector,
+		lineItemCategories: o.lineItemCategories,
 	}
 }
 

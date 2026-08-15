@@ -418,6 +418,7 @@ func startWebServer(c *core.CliContext) error {
 				apiV1Route.POST("/transactions/parse_import.json", bindApi(api.Transactions.TransactionParseImportFileHandler, config))
 				apiV1Route.POST("/transactions/import.json", bindApi(api.Transactions.TransactionImportHandler, config))
 				apiV1Route.GET("/transactions/import/process.json", bindApi(api.Transactions.TransactionImportProcessHandler, config))
+				apiV1Route.POST("/transactions/import/receipt_line_item_categories/remember.json", bindApi(api.Transactions.TransactionReceiptLineItemCategoryRememberHandler, config))
 			}
 
 			// Transaction Pictures
