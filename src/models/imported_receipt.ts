@@ -17,12 +17,14 @@ let nextCategoryGroupId: number = 0;
 export class ImportReceiptLineItem {
     public readonly id: string;
     public readonly originalCategoryName: string;
+    public readonly refund: boolean;
     public name: string;
     public amount: number;
 
     private constructor(response: ImportReceiptLineItemResponse) {
         this.id = `receiptLineItem_${nextLineItemId++}`;
         this.originalCategoryName = response.categoryName;
+        this.refund = !!response.refund;
         this.name = response.name;
         this.amount = response.amount;
     }
@@ -37,14 +39,19 @@ export class ImportReceiptLineItem {
 export class ImportReceiptCategoryGroup {
     public readonly id: string;
     public readonly originalCategoryName: string;
+    // whether this group holds what was handed back at the till rather than what was bought. Such a
+    // group is kept apart from the purchases of the same category, so that a returned bag of empties
+    // is a transaction of its own instead of cancelling out the drinks bought on the same receipt.
+    public readonly refund: boolean;
     public categoryId: string;
     public tagIds: string[];
     public lineItems: ImportReceiptLineItem[];
     public selected: boolean;
 
-    public constructor(categoryId: string, originalCategoryName: string, lineItems: ImportReceiptLineItem[]) {
+    public constructor(categoryId: string, originalCategoryName: string, lineItems: ImportReceiptLineItem[], refund: boolean = false) {
         this.id = `receiptCategoryGroup_${nextCategoryGroupId++}`;
         this.originalCategoryName = originalCategoryName;
+        this.refund = refund;
         this.categoryId = categoryId;
         this.tagIds = [];
         this.lineItems = lineItems;
@@ -69,8 +76,11 @@ export class ImportReceiptCategoryGroup {
         return this.lineItems.map(lineItem => lineItem.name).filter(name => !!name).join(', ');
     }
 
+    // a group that came to nothing has nothing to import, but one that came to less than nothing does:
+    // that is the money handed back at the till, booked as a negative expense against the category the
+    // deposit was charged to, so that the two cancel each other out over time
     public get isImportable(): boolean {
-        return this.lineItems.length > 0 && this.totalAmount > 0;
+        return this.lineItems.length > 0 && this.totalAmount !== 0;
     }
 }
 
@@ -81,8 +91,10 @@ export class ImportReceipt {
     public readonly index: number;
     public readonly fileName: string;
     public readonly type: TransactionType;
-    public readonly time: number;
     public readonly utcOffset: number;
+    // when the shopping was paid for. Every transaction of one receipt is booked at this one time, so
+    // correcting a date the model misread on the image corrects all of them at once.
+    public time: number;
     public readonly originalSourceAccountName: string;
     public readonly originalSourceAccountCurrency: string;
     public sourceAccountId: string;
@@ -191,14 +203,19 @@ export class ImportReceipt {
         }
 
         const categoryGroups: ImportReceiptCategoryGroup[] = [];
-        const categoryGroupsByCategoryName: Record<string, ImportReceiptCategoryGroup> = {};
+        const categoryGroupsByKey: Record<string, ImportReceiptCategoryGroup> = {};
 
+        // the lines are grouped exactly as the server grouped them into transactions - by category, and
+        // by whether they were charged or handed back - so that what the user sees adds up to what would
+        // be imported if they changed nothing
         for (const lineItem of lineItems) {
-            let categoryGroup = categoryGroupsByCategoryName[lineItem.categoryName];
+            const refund = !!lineItem.refund;
+            const categoryGroupKey = `${refund ? 'refund' : 'purchase'}:${lineItem.categoryName}`;
+            let categoryGroup = categoryGroupsByKey[categoryGroupKey];
 
             if (!categoryGroup) {
-                categoryGroup = new ImportReceiptCategoryGroup(categoryIdsByCategoryName[lineItem.categoryName] ?? '0', lineItem.categoryName, []);
-                categoryGroupsByCategoryName[lineItem.categoryName] = categoryGroup;
+                categoryGroup = new ImportReceiptCategoryGroup(categoryIdsByCategoryName[lineItem.categoryName] ?? '0', lineItem.categoryName, [], refund);
+                categoryGroupsByKey[categoryGroupKey] = categoryGroup;
                 categoryGroups.push(categoryGroup);
             }
 

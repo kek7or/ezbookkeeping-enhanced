@@ -1,14 +1,22 @@
 <template>
-    <div class="import-receipt-line-items">
+    <div class="import-receipt-line-items" :class="{ 'import-receipt-line-items-compact': compactView }">
         <div class="d-flex align-center text-body-2 text-medium-emphasis mb-4">
             <v-icon class="me-1" size="18" :icon="mdiDrag"/>
             <span>{{ tt('Drag an item to another category to move what it cost') }}</span>
         </div>
 
         <div class="import-receipt mb-6" :key="receipt.index" v-for="receipt in receipts">
-            <div class="d-flex align-center flex-wrap gap-2 mb-3">
+            <div class="import-receipt-header d-flex align-center flex-wrap gap-2 mb-3 py-2">
                 <v-chip size="small" label variant="tonal" :prepend-icon="mdiReceiptTextOutline">{{ receipt.fileName }}</v-chip>
-                <span class="text-body-2">{{ getReceiptDisplayDateTime(receipt) }}</span>
+                <div class="import-receipt-time">
+                    <date-time-select density="compact" variant="plain"
+                                      :disabled="!!disabled"
+                                      :timezone-utc-offset="receipt.utcOffset"
+                                      :model-value="receipt.time"
+                                      @update:model-value="receipt.time = $event">
+                    </date-time-select>
+                    <v-tooltip activator="parent" open-delay="500">{{ tt('Every transaction of this receipt is booked at this time') }}</v-tooltip>
+                </div>
                 <div style="width: 220px">
                     <two-column-select density="compact" variant="plain"
                                        primary-key-field="id" primary-value-field="category"
@@ -27,16 +35,41 @@
                                        v-model="receipt.sourceAccountId">
                     </two-column-select>
                 </div>
+                <div class="import-receipt-add-category d-flex align-center px-2">
+                    <v-icon class="me-1 text-medium-emphasis" size="18" :icon="mdiPlus"/>
+                    <two-column-select density="compact" variant="plain"
+                                       primary-key-field="id" primary-value-field="id" primary-title-field="name"
+                                       primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
+                                       primary-hidden-field="hidden" primary-sub-items-field="subCategories"
+                                       secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
+                                       secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
+                                       secondary-hidden-field="hidden"
+                                       :disabled="!!disabled || !hasVisibleExpenseCategories"
+                                       :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
+                                       :custom-selection-primary-text="tt('Add Category')"
+                                       :placeholder="tt('Add Category')"
+                                       :items="allCategories[CategoryType.Expense]"
+                                       :expand-primary-only="true"
+                                       :model-value="''"
+                                       @update:model-value="addCategoryGroup(receipt, $event as string)">
+                    </two-column-select>
+                    <v-tooltip activator="parent" open-delay="500">{{ tt('Add a category to move items into') }}</v-tooltip>
+                </div>
                 <v-spacer/>
                 <span class="text-body-2 text-medium-emphasis">
                     {{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(receipt.lineItemCount) }) }}
                 </span>
                 <span class="text-h6">{{ getDisplayAmount(receipt.totalAmount, getReceiptCurrency(receipt)) }}</span>
+                <v-btn density="comfortable" color="default" variant="text" class="ms-1"
+                       :icon="true" @click="compactView = !compactView">
+                    <v-icon size="20" :icon="compactView ? mdiUnfoldMoreHorizontal : mdiUnfoldLessHorizontal"/>
+                    <v-tooltip activator="parent">{{ compactView ? tt('Show Taller Categories') : tt('Show Shorter Categories') }}</v-tooltip>
+                </v-btn>
             </div>
 
-            <div class="d-flex align-start flex-wrap gap-4">
+            <div class="import-receipt-categories">
                 <div class="import-receipt-category" :key="categoryGroup.id" v-for="categoryGroup in receipt.categoryGroups">
-                    <div class="import-receipt-category-header pa-3">
+                    <div class="import-receipt-category-header px-2 py-1">
                         <div class="d-flex align-center">
                             <v-checkbox-btn density="compact" class="flex-grow-0 me-1"
                                             :color="isCategoryGroupValid(receipt, categoryGroup) ? 'primary' : 'error'"
@@ -75,8 +108,16 @@
                                 <v-tooltip activator="parent">{{ tt('Remove') }}</v-tooltip>
                             </v-btn>
                         </div>
-                        <div class="d-flex align-center mt-1">
-                            <span class="text-h6">{{ getDisplayAmount(categoryGroup.totalAmount, getReceiptCurrency(receipt)) }}</span>
+                        <div class="d-flex align-center">
+                            <span class="text-subtitle-1 font-weight-medium">{{ getDisplayAmount(categoryGroup.totalAmount, getReceiptCurrency(receipt)) }}</span>
+                            <!-- a refund carries the category its deposit was charged to, so it would
+                                 otherwise be told apart from that category's purchases by its sign alone -->
+                            <v-chip size="x-small" label variant="tonal" class="ms-2"
+                                    :prepend-icon="mdiCashRefund"
+                                    v-if="categoryGroup.refund">{{ tt('Refund') }}</v-chip>
+                            <span class="text-caption text-medium-emphasis ms-2 text-no-wrap" v-else-if="categoryGroup.lineItems.length">
+                                {{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(categoryGroup.lineItems.length) }) }}
+                            </span>
                             <v-spacer/>
                             <div class="import-receipt-category-tags">
                                 <v-autocomplete item-title="name" item-value="id"
@@ -115,6 +156,7 @@
                     </div>
 
                     <draggable-list class="import-receipt-category-items pa-2"
+                                    :scroll-sensitivity="80"
                                     item-key="id"
                                     handle=".import-receipt-line-item-handle"
                                     ghost-class="import-receipt-line-item-ghost"
@@ -123,7 +165,7 @@
                                     :disabled="!!disabled"
                                     v-model="categoryGroup.lineItems">
                         <template #item="{ element }">
-                            <div class="import-receipt-line-item d-flex align-center px-2 py-1 mb-2">
+                            <div class="import-receipt-line-item d-flex align-center px-2 mb-1">
                                 <div class="import-receipt-line-item-handle d-flex align-center flex-grow-1 overflow-hidden">
                                     <v-icon class="me-1 flex-grow-0" size="18" :icon="mdiDrag"/>
                                     <span class="text-truncate">{{ element.name }}</span>
@@ -146,34 +188,13 @@
                         </template>
                     </draggable-list>
                 </div>
-
-                <div class="import-receipt-category import-receipt-category-new">
-                    <div class="pa-3">
-                        <two-column-select density="compact" variant="plain"
-                                           primary-key-field="id" primary-value-field="id" primary-title-field="name"
-                                           primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
-                                           primary-hidden-field="hidden" primary-sub-items-field="subCategories"
-                                           secondary-key-field="id" secondary-value-field="id" secondary-title-field="name"
-                                           secondary-icon-field="icon" secondary-icon-type="category" secondary-color-field="color"
-                                           secondary-hidden-field="hidden"
-                                           :disabled="!!disabled || !hasVisibleExpenseCategories"
-                                           :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                           :custom-selection-primary-text="tt('Add Category')"
-                                           :placeholder="tt('Add Category')"
-                                           :items="allCategories[CategoryType.Expense]"
-                                           :model-value="''"
-                                           @update:model-value="addCategoryGroup(receipt, $event as string)">
-                        </two-column-select>
-                        <div class="text-body-2 text-medium-emphasis mt-2">{{ tt('Add a category to move items into') }}</div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useTransactionTagSelectionBase } from '@/components/base/TransactionTagSelectionBase.ts';
@@ -193,15 +214,18 @@ import { ImportTransaction } from '@/models/imported_transaction.ts';
 import { ImportReceipt, ImportReceiptCategoryGroup } from '@/models/imported_receipt.ts';
 
 import { parseBigDecimal } from '@/lib/numeral.ts';
-import { parseDateTimeFromUnixTimeWithTimezoneOffset } from '@/lib/datetime.ts';
 import { getTransactionPrimaryCategoryName, getTransactionSecondaryCategoryName } from '@/lib/category.ts';
 
 import {
     mdiDrag,
+    mdiPlus,
     mdiPound,
+    mdiCashRefund,
     mdiClose,
     mdiAlertOutline,
-    mdiReceiptTextOutline
+    mdiReceiptTextOutline,
+    mdiUnfoldLessHorizontal,
+    mdiUnfoldMoreHorizontal
 } from '@mdi/js';
 
 const props = defineProps<{
@@ -215,7 +239,6 @@ const emit = defineEmits<{
 
 const {
     tt,
-    formatDateTimeToLongDateTime,
     formatAmountToLocalizedNumeralsWithCurrency,
     formatNumberToLocalizedNumerals,
     getCategorizedAccountsWithDisplayBalance
@@ -228,6 +251,10 @@ const userStore = useUserStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const transactionTagsStore = useTransactionTagsStore();
+
+// a long receipt fills the screen with columns, so its categories can be shrunk to a fixed height that
+// scrolls on its own - the whole board then fits on one screen and every column stays a drop target
+const compactView = ref<boolean>(false);
 
 const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
 const customAccountCategoryOrder = computed<string>(() => settingsStore.appSettings.accountCategoryOrders);
@@ -269,10 +296,6 @@ function getReceiptCurrency(receipt: ImportReceipt): string {
 
 function getDisplayAmount(amount: number, currency: string): string {
     return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(amount), currency);
-}
-
-function getReceiptDisplayDateTime(receipt: ImportReceipt): string {
-    return formatDateTimeToLongDateTime(parseDateTimeFromUnixTimeWithTimezoneOffset(receipt.time, receipt.utcOffset));
 }
 
 function getReceiptAccountDisplayName(receipt: ImportReceipt): string {
@@ -339,36 +362,79 @@ defineExpose({
         display: none;
     }
 
+    /* what the receipt is and what it comes to stays in sight while its columns are scrolled through */
+    .import-receipt-header {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background-color: rgb(var(--v-theme-surface));
+    }
+
+    .import-receipt-time {
+        width: 240px;
+    }
+
+    .import-receipt-add-category {
+        width: 190px;
+        border: 1px dashed rgba(var(--v-border-color), var(--v-border-opacity));
+        border-radius: 6px;
+    }
+
+    /* the columns are laid out on a grid rather than wrapped, so that a category holding many lines
+       cannot leave a hole under the short ones standing next to it */
+    .import-receipt-categories {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 360px));
+        gap: 12px;
+    }
+
     .import-receipt-category {
-        width: 320px;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        max-height: 400px;
         border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
         border-radius: 6px;
     }
 
     .import-receipt-category-header {
+        flex: 0 0 auto;
         border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
     }
 
     /* the column is a drop target for the whole of its height, so a line can be dropped onto a
-       category without having to aim at the lines already in it */
+       category without having to aim at the lines already in it. A category longer than the column
+       scrolls inside it instead of stretching the page */
     .import-receipt-category-items {
-        min-height: 96px;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 84px;
+        overflow-y: auto;
     }
 
     .import-receipt-category-empty {
-        height: 72px;
+        flex: 1 1 auto;
+        min-height: 64px;
         border: 1px dashed rgba(var(--v-border-color), var(--v-border-opacity));
         border-radius: 4px;
     }
 
-    .import-receipt-category-new {
-        border-style: dashed;
-    }
-
     .import-receipt-line-item {
+        flex: 0 0 auto;
         border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
         border-radius: 4px;
         background-color: rgba(var(--v-theme-surface));
+    }
+
+    /* a line is only a name and an amount, so it is given the height of the text rather than the
+       height an input field would take on its own */
+    .import-receipt-line-item .v-field__input,
+    .import-receipt-line-item .v-field__prepend-inner {
+        min-height: 28px;
+        padding-top: 0;
+        padding-bottom: 0;
+        font-size: 0.875rem;
     }
 
     .import-receipt-line-item:hover {
@@ -377,7 +443,8 @@ defineExpose({
 
     .import-receipt-line-item-handle {
         cursor: grab;
-        min-height: 32px;
+        min-height: 30px;
+        font-size: 0.875rem;
     }
 
     .import-receipt-line-item-ghost {
@@ -395,5 +462,11 @@ defineExpose({
     .import-receipt-line-item-amount input {
         text-align: end;
     }
+}
+
+/* the shorter columns show fewer lines at a time, so that a receipt of any length can be looked over
+   as a whole before any of it is corrected */
+.import-receipt-line-items-compact .import-receipt-category {
+    max-height: 216px;
 }
 </style>

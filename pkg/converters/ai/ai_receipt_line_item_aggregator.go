@@ -1,8 +1,11 @@
 package ai
 
 import (
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/mayswind/ezbookkeeping/pkg/converters/converter"
@@ -21,11 +24,32 @@ const receiptTotalMismatchThreshold = int64(50)
 // transaction model, longer descriptions are truncated instead of failing the import
 const maxTransactionDescriptionLength = 255
 
+// maxReceiptRefundQuantity is the largest number of returned articles a refund line is believed to
+// state. A quantity beyond this was misread, and multiplying by it would invent an amount far larger
+// than anything the receipt could have printed.
+const maxReceiptRefundQuantity = int64(1000)
+
+// receiptQuantityTimesUnitPricePattern matches the "how many at what each" a receipt prints to explain
+// a line, on the line itself or in the indented row under it: "-10 x 0,25", "2 x 1,49".
+//
+// The unit price must carry decimals, which is what keeps the pattern off a pack size printed in an
+// article name ("Taschentücher 4 x 10"): a price on a German receipt always states its cents.
+var receiptQuantityTimesUnitPricePattern = regexp.MustCompile(`(-?\d{1,4})\s*[xX]\s*(\d+[.,]\d{1,2})`)
+
 // receiptLineItem is a recognized line whose price has been parsed into exact minor units
 type receiptLineItem struct {
 	name         string
 	categoryName string
 	amount       int64
+	refund       bool
+}
+
+// receiptCategoryGroupKey is what decides which lines are summed together: their category, and whether
+// they are purchases or money handed back. A refund is kept apart from the purchases of the same
+// category so that returning a bag of empties cannot cancel out the drinks bought on the same receipt.
+type receiptCategoryGroupKey struct {
+	categoryName string
+	refund       bool
 }
 
 // receiptCategoryGroup holds the line items of one category while they are being aggregated
@@ -33,6 +57,60 @@ type receiptCategoryGroup struct {
 	categoryName string
 	itemNames    []string
 	totalAmount  int64
+}
+
+// receiptRefundLineNames are the names a German receipt gives a line that hands money back rather than
+// charging for a purchase - returned empties, most often. Such a line is never a discount on the item
+// printed above it: the bottles have nothing to do with whatever was bought last.
+//
+// "Pfand" alone is not in this list and must not be, because a charged deposit is written that way.
+var receiptRefundLineNames = []string{
+	"rückgabe",
+	"ruckgabe",
+	"rücknahme",
+	"rucknahme",
+	"leergut",
+	"retoure",
+	"pfandbon",
+}
+
+// receiptNonItemLineNames are the lines a receipt prints outside its item block. The model is told not
+// to transcribe them, but it routinely copies the total and the payment line anyway, and reporting
+// those as lines that failed to become transactions would ask the user to book the whole receipt twice.
+var receiptNonItemLineNames = []string{
+	"zu zahlen",
+	"summe",
+	"zwischensumme",
+	"gesamt",
+	"gesamter preisvorteil",
+	"total",
+	"betrag",
+	"zahlart",
+	"kreditkarte",
+	"ec-karte",
+	"ec cash",
+	"girocard",
+	"maestro",
+	"mastercard",
+	"visa",
+	"kartenzahlung",
+	"bar",
+	"barzahlung",
+	"gegeben",
+	"rückgeld",
+	"wechselgeld",
+	"mwst",
+	"netto",
+	"brutto",
+	"payback",
+	"deutschlandcard",
+	"lidl plus",
+	"punkte",
+	"tse",
+	"seriennr",
+	"prüfwert",
+	"signaturzähler",
+	"ust-id",
 }
 
 // how the payment method printed on the receipt maps onto an account category, so that a receipt
@@ -53,26 +131,24 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 
 	p.checkAllRawLinesWereItemized(c, user, result, warningCollector)
 
-	parsedLineItems, unallocatedAdjustments := p.parseReceiptLineItems(c, user, result.LineItems)
+	parsedLineItems := p.parseReceiptLineItems(c, user, result.LineItems)
 	reportReceiptLineItems(parsedLineItems, receiptCollector)
 	groups := make([]*receiptCategoryGroup, 0, len(parsedLineItems))
-	groupsByCategoryName := make(map[string]*receiptCategoryGroup, len(parsedLineItems))
-
-	// credits that belong to the receipt rather than to any one purchase are not imported, but the
-	// receipt still totals to less because of them, so they count here
-	lineItemsTotalAmount := unallocatedAdjustments
+	groupsByKey := make(map[receiptCategoryGroupKey]*receiptCategoryGroup, len(parsedLineItems))
+	lineItemsTotalAmount := int64(0)
 
 	for _, lineItem := range parsedLineItems {
 		price := lineItem.amount
 		categoryName := lineItem.categoryName
-		group, exists := groupsByCategoryName[categoryName]
+		key := receiptCategoryGroupKey{categoryName: categoryName, refund: lineItem.refund}
+		group, exists := groupsByKey[key]
 
 		if !exists {
 			group = &receiptCategoryGroup{
 				categoryName: categoryName,
 				itemNames:    make([]string, 0, 4),
 			}
-			groupsByCategoryName[categoryName] = group
+			groupsByKey[key] = group
 			groups = append(groups, group)
 		}
 
@@ -87,9 +163,10 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 	transactions := make([]*models.RecognizedTransactionResult, 0, len(groups))
 
 	for _, group := range groups {
-		// no item is ever negative, because a discount is only charged to a line large enough to absorb
-		// it, so a group is either a real expense or one that came to nothing and is not worth importing
-		if group.totalAmount <= 0 {
+		// a group that came to nothing is not worth importing, but one that came to less than nothing is:
+		// that is the empties handed back at the till, booked as a negative expense against the category
+		// their deposit was charged to, so that the two cancel each other out over time
+		if group.totalAmount == 0 {
 			continue
 		}
 
@@ -111,17 +188,16 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 // parseReceiptLineItems turns the recognized lines into parsed items with exact minor unit amounts,
 // dropping what cannot be used and folding every adjustment into the item it was charged against.
 //
-// It also returns the adjustments that no single item could absorb - a returned crate of empties, a
-// coupon written off the whole basket. Those belong to the receipt rather than to any one purchase,
-// so they never become a transaction, but they are still part of what the receipt totals to and the
-// caller counts them when it checks the sum against the printed total.
-func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *models.User, lineItems []*models.RecognizedReceiptLineItem) ([]*receiptLineItem, int64) {
+// A credit that belongs to the receipt rather than to any one purchase - a returned crate of empties,
+// a coupon written off the whole basket - is kept as a line of its own instead. It is money the
+// customer got back, so it is shown, imported and counted towards the printed total like every other
+// line, rather than quietly subtracted from an unrelated purchase or dropped from the import.
+func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *models.User, lineItems []*models.RecognizedReceiptLineItem) []*receiptLineItem {
 	parsedLineItems := make([]*receiptLineItem, 0, len(lineItems))
-	unallocatedAdjustments := int64(0)
 
 	// a deposit or discount belongs to the line printed directly above it, so folding it into the
 	// last item only lands on the right one while nothing in between was thrown away. Once a line
-	// has been dropped the item above is no longer known, and the adjustment is left unallocated
+	// has been dropped the item above is no longer known, and the adjustment is kept on its own
 	// instead of being quietly charged to an unrelated purchase.
 	precedingLineDropped := false
 
@@ -138,6 +214,20 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 			continue
 		}
 
+		// what the customer handed back at the till is never charged against the item above it, however
+		// well it would fit: the bottles were bought on an earlier receipt and have nothing to do with
+		// whatever was scanned last here
+		if isReceiptRefundLineItem(lineItem) {
+			parsedLineItems = append(parsedLineItems, &receiptLineItem{
+				name:         strings.TrimSpace(lineItem.Name),
+				categoryName: strings.TrimSpace(lineItem.Category),
+				amount:       refundLineAmount(c, user, lineItem, price),
+				refund:       true,
+			})
+			precedingLineDropped = false
+			continue
+		}
+
 		// a deposit is not a purchase of its own and a discount is not a purchase at all: both are
 		// part of what the item above them cost, so they are added to that item (a discount with its
 		// negative price subtracting itself) and never named separately. The category is inherited
@@ -147,16 +237,22 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 				continue
 			}
 
-			// a credit that found nothing to reduce is not a purchase, so it stays out of the import
-			// and only counts towards the receipt total
+			// a credit no purchase could absorb is money off the basket rather than off one item, so it
+			// is kept as a line of its own - it is what the customer got back, and hiding it would leave
+			// the receipt unable to add up
+			//
+			// a charge that found nothing to attach to is likewise kept: a deposit printed above its
+			// drink, or below an item that was dropped, is still money the customer paid
 			if price < 0 {
-				unallocatedAdjustments += price
+				parsedLineItems = append(parsedLineItems, &receiptLineItem{
+					name:         strings.TrimSpace(lineItem.Name),
+					categoryName: strings.TrimSpace(lineItem.Category),
+					amount:       price,
+					refund:       true,
+				})
+				precedingLineDropped = false
 				continue
 			}
-
-			// a charge that found nothing to attach to is still money the customer paid - a deposit
-			// printed above its drink, or below an item that was dropped - so it is kept as a line
-			// item of its own rather than dropped
 		}
 
 		parsedLineItems = append(parsedLineItems, &receiptLineItem{
@@ -167,7 +263,67 @@ func (p *aiTransactionDataParser) parseReceiptLineItems(c core.Context, user *mo
 		precedingLineDropped = false
 	}
 
-	return parsedLineItems, unallocatedAdjustments
+	return parsedLineItems
+}
+
+// refundLineAmount returns what a refund line takes off the receipt, which is always a credit.
+//
+// When the line says how many articles were handed back and what each was worth ("Pfandrückgabe
+// -10 x 0,25"), that is what the line comes to, and multiplying the two is arithmetic the server owns.
+// The model reads those two numbers off one printed row reliably; which of the three numbers on that
+// row is the line total is what it gets wrong, taking the 0,25 unit price where -2,50 is printed.
+//
+// Failing that, only the sign can be repaired: a line that hands money back cannot be a charge, and
+// letting a positive one through would add money to the receipt the customer never paid. How far off
+// its size is then left to the total check.
+func refundLineAmount(c core.Context, user *models.User, lineItem *models.RecognizedReceiptLineItem, price int64) int64 {
+	if amount, ok := refundAmountFromQuantity(lineItem.Name); ok {
+		if amount != price {
+			log.Warnf(c, "[ai_receipt_line_item_aggregator.refundLineAmount] receipt refund \"%s\" of user \"uid:%d\" was read as \"%s\", using the %s its own quantity comes to instead", lineItem.Name, user.Uid, lineItem.Price, utils.FormatAmount(amount))
+		}
+
+		return amount
+	}
+
+	if price <= 0 {
+		return price
+	}
+
+	log.Warnf(c, "[ai_receipt_line_item_aggregator.refundLineAmount] receipt refund \"%s\" of user \"uid:%d\" was read as a positive price \"%s\", booking it as a credit instead", lineItem.Name, user.Uid, lineItem.Price)
+
+	return -price
+}
+
+// refundAmountFromQuantity returns what a refund line comes to when its name states how many articles
+// were handed back at what each was worth, and whether it stated that at all
+func refundAmountFromQuantity(name string) (int64, bool) {
+	match := receiptQuantityTimesUnitPricePattern.FindStringSubmatch(name)
+
+	if match == nil {
+		return 0, false
+	}
+
+	quantity, err := strconv.ParseInt(match[1], 10, 64)
+
+	if err != nil {
+		return 0, false
+	}
+
+	if quantity < 0 {
+		quantity = -quantity
+	}
+
+	if quantity < 1 || quantity > maxReceiptRefundQuantity {
+		return 0, false
+	}
+
+	unitPrice, err := parseReceiptAmount(match[2])
+
+	if err != nil || unitPrice <= 0 {
+		return 0, false
+	}
+
+	return -quantity * unitPrice, true
 }
 
 // reportReceiptLineItems hands the parsed lines back to the caller, in the order they are printed on
@@ -189,6 +345,7 @@ func reportReceiptLineItems(parsedLineItems []*receiptLineItem, receiptCollector
 			Name:         lineItem.name,
 			Amount:       lineItem.amount,
 			CategoryName: lineItem.categoryName,
+			Refund:       lineItem.refund,
 		})
 	}
 
@@ -237,6 +394,55 @@ func isReceiptAdjustmentLineItem(lineItem *models.RecognizedReceiptLineItem, pri
 	}
 
 	return lineItem.Deposit || strings.Contains(strings.ToLower(lineItem.Name), "pfand")
+}
+
+// isReceiptRefundLineItem reports whether a line hands money back to the customer instead of charging
+// them - "Pfandrückgabe", "Leergut", a returned article. Such a line is recognized by its name alone,
+// because what it is has to be decided before its price is trusted: a "Pfandrückgabe" the model read as
+// a positive 0,25 is still a refund, and treating it as a deposit would add it onto the item above it.
+func isReceiptRefundLineItem(lineItem *models.RecognizedReceiptLineItem) bool {
+	name := strings.ToLower(lineItem.Name)
+
+	for _, refundName := range receiptRefundLineNames {
+		if strings.Contains(name, refundName) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isReceiptNonItemLine reports whether a transcribed line is one of the receipt's own summary lines
+// rather than something that was bought - the total, the payment line, the VAT table.
+//
+// The name has to start the line for it to count: a receipt line is labelled at its left, while an
+// article whose name merely contains one of these words ("Barilla", "Visabella") is a purchase like
+// any other. The character after the name must not be a letter either, so that "Bar" does not claim
+// "Barilla" while "Bar 20,00" and "Summe:" are both still recognized.
+func isReceiptNonItemLine(rawLine string) bool {
+	line := normalizeReceiptText(rawLine)
+
+	if isReceiptVatTableLine(line) {
+		return true
+	}
+
+	for _, nonItemName := range receiptNonItemLineNames {
+		if !strings.HasPrefix(line, nonItemName) {
+			continue
+		}
+
+		remainder := line[len(nonItemName):]
+
+		if remainder == "" {
+			return true
+		}
+
+		if firstRune := []rune(remainder)[0]; !unicode.IsLetter(firstRune) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // resolveReceiptAccountName returns the account every transaction of this receipt is booked against.
@@ -309,20 +515,56 @@ func (p *aiTransactionDataParser) checkAllRawLinesWereItemized(c core.Context, u
 		return
 	}
 
-	if len(result.RawLines) <= len(result.LineItems) {
+	// the transcript is asked for the item block alone, but models routinely copy the total and the
+	// payment line along with it. Those were never meant to become transactions, and reporting them as
+	// lines that failed to would tell the user to book the whole receipt a second time by hand.
+	transcribedItemLines := filterReceiptItemLines(result.RawLines)
+
+	if len(transcribedItemLines) <= len(result.LineItems) {
 		return
 	}
 
-	missingLineCount := len(result.RawLines) - len(result.LineItems)
-	missingLines := findUnitemizedRawLines(result.RawLines, result.LineItems)
+	missingLineCount := len(transcribedItemLines) - len(result.LineItems)
+	missingLines := findUnitemizedRawLines(transcribedItemLines, result.LineItems)
 
-	log.Warnf(c, "[ai_receipt_line_item_aggregator.checkAllRawLinesWereItemized] the model transcribed %d receipt lines but only itemized %d of them for user \"uid:%d\", so %d printed line(s) were lost: %s", len(result.RawLines), len(result.LineItems), user.Uid, missingLineCount, strings.Join(result.RawLines, " | "))
+	log.Warnf(c, "[ai_receipt_line_item_aggregator.checkAllRawLinesWereItemized] the model transcribed %d receipt lines, %d of them item lines, but only itemized %d for user \"uid:%d\", so %d printed line(s) were lost: %s", len(result.RawLines), len(transcribedItemLines), len(result.LineItems), user.Uid, missingLineCount, strings.Join(result.RawLines, " | "))
 
 	warningCollector.Add(&models.ImportTransactionWarningResponse{
 		Type:          models.IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED,
 		LineItemCount: missingLineCount,
 		MissingLines:  missingLines,
 	})
+}
+
+// isReceiptVatTableLine reports whether a normalized line is a row of the VAT summary table, which is
+// labelled by the VAT rate marker of the lines it sums up ("A  7 %  3,01  42,94  45,95").
+//
+// The rate marker alone would be far too little to go on, so the percentage is required as well: an
+// article can be named "A..." and another can be sold at "45% Fett i.Tr.", but a line that starts with
+// a bare A or B and states a percentage is the tax table and nothing else.
+func isReceiptVatTableLine(line string) bool {
+	if !strings.HasPrefix(line, "a ") && !strings.HasPrefix(line, "b ") {
+		return false
+	}
+
+	return strings.Contains(line, "%")
+}
+
+// filterReceiptItemLines keeps the transcribed lines that could be a purchase, dropping the receipt's
+// own summary lines. Order is preserved, because the caller pairs what is left against the recognized
+// items in the order both were printed.
+func filterReceiptItemLines(rawLines []string) []string {
+	itemLines := make([]string, 0, len(rawLines))
+
+	for _, rawLine := range rawLines {
+		if isReceiptNonItemLine(rawLine) {
+			continue
+		}
+
+		itemLines = append(itemLines, rawLine)
+	}
+
+	return itemLines
 }
 
 // findUnitemizedRawLines pairs the transcribed lines against the recognized items and returns the lines

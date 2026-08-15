@@ -90,6 +90,9 @@ type ImportReceiptLineItemResponse struct {
 	Name         string `json:"name"`
 	Amount       int64  `json:"amount"`
 	CategoryName string `json:"categoryName"`
+	// whether this line hands money back rather than charging for a purchase, which keeps it in a
+	// transaction of its own instead of cancelling out the purchases of the same category
+	Refund bool `json:"refund,omitempty"`
 }
 
 // ImportReceiptResponse represents the lines one receipt image was read as, in the order they are

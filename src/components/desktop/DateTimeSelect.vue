@@ -1,6 +1,8 @@
 <template>
     <v-select
         persistent-placeholder
+        :density="density"
+        :variant="variant"
         :readonly="readonly"
         :disabled="disabled"
         :clearable="!emptyValue ? clearable : false"
@@ -103,11 +105,13 @@ import {
     getAMOrPM,
     getCombinedDateAndTimeValues
 } from '@/lib/datetime.ts';
-import { setChildInputFocus } from '@/lib/ui/desktop.ts';
+import { type ComponentDensity, type InputVariant, setChildInputFocus } from '@/lib/ui/desktop.ts';
 
 const props = defineProps<{
     modelValue: number;
     timezoneUtcOffset: number;
+    density?: ComponentDensity;
+    variant?: InputVariant;
     emptyValue?: boolean;
     disabled?: boolean;
     readonly?: boolean;

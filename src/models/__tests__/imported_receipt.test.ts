@@ -119,6 +119,69 @@ describe('ImportReceipt', () => {
         expect(transactions.map(transaction => transaction.index)).toEqual([0, 1, 2]);
     });
 
+    test('the receipt time is when every transaction of it happened', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+        const correctedTime = 1785269520 - 3 * 60 * 60;
+
+        receipt.time = correctedTime;
+
+        const transactions = receipt.toImportTransactions(0);
+
+        expect(transactions.length).toBe(3);
+
+        for (const transaction of transactions) {
+            expect(transaction.time).toBe(correctedTime);
+            // the receipt was paid where it was paid, so correcting the time does not move the zone
+            expect(transaction.utcOffset).toBe(120);
+        }
+    });
+
+    test('keeps what was handed back out of the purchases of the same category', () => {
+        // the empties are worth more than the drinks bought here, so summing the two together would
+        // leave a group of -6.83 and take the drinks out of the import with it
+        const response = createReceiptResponse();
+        response.receipt!.lineItems.push({ name: 'Pfandrückgabe', amount: -1175, categoryName: 'Drink', refund: true });
+
+        const receipt = ImportReceipt.of(response, 0, 'receipt.jpg')!;
+
+        expect(receipt.categoryGroups.length).toBe(4);
+        expect(receipt.lineItemCount).toBe(8);
+        expect(receipt.totalAmount).toBe(1636);
+
+        const refundGroup = receipt.categoryGroups[3]!;
+
+        expect(refundGroup.refund).toBe(true);
+        expect(refundGroup.originalCategoryName).toBe('Drink');
+        expect(refundGroup.totalAmount).toBe(-1175);
+
+        // the drinks bought on this receipt are still their own transaction
+        expect(receipt.categoryGroups[1]!.totalAmount).toBe(458);
+
+        const transactions = receipt.toImportTransactions(0);
+
+        expect(transactions.length).toBe(4);
+        expect(transactions[3]!.sourceAmount).toBe(-1175);
+        expect(transactions[3]!.comment).toBe('Pfandrückgabe');
+
+        // money handed back is a transaction like any other, it is only the sign that differs
+        expect(transactions[3]!.valid).toBe(true);
+        expect(transactions[3]!.selected).toBe(true);
+    });
+
+    test('a category that comes to nothing is not imported, one that comes to less than nothing is', () => {
+        const response = createReceiptResponse();
+        response.receipt!.lineItems.push({ name: 'Pfandrückgabe', amount: -1175, categoryName: 'Drink', refund: true });
+
+        const receipt = ImportReceipt.of(response, 0, 'receipt.jpg')!;
+        const refundGroup = receipt.categoryGroups[3]!;
+
+        expect(refundGroup.isImportable).toBe(true);
+
+        refundGroup.lineItems[0]!.amount = 0;
+        expect(refundGroup.isImportable).toBe(false);
+        expect(receipt.toImportTransactions(0).length).toBe(3);
+    });
+
     test('leaves an import that is not a receipt to the ordinary import table', () => {
         const withoutLineItems = createReceiptResponse();
         expect(ImportReceipt.of({ items: withoutLineItems.items, totalCount: 3 }, 0, 'receipt.jpg')).toBeUndefined();

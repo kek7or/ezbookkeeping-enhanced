@@ -66,11 +66,20 @@ including any line that repeats one above it.
 This stage is PURE COPYING. Do not categorize, do not convert numbers, do not merge lines, do
 not skip lines, do not reorder, do not decide anything. Just read the receipt out.
 
-Two things to be careful about while copying:
+The total and everything under it stay out of `raw_lines`: "Zu zahlen", "Summe", the payment
+line, the MWST table and the TSE block were not bought and are not items. Stop copying at the
+last purchased line.
+
+Three things to be careful about while copying:
 
 - Take the price that is horizontally aligned with the item name. If the receipt is curled or
   the photo is tilted, the price column can drift, so check that you are not picking up the
   price from the row above or below.
+- A CONTINUATION LINE IS PART OF THE LINE ABOVE IT. Receipts explain a line underneath it, in
+  a smaller indented row that states a quantity and a unit price ("0,026 kg x 4,90 EUR/kg",
+  "-10 x 0,25", "0,95 x 2"). That row is not a line of its own and holds no line price of its
+  own - copy it into the SAME `raw_lines` entry as the line it explains, and take the price
+  from the line it explains, never from the continuation.
 - REPEATED LINES ARE NOT MISTAKES. If the same item appears on two lines, the customer bought
   it twice, and both lines go into `raw_lines`. Two identical lines above each other look like
   the receipt printed the same thing twice - it did not. Buying two of something is ordinary.
@@ -176,6 +185,29 @@ was printed under, and never subtract it from that item's price yourself - the s
 
 A discount is usually printed on the line directly below the item it applies to, often indented.
 Keep it in that position in `line_items` so the server can tell what it belongs to.
+
+### Pfandrückgabe (empties handed back)
+Returning empty bottles is the one negative line that has nothing to do with the item printed
+above it - the bottles were bought weeks ago. It is money the shop gives back on this receipt,
+so it gets its own entry and its price is the NEGATIVE TOTAL printed on that line:
+
+```
+Pfandrückgabe                -2,50 A
+   -10 x        0,25
+Pfandrückgabe                -9,25 B
+   -37 x        0,25
+```
+-> `{"name": "Pfandrückgabe", "price": "-2.50", "category": "Drink"}` and
+   `{"name": "Pfandrückgabe", "price": "-9.25", "category": "Drink"}`
+
+The indented "-10 x 0,25" underneath says ten bottles at 25 cents each. It is a continuation of
+the line above, so "0,25" is NEVER the price of that line - taking it would turn 2,50 EUR given
+back into 25 cents charged. Read the number in the price column of the "Pfandrückgabe" line
+itself, and keep its minus sign.
+
+Give a Pfandrückgabe the same category the drinks are in, because that is where its deposit was
+charged when the bottles were bought. Never set `"deposit": true` on it: a deposit is a charge,
+a Pfandrückgabe is the opposite of one.
 
 ### Pfand (deposit)
 On German receipts a charged Pfand is not included in the price of the drink, it is printed as

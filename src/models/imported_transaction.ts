@@ -168,6 +168,9 @@ export interface ImportReceiptLineItemResponse {
     readonly name: string;
     readonly amount: number;
     readonly categoryName: string;
+    // whether this line hands money back rather than charging for a purchase, which keeps it in a
+    // transaction of its own instead of cancelling out the purchases of the same category
+    readonly refund?: boolean;
 }
 
 export interface ImportReceiptResponse {
