@@ -23,7 +23,28 @@ type OllamaLargeLanguageModelAdapter struct {
 	OllamaServerURL     string
 	OllamaModelID       string
 	OllamaThinkingLevel settings.LLMThinkingLevel
+	OllamaNumCtx        uint32
+	OllamaNumPredict    uint32
 }
+
+// Sampling options sent with every Ollama request. Everything this application asks a model for is
+// transcription of something already printed on a receipt or written in a text - there is exactly
+// one right answer and nothing to be creative about, so the sampler is pinned to greedy decoding.
+//
+// Without these, Ollama falls back to whatever the Modelfile carries, and the stock defaults
+// (temperature 0.8, top_p 0.9, top_k 40) pick a fresh token where the receipt only has one. Over a
+// twenty line receipt that randomness compounds into skipped lines and prices read off the
+// neighbouring row, while the JSON stays well formed enough that nothing downstream notices.
+const (
+	ollamaRecognitionTemperature = float32(0)
+	ollamaRecognitionTopP        = float32(1)
+	ollamaRecognitionTopK        = int32(1)
+
+	// a receipt legitimately repeats itself - the same article bought twice, the same price on two
+	// lines, "deposit": false on every entry - so the default 1.1 repetition penalty actively pushes
+	// the model away from transcribing it correctly. 1.0 disables the penalty.
+	ollamaRecognitionRepeatPenalty = float32(1)
+)
 
 // OllamaMessageRole defines the role of Ollama chat message
 type OllamaMessageRole string
@@ -40,6 +61,22 @@ type OllamaChatRequest struct {
 	Messages []*OllamaChatRequestMessage `json:"messages"`
 	Think    any                         `json:"think,omitempty"`
 	Format   string                      `json:"format,omitempty"`
+	Options  *OllamaChatRequestOptions   `json:"options,omitempty"`
+}
+
+// OllamaChatRequestOptions defines the runtime options of Ollama chat request. These override the
+// parameters baked into the model's Modelfile, so that a correct recognition does not depend on how
+// the model was built locally.
+type OllamaChatRequestOptions struct {
+	Temperature   float32 `json:"temperature"`
+	TopP          float32 `json:"top_p"`
+	TopK          int32   `json:"top_k"`
+	RepeatPenalty float32 `json:"repeat_penalty"`
+
+	// context and output budget are left to the model unless configured, because they cost VRAM and
+	// the right value depends on the machine ezBookkeeping talks to rather than on the task
+	NumCtx     uint32 `json:"num_ctx,omitempty"`
+	NumPredict uint32 `json:"num_predict,omitempty"`
 }
 
 // OllamaChatRequestMessage defines the structure of Ollama chat request message
@@ -119,6 +156,14 @@ func (p *OllamaLargeLanguageModelAdapter) buildJsonRequestBody(c core.Context, u
 		Model:    p.OllamaModelID,
 		Stream:   request.Stream,
 		Messages: make([]*OllamaChatRequestMessage, 0, 2),
+		Options: &OllamaChatRequestOptions{
+			Temperature:   ollamaRecognitionTemperature,
+			TopP:          ollamaRecognitionTopP,
+			TopK:          ollamaRecognitionTopK,
+			RepeatPenalty: ollamaRecognitionRepeatPenalty,
+			NumCtx:        p.OllamaNumCtx,
+			NumPredict:    p.OllamaNumPredict,
+		},
 	}
 
 	if thinkingLevel, exists := ollamaChatThinkingTypesMapping[p.OllamaThinkingLevel]; exists {
@@ -179,5 +224,7 @@ func NewOllamaLargeLanguageModelProvider(llmConfig *settings.LLMConfig, enableRe
 		OllamaServerURL:     llmConfig.OllamaServerURL,
 		OllamaModelID:       llmConfig.OllamaModelID,
 		OllamaThinkingLevel: llmConfig.EnableThinking,
+		OllamaNumCtx:        llmConfig.OllamaNumCtx,
+		OllamaNumPredict:    llmConfig.OllamaNumPredict,
 	})
 }

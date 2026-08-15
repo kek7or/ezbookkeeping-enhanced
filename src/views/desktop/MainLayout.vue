@@ -91,6 +91,12 @@
                     </div>
                 </li>
                 <li class="nav-link">
+                    <router-link to="/crypto">
+                        <v-icon class="nav-item-icon" :icon="mdiCurrencyBtc"/>
+                        <span class="nav-item-title">{{ tt('Crypto Assets') }}</span>
+                    </router-link>
+                </li>
+                <li class="nav-link">
                     <router-link to="/exchange_rates">
                         <v-icon class="nav-item-icon" :icon="mdiSwapHorizontal"/>
                         <span class="nav-item-title">{{ tt('Exchange Rates Data') }}</span>
@@ -238,6 +244,7 @@ import {
     mdiClipboardTextClockOutline,
     mdiChartPieOutline,
     mdiCompassOutline,
+    mdiCurrencyBtc,
     mdiSwapHorizontal,
     mdiCogOutline,
     mdiCellphone,

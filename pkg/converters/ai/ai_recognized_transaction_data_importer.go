@@ -63,7 +63,7 @@ func (c *aiRecognizedImageTransactionDataImporter) ParseImportedData(ctx core.Co
 
 // getImportTransactionResponse returns the imported transaction data parsed by AI recognized results
 func getImportTransactionResponse(ctx core.Context, user *models.User, results []*models.RecognizedTransactionResult, defaultTimezone *time.Location, additionalOptions converter.TransactionDataImporterOptions, accountMap map[string]*models.Account, expenseCategoryMap map[string]map[string]*models.TransactionCategory, incomeCategoryMap map[string]map[string]*models.TransactionCategory, transferCategoryMap map[string]map[string]*models.TransactionCategory, tagMap map[string]*models.TransactionTag) (models.ImportedTransactionSlice, []*models.Account, []*models.TransactionCategory, []*models.TransactionCategory, []*models.TransactionCategory, []*models.TransactionTag, error) {
-	transactionDataTable, err := createNewAIRecognizedTransactionDataTable(results)
+	transactionDataTable, err := createNewAIRecognizedTransactionDataTable(results, defaultTimezone)
 
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err

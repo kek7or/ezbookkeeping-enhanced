@@ -118,6 +118,7 @@ interface DesktopTwoColumnListItemSelectionProps extends CommonTwoColumnListItem
     label?: string;
     showSelectionPrimaryText?: boolean;
     showSelectionSecondaryIcon?: boolean;
+    expandPrimaryOnly?: boolean;
     customSelectionPrimaryText?: string;
     customSelectionSecondaryText?: string;
     noItemText?: string;
@@ -150,13 +151,28 @@ const dropdownMenu = useTemplateRef<HTMLElement>('dropdownMenu');
 
 const menuState = ref<boolean>(false);
 
+// which primary item has its sub items shown, for a select that is only ever given a value by picking
+// one of those sub items and therefore cannot tell from its own value which primary item to open
+const expandedPrimaryValue = ref<unknown>(undefined);
+
 const filteredSubItems = computed<Record<string, unknown>[]>(() => getFilteredSubItems(selectedPrimaryItem.value));
 
 const currentPrimaryValue = computed<unknown>({
     get: () => {
+        if (props.expandPrimaryOnly && typeof expandedPrimaryValue.value !== 'undefined') {
+            return expandedPrimaryValue.value;
+        }
+
         return getCurrentPrimaryValueBySecondaryValue(props.modelValue);
     },
     set: (value) => {
+        // clicking a primary item only opens what is under it, so that nothing is selected until one
+        // of its sub items is clicked
+        if (props.expandPrimaryOnly) {
+            expandedPrimaryValue.value = value;
+            return;
+        }
+
         const primaryItem = getItemByKeyValue(filteredItems.value, value, props.primaryValueField as string);
 
         if (!primaryItem) {

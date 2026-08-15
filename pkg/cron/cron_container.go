@@ -84,6 +84,14 @@ func (c *CronJobSchedulerContainer) registerAllJobs(ctx core.Context, config *se
 	if config.EnableCreateScheduledTransaction {
 		Container.registerIntervalJob(ctx, CreateScheduledTransactionJob)
 	}
+
+	// Only worth scheduling when receipt recognition is actually configured;
+	// otherwise the queue can never receive work.
+	if config.TransactionFromAIImageRecognition &&
+		config.ReceiptImageRecognitionLLMConfig != nil &&
+		config.ReceiptImageRecognitionLLMConfig.LLMProvider != "" {
+		Container.registerIntervalJob(ctx, ProcessReceiptRecognitionJobsJob)
+	}
 }
 
 func (c *CronJobSchedulerContainer) registerIntervalJob(ctx core.Context, job *CronJob) {

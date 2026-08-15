@@ -18,6 +18,16 @@ type RecognizedTransactionResponse struct {
 	Comment              string          `json:"comment,omitempty"`
 }
 
+// RecognizedReceiptLineItem represents a single line copied from a receipt by the large language model.
+// The model is only asked to read and categorize these lines, the server groups and sums them itself.
+type RecognizedReceiptLineItem struct {
+	Name     string `json:"name,omitempty" jsonschema_description:"Item name exactly as printed on the receipt"`
+	Price    string `json:"price,omitempty" jsonschema_description:"Price printed on that same line"`
+	Deposit  bool   `json:"deposit,omitempty" jsonschema_description:"Whether this line is a deposit (Pfand) charged on the item above it"`
+	Reason   string `json:"reason,omitempty" jsonschema_description:"Short justification for the chosen category"`
+	Category string `json:"category,omitempty" jsonschema_description:"Category name for this single item"`
+}
+
 // RecognizedTransactionResult represents the result of recognized transaction
 type RecognizedTransactionResult struct {
 	Type                   string   `json:"type,omitempty" jsonschema:"enum=income,enum=expense,enum=transfer" jsonschema_description:"Transaction type (income, expense, transfer)"`

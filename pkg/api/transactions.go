@@ -31,12 +31,13 @@ const pageCountForMovingAccountTransactions = 1000
 type TransactionsApi struct {
 	ApiUsingConfig
 	ApiUsingDuplicateChecker
-	transactions          *services.TransactionService
-	transactionCategories *services.TransactionCategoryService
-	transactionTags       *services.TransactionTagService
-	transactionPictures   *services.TransactionPictureService
-	accounts              *services.AccountService
-	users                 *services.UserService
+	transactions              *services.TransactionService
+	transactionCategories     *services.TransactionCategoryService
+	transactionTags           *services.TransactionTagService
+	transactionPictures       *services.TransactionPictureService
+	receiptLineItemCategories *services.ReceiptLineItemCategoryService
+	accounts                  *services.AccountService
+	users                     *services.UserService
 }
 
 // Initialize a transaction api singleton instance
@@ -51,12 +52,13 @@ var (
 			},
 			container: duplicatechecker.Container,
 		},
-		transactions:          services.Transactions,
-		transactionCategories: services.TransactionCategories,
-		transactionTags:       services.TransactionTags,
-		transactionPictures:   services.TransactionPictures,
-		accounts:              services.Accounts,
-		users:                 services.Users,
+		transactions:              services.Transactions,
+		transactionCategories:     services.TransactionCategories,
+		transactionTags:           services.TransactionTags,
+		transactionPictures:       services.TransactionPictures,
+		receiptLineItemCategories: services.ReceiptLineItemCategories,
+		accounts:                  services.Accounts,
+		users:                     services.Users,
 	}
 )
 
@@ -2522,6 +2524,18 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 
 	tagMap := a.transactionTags.GetVisibleTagNameMapByList(tags)
 
+	warningCollector := converter.NewImportWarningCollector()
+	additionalOptions = additionalOptions.WithWarningCollector(warningCollector)
+
+	receiptCollector := converter.NewImportReceiptCollector()
+	additionalOptions = additionalOptions.WithReceiptCollector(receiptCollector)
+
+	// only a receipt image is read line by line, and only its lines are worth looking up against what
+	// the user has already filed
+	if fileType == "ai_image" {
+		additionalOptions = additionalOptions.WithReceiptLineItemCategories(a.getReceiptLineItemCategoryMemory(c, user.Uid, categories, expenseCategoryMap))
+	}
+
 	parsedTransactions, _, _, _, _, _, err := dataImporter.ParseImportedData(c, user, fileData, clientTimezone, additionalOptions, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
 
 	if err != nil {
@@ -2538,9 +2552,124 @@ func (a *TransactionsApi) TransactionParseImportFileHandler(c *core.WebContext) 
 	parsedTransactionResps := &models.ImportTransactionResponsePageWrapper{
 		Items:      parsedTransactionRespsList,
 		TotalCount: int64(len(parsedTransactionRespsList)),
+		Warnings:   warningCollector.GetWarnings(),
+		Receipt:    receiptCollector.GetReceipt(),
 	}
 
 	return parsedTransactionResps, nil
+}
+
+// getReceiptLineItemCategoryMemory returns which category each article the user has bought before
+// belongs to, ready for the importer to look receipt lines up in.
+//
+// The category is remembered by id, so that renaming a category does not lose everything filed under
+// it, and resolved to its current name here because that is what the import pipeline categorizes by.
+// An entry whose category has since been deleted or hidden resolves to nothing and is left out, which
+// is also how the memory forgets an answer whose category no longer exists.
+//
+// Failing to read the memory is not worth failing an import over: the receipt can still be imported,
+// it just has to be categorized by hand, so the problem is logged and the import goes on without it.
+func (a *TransactionsApi) getReceiptLineItemCategoryMemory(c *core.WebContext, uid int64, categories []*models.TransactionCategory, expenseCategoryMap map[string]map[string]*models.TransactionCategory) *converter.ReceiptLineItemCategoryMemory {
+	lineItemCategories, err := a.receiptLineItemCategories.GetAllByUid(c, uid)
+
+	if err != nil {
+		log.Warnf(c, "[transactions.getReceiptLineItemCategoryMemory] failed to get remembered receipt line item categories for user \"uid:%d\", so the receipt will be categorized by the model alone, because %s", uid, err.Error())
+		return nil
+	}
+
+	if len(lineItemCategories) < 1 {
+		return nil
+	}
+
+	categoryNamesByCategoryId := make(map[int64]string, len(categories))
+
+	for _, category := range categories {
+		if category.Type != models.CATEGORY_TYPE_EXPENSE || category.ParentCategoryId == models.LevelOneTransactionCategoryParentId {
+			continue
+		}
+
+		// the importer resolves a category by name against exactly this map, so an entry naming a
+		// category it does not hold could not be imported and is better left to the model
+		if _, exists := expenseCategoryMap[category.Name]; !exists {
+			continue
+		}
+
+		categoryNamesByCategoryId[category.CategoryId] = category.Name
+	}
+
+	categoryNamesByLineItemName := make(map[string]string, len(lineItemCategories))
+
+	for _, lineItemCategory := range lineItemCategories {
+		categoryName, exists := categoryNamesByCategoryId[lineItemCategory.CategoryId]
+
+		if !exists {
+			continue
+		}
+
+		categoryNamesByLineItemName[lineItemCategory.NormalizedName] = categoryName
+	}
+
+	return converter.NewReceiptLineItemCategoryMemory(categoryNamesByLineItemName)
+}
+
+// TransactionReceiptLineItemCategoryRememberHandler records which category the lines of an imported
+// receipt were filed under, for the current user.
+//
+// This is what makes the import learn. It is called once a receipt has actually been imported, so
+// that what is remembered is what the user accepted rather than what they were looking at, and it
+// records every line rather than only the ones they moved: an article filed correctly by chance this
+// time should not be left to chance the next time.
+func (a *TransactionsApi) TransactionReceiptLineItemCategoryRememberHandler(c *core.WebContext) (any, *errs.Error) {
+	var rememberReq models.ReceiptLineItemCategoryRememberRequest
+	err := c.ShouldBindJSON(&rememberReq)
+
+	if err != nil {
+		log.Warnf(c, "[transactions.TransactionReceiptLineItemCategoryRememberHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	categories, err := a.transactionCategories.GetAllCategoriesByUid(c, uid, 0, -1)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.TransactionReceiptLineItemCategoryRememberHandler] failed to get categories for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	expenseCategoryIds := make(map[int64]bool, len(categories))
+
+	for _, category := range categories {
+		if category.Type == models.CATEGORY_TYPE_EXPENSE && category.ParentCategoryId != models.LevelOneTransactionCategoryParentId {
+			expenseCategoryIds[category.CategoryId] = true
+		}
+	}
+
+	items := make([]*models.ReceiptLineItemCategoryRememberItem, 0, len(rememberReq.Items))
+
+	for _, item := range rememberReq.Items {
+		if !expenseCategoryIds[item.CategoryId] {
+			log.Warnf(c, "[transactions.TransactionReceiptLineItemCategoryRememberHandler] skipping receipt line item \"%s\" of user \"uid:%d\", because category \"id:%d\" is not an expense category of this user", item.Name, uid, item.CategoryId)
+			continue
+		}
+
+		items = append(items, item)
+	}
+
+	if len(items) < 1 {
+		return true, nil
+	}
+
+	err = a.receiptLineItemCategories.Remember(c, uid, items)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.TransactionReceiptLineItemCategoryRememberHandler] failed to remember %d receipt line item categories for user \"uid:%d\", because %s", len(items), uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[transactions.TransactionReceiptLineItemCategoryRememberHandler] user \"uid:%d\" has remembered the category of %d receipt line items", uid, len(items))
+
+	return true, nil
 }
 
 // TransactionImportHandler imports transactions by request parameters for current user

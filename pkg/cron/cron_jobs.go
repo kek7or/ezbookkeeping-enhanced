@@ -30,3 +30,19 @@ var CreateScheduledTransactionJob = &CronJob{
 		return services.Transactions.CreateScheduledTransactions(c, time.Now().Unix(), c.GetInterval())
 	},
 }
+
+// ProcessReceiptRecognitionJobsJob represents the cron job which drains the receipt recognition queue
+//
+// The interval is short because a user who has just uploaded receipts is waiting
+// on these results. The scheduler already prevents overlapping runs, so a pass
+// that takes longer than the interval simply delays the next one.
+var ProcessReceiptRecognitionJobsJob = &CronJob{
+	Name:        "ProcessReceiptRecognitionJobs",
+	Description: "Periodically recognize queued receipt images.",
+	Period: CronJobIntervalPeriod{
+		Interval: 15 * time.Second,
+	},
+	Run: func(c *core.CronContext) error {
+		return services.ReceiptRecognitionJobs.ProcessPendingReceiptRecognitionJobs(c)
+	},
+}

@@ -1,6 +1,9 @@
 package ai
 
 import (
+	"strings"
+	"time"
+
 	"github.com/mayswind/ezbookkeeping/pkg/converters/datatable"
 	"github.com/mayswind/ezbookkeeping/pkg/core"
 	"github.com/mayswind/ezbookkeeping/pkg/errs"
@@ -22,7 +25,8 @@ var aiTransactionSupportedColumns = map[datatable.TransactionDataTableColumn]boo
 
 // aiRecognizedTransactionDataTable defines the structure of AI recognized transaction data table
 type aiRecognizedTransactionDataTable struct {
-	allData []*models.RecognizedTransactionResult
+	allData         []*models.RecognizedTransactionResult
+	defaultTimezone *time.Location
 }
 
 // aiRecognizedTransactionDataRow defines the structure of AI recognized transaction data row
@@ -102,12 +106,12 @@ func (t *aiRecognizedTransactionDataRowIterator) Next(ctx core.Context, user *mo
 }
 
 func (t *aiRecognizedTransactionDataRowIterator) parseTransaction(ctx core.Context, user *models.User, result *models.RecognizedTransactionResult) (map[datatable.TransactionDataTableColumn]string, error) {
-	data := make(map[datatable.TransactionDataTableColumn]string, len(aiTransactionSupportedColumns))
-	data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TIME] = result.Time
-
 	if result == nil || len(result.Type) == 0 {
 		return nil, errs.ErrTransactionTypeInvalid
 	}
+
+	data := make(map[datatable.TransactionDataTableColumn]string, len(aiTransactionSupportedColumns))
+	data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TIME] = t.getLongDateTime(ctx, result.Time)
 
 	if result.Type == "income" {
 		data[datatable.TRANSACTION_DATA_TABLE_TRANSACTION_TYPE] = utils.IntToString(int(models.TRANSACTION_TYPE_INCOME))
@@ -129,7 +133,13 @@ func (t *aiRecognizedTransactionDataRowIterator) parseTransaction(ctx core.Conte
 	return data, nil
 }
 
-func (t *aiRecognizedTransactionDataRowIterator) getLongDateTime(dateTime string) string {
+// getLongDateTime normalizes the transaction time the model recognized into the format the importer
+// expects. An unusable time never fails the import: the receipt is still worth importing with
+// today's date, which the user can correct in the check step, and failing the whole file over a
+// date the model could not read is far worse.
+func (t *aiRecognizedTransactionDataRowIterator) getLongDateTime(ctx core.Context, dateTime string) string {
+	dateTime = strings.TrimSpace(dateTime)
+
 	if utils.IsValidLongDateTimeFormat(dateTime) {
 		return dateTime
 	}
@@ -142,15 +152,30 @@ func (t *aiRecognizedTransactionDataRowIterator) getLongDateTime(dateTime string
 		return dateTime + " 00:00:00"
 	}
 
-	return dateTime
+	// the model sometimes answers with an ISO 8601 timestamp although the prompt asks it not to,
+	// and that is still a real reading of the receipt, so convert it rather than discard it
+	if parsedTime, err := time.Parse(time.RFC3339, dateTime); err == nil {
+		return utils.FormatUnixTimeToLongDateTime(parsedTime.Unix(), t.dataTable.defaultTimezone)
+	}
+
+	currentDateTime := utils.FormatUnixTimeToLongDateTime(time.Now().Unix(), t.dataTable.defaultTimezone)
+
+	if dateTime == "" {
+		log.Warnf(ctx, "[ai_recognized_transaction_data_table.getLongDateTime] no transaction time was recognized, falling back to the current time \"%s\"", currentDateTime)
+	} else {
+		log.Warnf(ctx, "[ai_recognized_transaction_data_table.getLongDateTime] cannot use the recognized transaction time \"%s\", falling back to the current time \"%s\"", dateTime, currentDateTime)
+	}
+
+	return currentDateTime
 }
 
-func createNewAIRecognizedTransactionDataTable(recognizedTransactions []*models.RecognizedTransactionResult) (*aiRecognizedTransactionDataTable, error) {
+func createNewAIRecognizedTransactionDataTable(recognizedTransactions []*models.RecognizedTransactionResult, defaultTimezone *time.Location) (*aiRecognizedTransactionDataTable, error) {
 	if recognizedTransactions == nil || len(recognizedTransactions) < 1 {
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
 
 	return &aiRecognizedTransactionDataTable{
-		allData: recognizedTransactions,
+		allData:         recognizedTransactions,
+		defaultTimezone: defaultTimezone,
 	}, nil
 }

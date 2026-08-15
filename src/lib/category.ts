@@ -42,6 +42,7 @@ export function localizedPresetCategoryToTransactionCategoryCreateWithSubCategor
             parentId: '0',
             icon: subPresetCategory.icon,
             color: subPresetCategory.color,
+            excludeFromStatistics: false,
             comment: '',
             clientSessionId: ''
         };

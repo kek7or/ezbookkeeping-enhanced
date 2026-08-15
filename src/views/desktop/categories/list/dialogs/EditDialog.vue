@@ -70,6 +70,13 @@
                                 v-model="category.comment"
                             />
                         </v-col>
+                        <v-col class="py-0" cols="12" md="12">
+                            <v-switch :disabled="loading || submitting"
+                                      :label="tt('Exclude from Statistics')"
+                                      :hint="tt('Transactions in this category will not be counted in statistics, but still affect account balance')"
+                                      persistent-hint
+                                      v-model="category.excludeFromStatistics"/>
+                        </v-col>
                         <v-col class="py-0" cols="12" md="12" v-if="editCategoryId">
                             <v-switch :disabled="loading || submitting"
                                       :label="tt('Visible')" v-model="category.visible"/>

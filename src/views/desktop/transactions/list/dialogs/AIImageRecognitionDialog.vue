@@ -104,7 +104,7 @@ function loadImage(file: File): void {
     imageFile.value = null;
     imageSrc.value = undefined;
 
-    compressJpgImageByQuality(file, ImageUploadQualityType.HD720P).then(blob => {
+    compressJpgImageByQuality(file, ImageUploadQualityType.AIRecognitionDefault).then(blob => {
         imageFile.value = KnownFileType.JPG.createFileFromBlob(blob, "image");
         imageSrc.value = URL.createObjectURL(blob);
         loading.value = false;

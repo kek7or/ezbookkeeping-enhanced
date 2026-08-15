@@ -146,7 +146,57 @@ export interface ImportTransactionResponse {
     readonly geoLocation?: TransactionGeoLocationResponse;
 }
 
+export type ImportTransactionWarningType = 'receiptTotalMismatch' | 'receiptLinesNotItemized';
+
+export interface ImportTransactionWarningResponse {
+    readonly type: ImportTransactionWarningType;
+    // how many lines the warning is about: the recognized ones for "receiptTotalMismatch",
+    // the lost ones for "receiptLinesNotItemized"
+    readonly lineItemCount?: number;
+    readonly calculatedTotal?: string;
+    readonly statedTotal?: string;
+    readonly difference?: string;
+    // the printed lines that were read off the receipt but never turned into a transaction, absent
+    // when they could not be identified individually
+    readonly missingLines?: string[];
+}
+
+// a single line read off a receipt, with the deposits and discounts printed under it already charged
+// against it. The amount is in minor units, exactly like ImportTransactionResponse.sourceAmount, so
+// that regrouping the lines is integer arithmetic and cannot drift from what the server parsed.
+export interface ImportReceiptLineItemResponse {
+    readonly name: string;
+    readonly amount: number;
+    readonly categoryName: string;
+    // whether this line hands money back rather than charging for a purchase, which keeps it in a
+    // transaction of its own instead of cancelling out the purchases of the same category
+    readonly refund?: boolean;
+    // whether the category is the user's own answer from an earlier receipt rather than the model's
+    // guess, so that the lines they did not have to categorize can be marked as such
+    readonly remembered?: boolean;
+}
+
+// ReceiptLineItemCategoryRememberRequest is what the import learned from a receipt the user imported:
+// which category each of its lines ended up in, which is where a line of that article will start next
+// time it is bought
+export interface ReceiptLineItemCategoryRememberRequest {
+    readonly items: ReceiptLineItemCategoryRememberItem[];
+}
+
+export interface ReceiptLineItemCategoryRememberItem {
+    readonly name: string;
+    readonly categoryId: string;
+}
+
+export interface ImportReceiptResponse {
+    readonly lineItems: ImportReceiptLineItemResponse[];
+}
+
 export interface ImportTransactionResponsePageWrapper {
     readonly items: ImportTransactionResponse[];
     readonly totalCount: number;
+    readonly warnings?: ImportTransactionWarningResponse[];
+    // the individual receipt lines the items were aggregated from, absent for every import that is
+    // not a receipt image
+    readonly receipt?: ImportReceiptResponse;
 }

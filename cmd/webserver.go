@@ -418,6 +418,7 @@ func startWebServer(c *core.CliContext) error {
 				apiV1Route.POST("/transactions/parse_import.json", bindApi(api.Transactions.TransactionParseImportFileHandler, config))
 				apiV1Route.POST("/transactions/import.json", bindApi(api.Transactions.TransactionImportHandler, config))
 				apiV1Route.GET("/transactions/import/process.json", bindApi(api.Transactions.TransactionImportProcessHandler, config))
+				apiV1Route.POST("/transactions/import/receipt_line_item_categories/remember.json", bindApi(api.Transactions.TransactionReceiptLineItemCategoryRememberHandler, config))
 			}
 
 			// Transaction Pictures
@@ -482,6 +483,12 @@ func startWebServer(c *core.CliContext) error {
 			if config.ReceiptImageRecognitionLLMConfig != nil && config.ReceiptImageRecognitionLLMConfig.LLMProvider != "" {
 				if config.TransactionFromAIImageRecognition {
 					apiV1Route.POST("/llm/transactions/recognize_receipt_image.json", bindApi(api.LargeLanguageModels.RecognizeReceiptImageHandler, config))
+
+					// Queued recognition. Submitting returns as soon as the image
+					// is stored, so a client never waits on a model round-trip.
+					apiV1Route.POST("/receipt/jobs/submit.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobSubmitHandler, config))
+					apiV1Route.GET("/receipt/jobs/list.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobListHandler, config))
+					apiV1Route.POST("/receipt/jobs/resolve.json", bindApi(api.ReceiptRecognitionJobs.ReceiptRecognitionJobResolveHandler, config))
 				}
 			}
 
@@ -489,6 +496,10 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.GET("/exchange_rates/latest.json", bindApi(api.ExchangeRates.LatestExchangeRateHandler, config))
 			apiV1Route.POST("/exchange_rates/user_custom/update.json", bindApi(api.ExchangeRates.UserCustomExchangeRateUpdateHandler, config))
 			apiV1Route.POST("/exchange_rates/user_custom/delete.json", bindApi(api.ExchangeRates.UserCustomExchangeRateDeleteHandler, config))
+
+			// Crypto Assets
+			apiV1Route.GET("/crypto/portfolio.json", bindApi(api.CryptoAssets.CryptoPortfolioHandler, config))
+			apiV1Route.POST("/crypto/portfolio/refresh.json", bindApi(api.CryptoAssets.CryptoPortfolioRefreshHandler, config))
 
 			// System
 			apiV1Route.GET("/systems/version.json", bindApi(api.Systems.VersionHandler, config))

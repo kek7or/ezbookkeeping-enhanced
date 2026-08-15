@@ -28,7 +28,7 @@ func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_TextualUserPrompt(
 	err = json.Unmarshal(bodyBytes, &body)
 	assert.Nil(t, err)
 
-	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello, how are you?\"}],\"format\":\"json\"}", string(bodyBytes))
+	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello, how are you?\"}],\"format\":\"json\",\"options\":{\"temperature\":0,\"top_p\":1,\"top_k\":1,\"repeat_penalty\":1}}", string(bodyBytes))
 }
 
 func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_ImageUserPrompt(t *testing.T) {
@@ -49,7 +49,7 @@ func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_ImageUserPrompt(t 
 	err = json.Unmarshal(bodyBytes, &body)
 	assert.Nil(t, err)
 
-	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"What's in this image?\"},{\"role\":\"user\",\"content\":\"\",\"images\":[\"ZmFrZWRhdGE=\"]}],\"format\":\"json\"}", string(bodyBytes))
+	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"What's in this image?\"},{\"role\":\"user\",\"content\":\"\",\"images\":[\"ZmFrZWRhdGE=\"]}],\"format\":\"json\",\"options\":{\"temperature\":0,\"top_p\":1,\"top_k\":1,\"repeat_penalty\":1}}", string(bodyBytes))
 }
 
 func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_ThinkingHigh(t *testing.T) {
@@ -70,7 +70,57 @@ func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_ThinkingHigh(t *te
 	err = json.Unmarshal(bodyBytes, &body)
 	assert.Nil(t, err)
 
-	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello, how are you?\"}],\"think\":\"high\",\"format\":\"json\"}", string(bodyBytes))
+	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello, how are you?\"}],\"think\":\"high\",\"format\":\"json\",\"options\":{\"temperature\":0,\"top_p\":1,\"top_k\":1,\"repeat_penalty\":1}}", string(bodyBytes))
+}
+
+// the sampler has to be pinned on every request: leaving it to the Modelfile is what let a receipt
+// import silently lose printed lines and read a price off the neighbouring row
+func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_AlwaysUsesGreedyDecoding(t *testing.T) {
+	adapter := &OllamaLargeLanguageModelAdapter{
+		OllamaModelID: "test",
+	}
+
+	request := &data.LargeLanguageModelRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		UserPrompt:   []byte("Hello, how are you?"),
+	}
+
+	bodyBytes, err := adapter.buildJsonRequestBody(core.NewNullContext(), 0, request, data.LARGE_LANGUAGE_MODEL_RESPONSE_FORMAT_JSON)
+	assert.Nil(t, err)
+
+	var body struct {
+		Options *OllamaChatRequestOptions `json:"options"`
+	}
+	err = json.Unmarshal(bodyBytes, &body)
+	assert.Nil(t, err)
+
+	assert.NotNil(t, body.Options)
+	assert.Equal(t, float32(0), body.Options.Temperature)
+	assert.Equal(t, float32(1), body.Options.TopP)
+	assert.Equal(t, int32(1), body.Options.TopK)
+	assert.Equal(t, float32(1), body.Options.RepeatPenalty)
+
+	// left to the model unless the deployment configured them
+	assert.Equal(t, uint32(0), body.Options.NumCtx)
+	assert.Equal(t, uint32(0), body.Options.NumPredict)
+}
+
+func TestOllamaLargeLanguageModelAdapter_buildJsonRequestBody_ConfiguredContextAndOutputBudget(t *testing.T) {
+	adapter := &OllamaLargeLanguageModelAdapter{
+		OllamaModelID:    "test",
+		OllamaNumCtx:     32768,
+		OllamaNumPredict: 4096,
+	}
+
+	request := &data.LargeLanguageModelRequest{
+		SystemPrompt: "You are a helpful assistant.",
+		UserPrompt:   []byte("Hello, how are you?"),
+	}
+
+	bodyBytes, err := adapter.buildJsonRequestBody(core.NewNullContext(), 0, request, data.LARGE_LANGUAGE_MODEL_RESPONSE_FORMAT_JSON)
+	assert.Nil(t, err)
+
+	assert.Equal(t, "{\"model\":\"test\",\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":\"You are a helpful assistant.\"},{\"role\":\"user\",\"content\":\"Hello, how are you?\"}],\"format\":\"json\",\"options\":{\"temperature\":0,\"top_p\":1,\"top_k\":1,\"repeat_penalty\":1,\"num_ctx\":32768,\"num_predict\":4096}}", string(bodyBytes))
 }
 
 func TestOllamaLargeLanguageModelAdapter_ParseTextualResponse_ValidJsonResponse(t *testing.T) {

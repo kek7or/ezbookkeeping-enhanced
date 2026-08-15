@@ -55,10 +55,63 @@ type ImportTransactionResponse struct {
 	GeoLocation                        *TransactionGeoLocationResponse `json:"geoLocation,omitempty"`
 }
 
+// ImportTransactionWarningType represents the type of a non-fatal problem detected when parsing imported data
+type ImportTransactionWarningType string
+
+// Import transaction warning types
+const (
+	IMPORT_TRANSACTION_WARNING_RECEIPT_TOTAL_MISMATCH     ImportTransactionWarningType = "receiptTotalMismatch"
+	IMPORT_TRANSACTION_WARNING_RECEIPT_LINES_NOT_ITEMIZED ImportTransactionWarningType = "receiptLinesNotItemized"
+)
+
+// ImportTransactionWarningResponse represents a non-fatal problem detected when parsing imported data.
+// The parsed transactions are still returned, so the user can correct them before importing.
+//
+// LineItemCount is how many lines the warning is about, which each type counts its own way:
+// "receiptTotalMismatch" counts the lines that were recognized, "receiptLinesNotItemized" counts the
+// lines that were lost.
+type ImportTransactionWarningResponse struct {
+	Type            ImportTransactionWarningType `json:"type"`
+	LineItemCount   int                          `json:"lineItemCount,omitempty"`
+	CalculatedTotal string                       `json:"calculatedTotal,omitempty"`
+	StatedTotal     string                       `json:"statedTotal,omitempty"`
+	Difference      string                       `json:"difference,omitempty"`
+	MissingLines    []string                     `json:"missingLines,omitempty"`
+}
+
+// ImportReceiptLineItemResponse represents a single line read off a receipt, after the deposits and
+// discounts printed under it have been charged against it.
+//
+// The server groups these lines by category and sums each group into a transaction, but it returns
+// them as well, so that the user can correct a line the model filed under the wrong category and see
+// the amounts follow. Amount is in minor units, exactly like ImportTransactionResponse.SourceAmount,
+// so that regrouping on the client is integer arithmetic and cannot drift from what was parsed here.
+type ImportReceiptLineItemResponse struct {
+	Name         string `json:"name"`
+	Amount       int64  `json:"amount"`
+	CategoryName string `json:"categoryName"`
+	// whether this line hands money back rather than charging for a purchase, which keeps it in a
+	// transaction of its own instead of cancelling out the purchases of the same category
+	Refund bool `json:"refund,omitempty"`
+	// whether the category is the user's own answer from an earlier receipt rather than the model's
+	// guess, so that the client can say which lines it did not have to categorize
+	Remembered bool `json:"remembered,omitempty"`
+}
+
+// ImportReceiptResponse represents the lines one receipt image was read as, in the order they are
+// printed on the receipt
+type ImportReceiptResponse struct {
+	LineItems []*ImportReceiptLineItemResponse `json:"lineItems"`
+}
+
 // ImportTransactionResponsePageWrapper represents a response of imported transaction which contains items and count
 type ImportTransactionResponsePageWrapper struct {
-	Items      []*ImportTransactionResponse `json:"items"`
-	TotalCount int64                        `json:"totalCount"`
+	Items      []*ImportTransactionResponse        `json:"items"`
+	TotalCount int64                               `json:"totalCount"`
+	Warnings   []*ImportTransactionWarningResponse `json:"warnings,omitempty"`
+	// the individual receipt lines the items were aggregated from, absent for every import that is
+	// not a receipt image
+	Receipt *ImportReceiptResponse `json:"receipt,omitempty"`
 }
 
 // ToImportTransactionResponse returns the a view-objects according to imported transaction data

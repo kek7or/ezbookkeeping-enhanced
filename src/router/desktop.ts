@@ -31,6 +31,7 @@ import TransactionTemplateListPage from '@/views/desktop/templates/ListPage.vue'
 import UserSettingsPage from '@/views/desktop/user/UserSettingsPage.vue';
 import AppSettingsPage from '@/views/desktop/app/AppSettingsPage.vue';
 
+import CryptoAssetListPage from '@/views/desktop/crypto/ListPage.vue';
 import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 
@@ -182,6 +183,11 @@ const router = createRouter({
                     props: {
                         initType: TemplateType.Schedule.type
                     }
+                },
+                {
+                    path: '/crypto',
+                    component: CryptoAssetListPage,
+                    beforeEnter: checkLogin
                 },
                 {
                     path: '/exchange_rates',

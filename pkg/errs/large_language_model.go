@@ -11,4 +11,6 @@ var (
 	ErrNoTransactionInformation             = NewNormalError(NormalSubcategoryLargeLanguageModel, 4, http.StatusBadRequest, "no transaction information detected")
 	ErrNoAIRecognitionText                  = NewNormalError(NormalSubcategoryLargeLanguageModel, 5, http.StatusBadRequest, "no text for AI recognition")
 	ErrAIRecognitionTextIsEmpty             = NewNormalError(NormalSubcategoryLargeLanguageModel, 6, http.StatusBadRequest, "text for AI recognition is empty")
+	ErrReceiptRecognitionJobNotFound        = NewNormalError(NormalSubcategoryLargeLanguageModel, 7, http.StatusBadRequest, "receipt recognition job not found")
+	ErrReceiptRecognitionJobIdInvalid       = NewNormalError(NormalSubcategoryLargeLanguageModel, 8, http.StatusBadRequest, "receipt recognition job id is invalid")
 )

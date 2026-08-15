@@ -1,5 +1,5 @@
 <template>
-    <v-dialog :persistent="!!persistent || loading || submitting" v-model="showState">
+    <v-dialog width="92%" max-width="1500" :persistent="!!persistent || loading || submitting" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
                 <div class="d-flex align-center justify-center">
@@ -283,10 +283,40 @@
                         />
                     </v-window-item>
                     <v-window-item value="checkData">
+                        <v-alert type="warning" variant="tonal" class="mb-4"
+                                 :title="tt('Receipt Total Does Not Match')"
+                                 v-for="(warning, warningIndex) in receiptTotalMismatchWarnings" :key="warningIndex">
+                            {{ tt('format.misc.receiptTotalMismatch', {
+                                count: formatNumberToLocalizedNumerals(warning.lineItemCount || 0),
+                                calculated: warning.calculatedTotal,
+                                stated: warning.statedTotal,
+                                difference: warning.difference
+                            }) }}
+                        </v-alert>
+                        <v-alert type="warning" variant="tonal" class="mb-4"
+                                 :title="tt('Some Receipt Lines Were Not Imported')"
+                                 v-for="(warning, warningIndex) in receiptLinesNotItemizedWarnings" :key="`notItemized-${warningIndex}`">
+                            {{ tt(warning.missingLines && warning.missingLines.length
+                                ? 'format.misc.receiptLinesNotItemizedWithLines'
+                                : 'format.misc.receiptLinesNotItemized', {
+                                count: formatNumberToLocalizedNumerals(warning.lineItemCount || 0)
+                            }) }}
+                            <ul class="receipt-missing-lines mt-2" v-if="warning.missingLines && warning.missingLines.length">
+                                <li :key="lineIndex" v-for="(missingLine, lineIndex) in warning.missingLines">{{ missingLine }}</li>
+                            </ul>
+                        </v-alert>
+                        <import-transaction-assign-line-items-tab
+                            ref="importTransactionAssignLineItemsTab"
+                            :receipts="importReceipts"
+                            :disabled="loading || submitting"
+                            @update:transactions="importTransactions = $event"
+                            v-if="isReceiptLineItemEditorActive"
+                        />
                         <import-transaction-check-data-tab
                             ref="importTransactionCheckDataTab"
                             :import-transactions="importTransactions"
                             :disabled="loading || submitting"
+                            v-else
                         />
                     </v-window-item>
                     <v-window-item value="finalResult">
@@ -311,7 +341,7 @@
                         <v-progress-circular indeterminate size="22" class="ms-2" v-if="submitting"></v-progress-circular>
                     </v-btn>
                     <v-btn class="button-icon-with-direction" color="teal"
-                           :disabled="submitting || importTransactionCheckDataTab?.isEditing || !importTransactionCheckDataTab?.canImport"
+                           :disabled="submitting || (isReceiptLineItemEditorActive ? !importTransactionAssignLineItemsTab?.canImport : (importTransactionCheckDataTab?.isEditing || !importTransactionCheckDataTab?.canImport))"
                            :append-icon="!submitting ? mdiArrowRight : undefined" @click="submit"
                            v-if="currentStep === 'checkData'">
                         {{ (submitting && importProcess > 0 ? tt('format.misc.importingTransactions', { process: formatNumberToLocalizedNumerals(importProcess, 2) }) : tt('Import')) }}
@@ -338,6 +368,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import ImportTransactionDefineColumnTab from './tabs/ImportTransactionDefineColumnTab.vue';
 import ImportTransactionExecuteCustomScriptTab from './tabs/ImportTransactionExecuteCustomScriptTab.vue';
 import ImportTransactionRecognizeImagesTab, { type BatchImportImageItem } from './tabs/ImportTransactionRecognizeImagesTab.vue';
+import ImportTransactionAssignLineItemsTab from './tabs/ImportTransactionAssignLineItemsTab.vue';
 import ImportTransactionCheckDataTab from './tabs/ImportTransactionCheckDataTab.vue';
 
 import { ref, computed, useTemplateRef, watch } from 'vue';
@@ -365,7 +396,8 @@ import {
 import { ImageUploadQualityType } from '@/core/image.ts';
 import { UTF_8 } from '@/consts/file.ts';
 
-import { type ImportTransactionResponse, ImportTransaction } from '@/models/imported_transaction.ts';
+import { type ImportTransactionResponsePageWrapper, type ImportTransactionWarningResponse, type ReceiptLineItemCategoryRememberItem, ImportTransaction } from '@/models/imported_transaction.ts';
+import { ImportReceipt } from '@/models/imported_receipt.ts';
 
 import { isDefined, isNumber } from '@/lib/common.ts';
 import { findExtensionByType, isFileExtensionSupported, detectFileEncoding } from '@/lib/file.ts';
@@ -391,6 +423,7 @@ type SnackBarType = InstanceType<typeof SnackBar>;
 type ImportTransactionDefineColumnTabType = InstanceType<typeof ImportTransactionDefineColumnTab>;
 type ImportTransactionExecuteCustomScriptTabType = InstanceType<typeof ImportTransactionExecuteCustomScriptTab>;
 type ImportTransactionRecognizeImagesTabType = InstanceType<typeof ImportTransactionRecognizeImagesTab>;
+type ImportTransactionAssignLineItemsTabType = InstanceType<typeof ImportTransactionAssignLineItemsTab>;
 type ImportTransactionCheckDataTabType = InstanceType<typeof ImportTransactionCheckDataTab>;
 
 type ImportTransactionDialogStep = 'uploadFile' | 'defineColumn' | 'executeCustomScript' | 'recognizeImages' | 'checkData' | 'finalResult';
@@ -425,6 +458,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const importTransactionDefineColumnTab = useTemplateRef<ImportTransactionDefineColumnTabType>('importTransactionDefineColumnTab');
 const importTransactionExecuteCustomScriptTab = useTemplateRef<ImportTransactionExecuteCustomScriptTabType>('importTransactionExecuteCustomScriptTab');
 const importTransactionRecognizeImagesTab = useTemplateRef<ImportTransactionRecognizeImagesTabType>('importTransactionRecognizeImagesTab');
+const importTransactionAssignLineItemsTab = useTemplateRef<ImportTransactionAssignLineItemsTabType>('importTransactionAssignLineItemsTab');
 const importTransactionCheckDataTab = useTemplateRef<ImportTransactionCheckDataTabType>('importTransactionCheckDataTab');
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 
@@ -470,6 +504,12 @@ const importAIAdditionalPrompt = ref<string>('');
 const importImageCancelRecognizingUuid = ref<string | undefined>(undefined);
 const parsedFileData = ref<string[][] | undefined>(undefined);
 const importTransactions = ref<ImportTransaction[] | undefined>(undefined);
+const importReceipts = ref<ImportReceipt[]>([]);
+// an image the model answered with whole transactions instead of receipt lines cannot be edited line
+// by line, and mixing the two editors in one step would hide those transactions, so a single such
+// image sends the whole batch to the ordinary import table
+const hasNonReceiptRecognizedTransactions = ref<boolean>(false);
+const importWarnings = ref<ImportTransactionWarningResponse[]>([]);
 
 const importedCount = ref<number | null>(null);
 const loading = ref<boolean>(true);
@@ -520,6 +560,10 @@ const isAIImageImport = computed<boolean>(() => fileType.value === 'ai_image');
 const needAIImageRecognition = computed<boolean>(() => allSupportedImportFileTypesMap.value[fileType.value]?.needAIImageRecognition ?? false);
 const supportedAdditionalOptions = computed<ImportFileTypeSupportedAdditionalOptions | undefined>(() => allSupportedImportFileTypesMap.value[fileType.value]?.supportedAdditionalOptions);
 const supportedAIAdditionalPrompt = computed<boolean>(() => !!allSupportedImportFileTypesMap.value[fileType.value]?.supportedAIAdditionalPrompt);
+const hasEditableReceipts = computed<boolean>(() => importReceipts.value.length > 0 && !hasNonReceiptRecognizedTransactions.value);
+const isReceiptLineItemEditorActive = computed<boolean>(() => currentStep.value === 'checkData' && hasEditableReceipts.value);
+const receiptTotalMismatchWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptTotalMismatch'));
+const receiptLinesNotItemizedWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptLinesNotItemized'));
 
 const allSteps = computed<StepBarItem[]>(() => {
     const steps: StepBarItem[] = [
@@ -690,6 +734,9 @@ function open(): Promise<void> {
     importTransactionDefineColumnTab.value?.reset();
     importTransactionExecuteCustomScriptTab.value?.reset();
     importTransactions.value = undefined;
+    importReceipts.value = [];
+    hasNonReceiptRecognizedTransactions.value = false;
+    importWarnings.value = [];
     importTransactionCheckDataTab.value?.reset();
     showState.value = true;
     clientSessionId.value = generateRandomUUID();
@@ -832,9 +879,9 @@ function reloadBasisData(): void {
     });
 }
 
-function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): Promise<ImportTransactionResponse[]> {
-    return new Promise<ImportTransactionResponse[]>((resolve, reject) => {
-        compressJpgImageByQuality(item.file, ImageUploadQualityType.HD720P).then(blob => {
+function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): Promise<ImportTransactionResponsePageWrapper> {
+    return new Promise<ImportTransactionResponsePageWrapper>((resolve, reject) => {
+        compressJpgImageByQuality(item.file, ImageUploadQualityType.AIRecognitionDefault).then(blob => {
             const compressedFile = KnownFileType.JPG.createFileFromBlob(blob, "image");
             importImageCancelRecognizingUuid.value = generateRandomUUID();
 
@@ -844,7 +891,12 @@ function recognizeImage(item: BatchImportImageItem, additionalPrompt?: string): 
                 importFile: compressedFile,
                 cancelableUuid: importImageCancelRecognizingUuid.value
             }).then(response => {
-                resolve(response.items || []);
+                // each image is a receipt of its own, so the warnings accumulate over the whole batch
+                if (response.warnings) {
+                    importWarnings.value.push(...response.warnings);
+                }
+
+                resolve(response);
             }).catch(error => {
                 reject(error);
             });
@@ -894,15 +946,26 @@ function batchRecognizeImages(): Promise<void> {
 
             item.status = 'recognizing';
 
-            recognizeImage(item, supportedAIAdditionalPrompt.value ? importAIAdditionalPrompt.value : undefined).then(results => {
+            recognizeImage(item, supportedAIAdditionalPrompt.value ? importAIAdditionalPrompt.value : undefined).then(response => {
                 if (submitting.value) {
                     if (!importTransactions.value) {
                         importTransactions.value = [];
                     }
 
-                    for (const importTransactionResp of results) {
-                        const index = importTransactions.value.length;
-                        importTransactions.value.push(ImportTransaction.of(importTransactionResp, index));
+                    for (const importTransactionResp of response.items || []) {
+                        const transactionIndex = importTransactions.value.length;
+                        importTransactions.value.push(ImportTransaction.of(importTransactionResp, transactionIndex));
+                    }
+
+                    // the receipt lines are kept next to the transactions they were summed into, so
+                    // that the check step can let the user move a line the model misfiled and have the
+                    // transactions follow. It replaces these transactions once it is shown.
+                    const receipt = ImportReceipt.of(response, importReceipts.value.length, item.file.name);
+
+                    if (receipt) {
+                        importReceipts.value.push(receipt);
+                    } else {
+                        hasNonReceiptRecognizedTransactions.value = true;
                     }
 
                     item.status = 'success';
@@ -951,6 +1014,9 @@ function parseData(): void {
         currentStep.value = 'recognizeImages';
         submitting.value = true;
         importTransactions.value = undefined;
+        importReceipts.value = [];
+        hasNonReceiptRecognizedTransactions.value = false;
+        importWarnings.value = [];
 
         batchRecognizeImages().then(() => {
             if (!importTransactions.value || importTransactions.value.length < 1) {
@@ -1131,6 +1197,7 @@ function parseData(): void {
             tagSeparator: tagSeparator
         }).then(response => {
             const parsedTransactions: ImportTransaction[] = [];
+            importWarnings.value = response.warnings ?? [];
 
             if (response.items) {
                 for (const [importTransaction, index] of itemAndIndex(response.items)) {
@@ -1158,6 +1225,29 @@ function parseData(): void {
             }
         });
     }
+}
+
+// rememberReceiptLineItemCategories teaches the import where the lines of the receipts just imported
+// belong, so that the same articles start in the right category the next time they are bought.
+//
+// It runs only once the import has succeeded, because what the user accepted is the answer worth
+// keeping - a receipt they looked at and then cancelled says nothing about where anything belongs.
+function rememberReceiptLineItemCategories(): void {
+    if (!hasEditableReceipts.value) {
+        return;
+    }
+
+    const items: ReceiptLineItemCategoryRememberItem[] = [];
+
+    for (const receipt of importReceipts.value) {
+        items.push(...receipt.toRememberedLineItemCategories());
+    }
+
+    if (items.length < 1) {
+        return;
+    }
+
+    transactionsStore.rememberReceiptLineItemCategories({ items });
 }
 
 function submit(): void {
@@ -1233,6 +1323,8 @@ function submit(): void {
             importedCount.value = response;
             currentStep.value = 'finalResult';
 
+            rememberReceiptLineItemCategories();
+
             accountsStore.updateAccountListInvalidState(true);
             transactionsStore.updateTransactionListInvalidState(true);
             overviewStore.updateTransactionOverviewInvalidState(true);
@@ -1288,6 +1380,9 @@ watch(fileType, (newValue) => {
     parsedFileData.value = undefined;
     importAdditionalOptions.value = Object.assign({}, supportedAdditionalOptions.value ?? {});
     importTransactions.value = undefined;
+    importReceipts.value = [];
+    hasNonReceiptRecognizedTransactions.value = false;
+    importWarnings.value = [];
     clearImportImageFiles();
 });
 
@@ -1313,6 +1408,15 @@ defineExpose({
 </script>
 
 <style>
+/* the lines are copied off the receipt with its own column padding, so they only line up in a
+   monospaced font, and a long one scrolls inside the alert rather than widening the dialog */
+.receipt-missing-lines {
+    padding-inline-start: 1.5rem;
+    font-family: monospace;
+    white-space: pre;
+    overflow-x: auto;
+}
+
 .import-transaction-images {
     .import-image {
         .picture-control-icon {

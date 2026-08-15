@@ -14,9 +14,10 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
     public comment: string;
     public displayOrder: number;
     public visible: boolean;
+    public excludeFromStatistics: boolean;
     public subCategories?: TransactionCategory[];
 
-    private constructor(id: string, name: string, parentId: string, type: CategoryType, icon: string, color: ColorValue, comment: string, displayOrder: number, visible: boolean, subCategories?: TransactionCategory[]) {
+    private constructor(id: string, name: string, parentId: string, type: CategoryType, icon: string, color: ColorValue, comment: string, displayOrder: number, visible: boolean, excludeFromStatistics: boolean, subCategories?: TransactionCategory[]) {
         this.id = id;
         this.name = name;
         this.parentId = parentId;
@@ -26,6 +27,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         this.comment = comment;
         this.displayOrder = displayOrder;
         this.visible = visible;
+        this.excludeFromStatistics = excludeFromStatistics;
 
         if (subCategories) {
             this.subCategories = subCategories;
@@ -47,7 +49,8 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             this.color === other.color &&
             this.comment === other.comment &&
             this.displayOrder === other.displayOrder &&
-            this.visible === other.visible;
+            this.visible === other.visible &&
+            this.excludeFromStatistics === other.excludeFromStatistics;
 
         if (!isEqual) {
             return false;
@@ -79,6 +82,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
         this.color = other.color;
         this.comment = other.comment;
         this.visible = other.visible;
+        this.excludeFromStatistics = other.excludeFromStatistics;
     }
 
     public clone(): TransactionCategory {
@@ -91,7 +95,8 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             this.color,
             this.comment,
             this.displayOrder,
-            this.visible
+            this.visible,
+            this.excludeFromStatistics
         );
     }
 
@@ -102,6 +107,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             parentId: this.parentId,
             icon: this.icon,
             color: this.color,
+            excludeFromStatistics: this.excludeFromStatistics,
             comment: this.comment,
             clientSessionId: clientSessionId
         };
@@ -114,6 +120,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             parentId: this.parentId,
             icon: this.icon,
             color: this.color,
+            excludeFromStatistics: this.excludeFromStatistics,
             comment: this.comment,
             hidden: !this.visible
         };
@@ -130,6 +137,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
             categoryResponse.comment,
             categoryResponse.displayOrder,
             !categoryResponse.hidden,
+            !!categoryResponse.excludeFromStatistics,
             categoryResponse.subCategories ? TransactionCategory.ofMulti(categoryResponse.subCategories) : undefined
         );
     }
@@ -165,7 +173,7 @@ export class TransactionCategory implements TransactionCategoryInfoResponse {
     }
 
     public static createNewCategory(type?: CategoryType, parentId?: string): TransactionCategory {
-        return new TransactionCategory('', '', parentId || '0', type || CategoryType.Income, DEFAULT_CATEGORY_ICON_ID, DEFAULT_CATEGORY_COLOR, '', 0, true);
+        return new TransactionCategory('', '', parentId || '0', type || CategoryType.Income, DEFAULT_CATEGORY_ICON_ID, DEFAULT_CATEGORY_COLOR, '', 0, true, false);
     }
 }
 
@@ -175,6 +183,7 @@ export interface TransactionCategoryCreateRequest {
     readonly parentId: string;
     readonly icon: string;
     readonly color: string;
+    readonly excludeFromStatistics: boolean;
     readonly comment: string;
     readonly clientSessionId: string;
 }
@@ -197,6 +206,7 @@ export interface TransactionCategoryModifyRequest {
     readonly parentId: string;
     readonly icon: string;
     readonly color: string;
+    readonly excludeFromStatistics: boolean;
     readonly comment: string;
     readonly hidden: boolean;
 }
@@ -229,5 +239,6 @@ export interface TransactionCategoryInfoResponse {
     readonly comment: string;
     readonly displayOrder: number;
     readonly hidden: boolean;
+    readonly excludeFromStatistics: boolean;
     readonly subCategories?: TransactionCategoryInfoResponse[];
 }

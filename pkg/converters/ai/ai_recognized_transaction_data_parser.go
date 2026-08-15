@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,6 +27,15 @@ type aiTransactionDataParser struct {
 // aiTransactionDataParsedResult defines the structure of parsed transaction data result
 type aiTransactionDataParsedResult struct {
 	Transactions []*models.RecognizedTransactionResult `json:"transactions"`
+	LineItems    []*models.RecognizedReceiptLineItem   `json:"line_items"`
+	// the verbatim transcription of the item block the model writes before it builds the line
+	// items; it is a scratchpad and is not imported, but comparing the two counts shows whether
+	// a printed line was lost between reading the receipt and structuring it
+	RawLines      []string `json:"raw_lines"`
+	ReceiptTotal  string   `json:"receipt_total"`
+	Time          string   `json:"time"`
+	AccountName   string   `json:"account"`
+	PaymentMethod string   `json:"payment_method"`
 }
 
 // parseText processes the input text data and returns the recognized transaction results using AI
@@ -61,7 +71,17 @@ func (p *aiTransactionDataParser) parseText(c core.Context, user *models.User, f
 		return nil, errs.ErrOperationFailed
 	}
 
-	return p.parseRecognizedResult(c, user, llmResponse)
+	result, err := p.parseRecognizedResult(c, user, llmResponse)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(result.Transactions) < 1 {
+		return nil, errs.ErrNotFoundTransactionDataInFile
+	}
+
+	return result.Transactions, nil
 }
 
 // parseText processes the input image data and returns the recognized transaction results using AI
@@ -96,18 +116,38 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 		return nil, errs.ErrOperationFailed
 	}
 
-	return p.parseRecognizedResult(c, user, llmResponse)
+	result, err := p.parseRecognizedResult(c, user, llmResponse)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// a receipt listing several purchased lines is returned as line items which are grouped and summed here,
+	// any other image (a single voucher, a transfer confirmation) is returned as transactions directly
+	if len(result.LineItems) > 0 {
+		transactions := p.aggregateReceiptLineItems(c, user, result, accountMap, additionalOptions.GetWarningCollector(), additionalOptions.GetReceiptCollector(), additionalOptions.GetReceiptLineItemCategories())
+
+		if len(transactions) > 0 {
+			return transactions, nil
+		}
+	}
+
+	if len(result.Transactions) < 1 {
+		return nil, errs.ErrNotFoundTransactionDataInFile
+	}
+
+	return result.Transactions, nil
 }
 
 // buildRecognitionSystemPrompt returns the system prompt for AI recognition based on the provided template and user data
 func (p *aiTransactionDataParser) buildRecognitionSystemPrompt(c core.Context, user *models.User, templateName templates.KnownTemplate, additionalPrompt string, defaultTimezone *time.Location, accountMap map[string]*models.Account, expenseCategoryMap, incomeCategoryMap, transferCategoryMap map[string]map[string]*models.TransactionCategory, tagMap map[string]*models.TransactionTag) (string, error) {
-	accountNames := p.getAccountNames(accountMap)
-	expenseCategoryNames := p.getCategoryNames(expenseCategoryMap)
-	incomeCategoryNames := p.getCategoryNames(incomeCategoryMap)
-	transferCategoryNames := p.getCategoryNames(transferCategoryMap)
+	accountNames := p.getAccountLines(accountMap)
+	expenseCategoryNames := p.getCategoryLines(c, user, expenseCategoryMap)
+	incomeCategoryNames := p.getCategoryLines(c, user, incomeCategoryMap)
+	transferCategoryNames := p.getCategoryLines(c, user, transferCategoryMap)
 	tagNames := p.getTagNames(tagMap)
 
-	systemPrompt, err := templates.GetTemplate(templateName)
+	systemPrompt, err := templates.GetTextTemplate(templateName)
 
 	if err != nil {
 		log.Errorf(c, "[ai_recognized_transaction_data_parser.buildRecognitionSystemPrompt] failed to get prompt template for user \"uid:%d\", because %s", user.Uid, err.Error())
@@ -134,7 +174,7 @@ func (p *aiTransactionDataParser) buildRecognitionSystemPrompt(c core.Context, u
 	return strings.ReplaceAll(bodyBuffer.String(), "\r\n", "\n"), nil
 }
 
-func (p *aiTransactionDataParser) parseRecognizedResult(c core.Context, user *models.User, llmResponse *data.LargeLanguageModelTextualResponse) ([]*models.RecognizedTransactionResult, error) {
+func (p *aiTransactionDataParser) parseRecognizedResult(c core.Context, user *models.User, llmResponse *data.LargeLanguageModelTextualResponse) (*aiTransactionDataParsedResult, error) {
 	if llmResponse == nil || len(llmResponse.Content) == 0 || strings.HasPrefix(llmResponse.Content, "[]") {
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
@@ -146,33 +186,161 @@ func (p *aiTransactionDataParser) parseRecognizedResult(c core.Context, user *mo
 		return nil, errs.ErrOperationFailed
 	}
 
-	if result == nil || len(result.Transactions) < 1 {
+	if result == nil {
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
 
-	return result.Transactions, nil
+	repairMojibakeInParsedResult(c, user, result)
+
+	return result, nil
 }
 
-func (p *aiTransactionDataParser) getAccountNames(accountMap map[string]*models.Account) []string {
-	names := make([]string, 0, len(accountMap))
+// repairMojibakeInParsedResult fixes text the model returned with its non-ASCII
+// characters corrupted, writing "HÃ¤hnchen-Brustfilet" where the receipt printed
+// "Hähnchen-Brustfilet".
+//
+// The corruption is the model's own: the raw response body already contains it,
+// so there is nothing upstream to correct. It shows up reliably on receipts in
+// languages with accented characters, which makes every affected item name and
+// category wrong in the imported transaction.
+func repairMojibakeInParsedResult(c core.Context, user *models.User, result *aiTransactionDataParsedResult) {
+	repaired := false
 
-	for _, account := range accountMap {
-		names = append(names, account.Name)
+	for i := 0; i < len(result.LineItems); i++ {
+		lineItem := result.LineItems[i]
+
+		if lineItem == nil {
+			continue
+		}
+
+		repaired = utils.RepairMojibakeInAllFields(&lineItem.Name, &lineItem.Category, &lineItem.Reason) || repaired
 	}
 
-	return names
+	for i := 0; i < len(result.Transactions); i++ {
+		transaction := result.Transactions[i]
+
+		if transaction == nil {
+			continue
+		}
+
+		repaired = utils.RepairMojibakeInAllFields(
+			&transaction.Description,
+			&transaction.CategoryName,
+			&transaction.AccountName,
+			&transaction.DestinationAccountName,
+		) || repaired
+
+		utils.RepairMojibakeSlice(transaction.TagNames)
+	}
+
+	repaired = utils.RepairMojibakeInAllFields(&result.AccountName) || repaired
+	utils.RepairMojibakeSlice(result.RawLines)
+
+	if repaired {
+		// Logged rather than fixed silently: a model that keeps doing this is
+		// one worth replacing, and that is invisible if the repair hides it.
+		log.Warnf(c, "[ai_recognized_transaction_data_parser.repairMojibakeInParsedResult] repaired mojibake in the model response for user \"uid:%d\"", user.Uid)
+	}
 }
 
-func (p *aiTransactionDataParser) getCategoryNames(categoryMap map[string]map[string]*models.TransactionCategory) []string {
-	names := make([]string, 0)
+// account category names as they are shown in the user interface, so that the model sees an
+// account list it can match a payment method against ("paid by card" -> the Credit Card account)
+var aiAccountCategoryNames = map[models.AccountCategory]string{
+	models.ACCOUNT_CATEGORY_CASH:                   "Cash",
+	models.ACCOUNT_CATEGORY_CHECKING_ACCOUNT:       "Checking Account",
+	models.ACCOUNT_CATEGORY_CREDIT_CARD:            "Credit Card",
+	models.ACCOUNT_CATEGORY_VIRTUAL:                "Virtual Account",
+	models.ACCOUNT_CATEGORY_DEBT:                   "Debt Account",
+	models.ACCOUNT_CATEGORY_RECEIVABLES:            "Receivables",
+	models.ACCOUNT_CATEGORY_INVESTMENT:             "Investment Account",
+	models.ACCOUNT_CATEGORY_SAVINGS_ACCOUNT:        "Savings Account",
+	models.ACCOUNT_CATEGORY_CERTIFICATE_OF_DEPOSIT: "Certificate of Deposit",
+}
 
-	for _, subCategoryMap := range categoryMap {
-		for _, category := range subCategoryMap {
-			names = append(names, category.Name)
+// getAccountLines returns the account list rendered for the system prompt, annotated with each
+// account's category, for example "Wallet (Cash)". Without the category the model has no way to
+// tell which account a cash or card payment belongs to, since account names are user chosen.
+func (p *aiTransactionDataParser) getAccountLines(accountMap map[string]*models.Account) []string {
+	lines := make([]string, 0, len(accountMap))
+
+	for _, account := range accountMap {
+		if categoryName, exists := aiAccountCategoryNames[account.Category]; exists {
+			lines = append(lines, account.Name+" ("+categoryName+")")
+		} else {
+			lines = append(lines, account.Name)
 		}
 	}
 
-	return names
+	sort.Strings(lines)
+
+	return lines
+}
+
+// getCategoryLines returns the category list rendered for the system prompt, grouped by their parent
+// category and annotated with the user defined category description, for example:
+//
+//	Food & Drink:
+//	  - Food: everyday groceries
+//	  - Drink
+//
+// Transactions are always assigned to a sub category, so the parent category is shown for context only
+// and the sub category name is what the model is asked to return. The output is sorted so that the same
+// user data always renders the exact same prompt.
+func (p *aiTransactionDataParser) getCategoryLines(c core.Context, user *models.User, categoryMap map[string]map[string]*models.TransactionCategory) []string {
+	subCategoriesByParentName := make(map[string][]*models.TransactionCategory)
+
+	for subCategoryName, subCategoryMapByParentName := range categoryMap {
+		if len(subCategoryMapByParentName) > 1 {
+			parentNames := make([]string, 0, len(subCategoryMapByParentName))
+
+			for parentName := range subCategoryMapByParentName {
+				parentNames = append(parentNames, parentName)
+			}
+
+			sort.Strings(parentNames)
+			log.Warnf(c, "[ai_recognized_transaction_data_parser.getCategoryLines] sub category name \"%s\" exists in multiple parent categories (%s) for user \"uid:%d\", the recognized transactions of this category cannot be resolved to a specific one", subCategoryName, strings.Join(parentNames, ", "), user.Uid)
+		}
+
+		for parentName, category := range subCategoryMapByParentName {
+			subCategoriesByParentName[parentName] = append(subCategoriesByParentName[parentName], category)
+		}
+	}
+
+	parentNames := make([]string, 0, len(subCategoriesByParentName))
+
+	for parentName := range subCategoriesByParentName {
+		parentNames = append(parentNames, parentName)
+	}
+
+	sort.Strings(parentNames)
+
+	lines := make([]string, 0, len(parentNames)+len(categoryMap))
+
+	for _, parentName := range parentNames {
+		subCategories := subCategoriesByParentName[parentName]
+
+		sort.SliceStable(subCategories, func(i, j int) bool {
+			if subCategories[i].DisplayOrder != subCategories[j].DisplayOrder {
+				return subCategories[i].DisplayOrder < subCategories[j].DisplayOrder
+			}
+
+			return subCategories[i].Name < subCategories[j].Name
+		})
+
+		lines = append(lines, parentName+":")
+
+		for _, subCategory := range subCategories {
+			description := strings.TrimSpace(subCategory.Comment)
+
+			if description != "" {
+				lines = append(lines, "  - "+subCategory.Name+": "+description)
+			} else {
+				lines = append(lines, "  - "+subCategory.Name)
+			}
+		}
+	}
+
+	return lines
 }
 
 func (p *aiTransactionDataParser) getTagNames(tagMap map[string]*models.TransactionTag) []string {
@@ -181,6 +349,8 @@ func (p *aiTransactionDataParser) getTagNames(tagMap map[string]*models.Transact
 	for _, tag := range tagMap {
 		names = append(names, tag.Name)
 	}
+
+	sort.Strings(names)
 
 	return names
 }
