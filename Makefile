@@ -107,31 +107,57 @@ server: $(BINARY) dirs ## Run the backend in the foreground (:4242)
 web: ## Run the Vite dev server in the foreground (:5173)
 	npm run serve
 
+# Everything the app needs is started and stopped together, because receipt
+# recognition is not optional to how this is used and an app whose Ollama is
+# down fails at the moment it is being relied on. The halves are still
+# available on their own as app-up / app-down and ollama-up / ollama-down.
+
 .PHONY: up
-up: $(BINARY) dirs ## Start backend and frontend in the background
-	@$(call kill_port,$(API_PORT))
-	@$(call kill_port,$(WEB_PORT))
-	@powershell -NoProfile -Command "Start-Process -FilePath './$(BINARY)' -ArgumentList 'server','run' -RedirectStandardOutput 'log/server.out' -RedirectStandardError 'log/server.err' -WindowStyle Hidden"
-	@powershell -NoProfile -Command "Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','serve' -RedirectStandardOutput 'log/web.out' -RedirectStandardError 'log/web.err' -WindowStyle Hidden"
-	@sleep 6
+up: ollama-up app-up ## Start Ollama, backend and frontend in the background
 	@$(MAKE) --no-print-directory status
 	@echo ""
 	@echo "open http://localhost:$(WEB_PORT)   (logs: make logs)"
 
 .PHONY: down
-down: ## Stop backend and frontend
+down: app-down ollama-down ## Stop Ollama, backend and frontend
+
+.PHONY: app-up
+app-up: $(BINARY) dirs ## Start backend and frontend only
+	@$(call kill_port,$(API_PORT))
+	@$(call kill_port,$(WEB_PORT))
+	@powershell -NoProfile -Command "Start-Process -FilePath './$(BINARY)' -ArgumentList 'server','run' -RedirectStandardOutput 'log/server.out' -RedirectStandardError 'log/server.err' -WindowStyle Hidden"
+	@powershell -NoProfile -Command "Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','serve' -RedirectStandardOutput 'log/web.out' -RedirectStandardError 'log/web.err' -WindowStyle Hidden"
+	@$(MAKE) --no-print-directory wait
+
+.PHONY: app-down
+app-down: ## Stop backend and frontend only
 	@$(call kill_port,$(API_PORT))
 	@$(call kill_port,$(WEB_PORT))
 	@echo "stopped :$(API_PORT) and :$(WEB_PORT)"
 
 .PHONY: restart
-restart: down up ## Restart backend and frontend
+restart: down up ## Restart everything
+
+# Waiting for the port to answer rather than sleeping a fixed six seconds: vite
+# is usually up in two and the backend takes longer after a rebuild, so a fixed
+# wait is either too slow or a lie about being ready.
+.PHONY: wait
+wait: ## Block until the web server answers (up to 40s)
+	@for i in $$(seq 1 40); do \
+		curl -s -m 1 -o /dev/null http://127.0.0.1:$(WEB_PORT)/ 2>/dev/null && exit 0; \
+		sleep 1; \
+	done; \
+	echo "web server did not come up within 40s - see log/web.err"
 
 .PHONY: status
 status: ## Show which services are listening
 	@printf "  backend :%s  %s\n" "$(API_PORT)" "$$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:$(API_PORT)/server_settings.js 2>/dev/null | grep -q 200 && echo up || echo down)"
 	@printf "  web     :%s  %s\n" "$(WEB_PORT)" "$$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:$(WEB_PORT)/ 2>/dev/null | grep -q 200 && echo up || echo down)"
 	@printf "  ollama  :%s %s\n" "$(OLLAMA_PORT)" "$$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:$(OLLAMA_PORT)/api/tags 2>/dev/null | grep -q 200 && echo up || echo down)"
+
+.PHONY: url
+url: ## Print the app url, so a launcher never has to repeat the port
+	@echo "http://localhost:$(WEB_PORT)"
 
 .PHONY: logs
 logs: ## Tail the backend log
