@@ -25,6 +25,15 @@ WEB_PORT     := 5173
 OLLAMA_PORT  := 11434
 OLLAMA_MODEL ?= qwen3-vl-16k
 
+# The models are not in the default store, they are on F:, and Ollama only
+# looks there when OLLAMA_MODELS is in its environment. The value lives in .env
+# next to everything else machine-local; the backend parses that file itself,
+# but Ollama is a separate process started from here, so it is lifted out and
+# exported. Without it Ollama comes up healthy and answers every request with
+# "model not found".
+OLLAMA_MODELS := $(shell sed -n 's/^ *\(export \)\?OLLAMA_MODELS *= *//p' .env 2>/dev/null | tail -1 | tr -d '\r"')
+export OLLAMA_MODELS
+
 # CC is set explicitly rather than prepending to PATH: PATH is ";"-separated on Windows but
 # ":"-separated inside bash, and mixing the two silently produces an unusable entry.
 GO_BUILD := CGO_ENABLED=1 CC="$(MINGW_BIN)/gcc.exe" go build -tags timetzdata
@@ -165,13 +174,23 @@ logs: ## Tail the backend log
 
 ## ---------------------------------------------------------------- ollama
 
+# The readiness check is for the model, not for the port. The failure this keeps
+# hitting is an Ollama that listens happily while pointed at the wrong model
+# store: healthy to curl, "model not found" to every request the app makes. A
+# server in that state is restarted rather than reported as already running.
+ollama_has_model = curl -s -m 2 http://127.0.0.1:$(OLLAMA_PORT)/api/tags 2>/dev/null | grep -q '"$(OLLAMA_MODEL)'
+
 .PHONY: ollama-up
 ollama-up: ## Start the Ollama server in the background
 	@mkdir -p log
-	@curl -s -m 2 -o /dev/null http://127.0.0.1:$(OLLAMA_PORT)/api/tags \
-		&& echo "ollama already running on :$(OLLAMA_PORT)" \
-		|| { powershell -NoProfile -Command "Start-Process -FilePath '$(OLLAMA)' -ArgumentList 'serve' -RedirectStandardOutput 'log/ollama.out' -RedirectStandardError 'log/ollama.err' -WindowStyle Hidden"; \
-		     sleep 4; echo "started ollama on :$(OLLAMA_PORT)"; }
+	@$(ollama_has_model) \
+		&& echo "ollama already running on :$(OLLAMA_PORT) with $(OLLAMA_MODEL)" \
+		|| { $(call kill_port,$(OLLAMA_PORT)); \
+		     powershell -NoProfile -Command "Start-Process -FilePath '$(OLLAMA)' -ArgumentList 'serve' -RedirectStandardOutput 'log/ollama.out' -RedirectStandardError 'log/ollama.err' -WindowStyle Hidden"; \
+		     sleep 4; \
+		     $(ollama_has_model) \
+		       && echo "started ollama on :$(OLLAMA_PORT) with $(OLLAMA_MODEL)" \
+		       || echo "ollama on :$(OLLAMA_PORT) has no $(OLLAMA_MODEL) in $(OLLAMA_MODELS) - see 'make ollama-models'"; }
 
 .PHONY: ollama-down
 ollama-down: ## Stop the Ollama server
