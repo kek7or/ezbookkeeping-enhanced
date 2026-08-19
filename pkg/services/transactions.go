@@ -510,6 +510,30 @@ func (s *TransactionService) GetTransactionByTransactionId(c core.Context, uid i
 	return transaction, nil
 }
 
+// GetReceiptLineItemsByTransactionId returns the receipt lines the specified transaction was summed
+// from, in the order they were printed on the receipt.
+//
+// A transaction that was not imported from a recognized receipt has none, which is not an error - it
+// simply has nothing to itemize.
+func (s *TransactionService) GetReceiptLineItemsByTransactionId(c core.Context, uid int64, transactionId int64) ([]*models.TransactionReceiptLineItem, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if transactionId <= 0 {
+		return nil, errs.ErrTransactionIdInvalid
+	}
+
+	var lineItems []*models.TransactionReceiptLineItem
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND transaction_id=?", uid, false, transactionId).OrderBy("display_order asc").Find(&lineItems)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return lineItems, nil
+}
+
 // GetTransactionsByTransactionIds returns transaction models according to transaction ids
 func (s *TransactionService) GetTransactionsByTransactionIds(c core.Context, uid int64, transactionIds []int64) ([]*models.Transaction, error) {
 	if uid <= 0 {
@@ -629,7 +653,11 @@ func (s *TransactionService) CreateTransaction(c core.Context, transaction *mode
 }
 
 // BatchCreateTransactions saves new transactions to database
-func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, processHandler core.TaskProcessUpdateHandler) error {
+//
+// allLineItems holds, by the index of the transaction it belongs to, the receipt lines that
+// transaction is the sum of. They are written in the same database transaction as the transactions
+// themselves, so a receipt is never half-itemized.
+func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, allLineItems map[int][]*models.TransactionReceiptLineItemRequest, processHandler core.TaskProcessUpdateHandler) error {
 	now := time.Now().Unix()
 	currentProcess := float64(0)
 	processUpdateStep := int(math.Max(100.0, float64(len(transactions)/100.0)))
@@ -672,7 +700,17 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 		needTagIndexUuidCount += uint16(len(uniqueTagIds))
 	}
 
-	if needTransactionUuidCount > uint16(65535) || needTagIndexUuidCount > uint16(65535) {
+	needLineItemUuidCount := 0
+
+	for index, lineItems := range allLineItems {
+		if index < 0 || index >= len(transactions) {
+			return errs.ErrOperationFailed
+		}
+
+		needLineItemUuidCount += len(lineItems)
+	}
+
+	if needTransactionUuidCount > uint16(65535) || needTagIndexUuidCount > uint16(65535) || needLineItemUuidCount > 65535 {
 		return errs.ErrImportTooManyTransaction
 	}
 
@@ -729,6 +767,38 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 		allTransactionTagIds[transaction.TransactionId] = uniqueTagIds
 	}
 
+	lineItemUuids := s.GenerateUuids(uuid.UUID_TYPE_DEFAULT, uint16(needLineItemUuidCount))
+	lineItemUuidIndex := 0
+
+	if len(lineItemUuids) < needLineItemUuidCount {
+		return errs.ErrSystemIsBusy
+	}
+
+	allTransactionLineItems := make(map[int64][]*models.TransactionReceiptLineItem)
+
+	for index, lineItems := range allLineItems {
+		transaction := transactions[index]
+		transactionLineItems := make([]*models.TransactionReceiptLineItem, len(lineItems))
+
+		for i := 0; i < len(lineItems); i++ {
+			transactionLineItems[i] = &models.TransactionReceiptLineItem{
+				LineItemId:      lineItemUuids[lineItemUuidIndex],
+				Uid:             transaction.Uid,
+				Deleted:         false,
+				TransactionId:   transaction.TransactionId,
+				DisplayOrder:    int32(i),
+				Name:            lineItems[i].Name,
+				Amount:          lineItems[i].Amount,
+				CreatedUnixTime: now,
+				UpdatedUnixTime: now,
+			}
+
+			lineItemUuidIndex++
+		}
+
+		allTransactionLineItems[transaction.TransactionId] = transactionLineItems
+	}
+
 	userDataDb := s.UserDataDB(uid)
 
 	return userDataDb.DoTransaction(c, func(sess *xorm.Session) error {
@@ -749,6 +819,15 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 				transactionTimeZone := time.FixedZone("Transaction Timezone", int(transaction.TimezoneUtcOffset)*60)
 				log.Errorf(c, "[transactions.BatchCreateTransactions] failed to create trasaction (datetime: %s, type: %s, amount: %d)", utils.FormatUnixTimeToLongDateTime(transactionUnixTime, transactionTimeZone), transaction.Type, transaction.Amount)
 				return err
+			}
+
+			for _, lineItem := range allTransactionLineItems[transaction.TransactionId] {
+				_, err := sess.Insert(lineItem)
+
+				if err != nil {
+					log.Errorf(c, "[transactions.BatchCreateTransactions] failed to add receipt line item of transaction \"id:%d\", because %s", transaction.TransactionId, err.Error())
+					return err
+				}
 			}
 		}
 
@@ -1989,6 +2068,11 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 		DeletedUnixTime: now,
 	}
 
+	lineItemUpdateModel := &models.TransactionReceiptLineItem{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		// Get and verify current transaction
 		oldTransaction := &models.Transaction{}
@@ -2043,6 +2127,13 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 
 		// Update transaction picture
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND transaction_id=?", uid, false, oldTransaction.TransactionId).Update(pictureUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// Update transaction receipt line items
+		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND transaction_id=?", uid, false, oldTransaction.TransactionId).Update(lineItemUpdateModel)
 
 		if err != nil {
 			return err
@@ -2140,6 +2231,11 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 		DeletedUnixTime: now,
 	}
 
+	lineItemUpdateModel := &models.TransactionReceiptLineItem{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
 	accountUpdateModel := &models.Account{
 		Balance:         0,
 		Deleted:         deleteAccount,
@@ -2163,6 +2259,13 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 
 		// Update all transaction pictures to deleted
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(pictureUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// Update all transaction receipt line items to deleted
+		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(lineItemUpdateModel)
 
 		if err != nil {
 			return err

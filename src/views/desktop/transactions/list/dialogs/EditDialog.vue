@@ -87,6 +87,9 @@
                         <v-tab value="pictures" :disabled="mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit && (!transaction.pictures || !transaction.pictures.length)" v-if="type === TransactionEditPageType.Transaction && isTransactionPicturesEnabled()">
                             <span>{{ tt('Pictures') }}</span>
                         </v-tab>
+                        <v-tab value="lineItems" :disabled="!transactionLineItems.length" v-if="type === TransactionEditPageType.Transaction">
+                            <span>{{ tt('Positions') }}</span>
+                        </v-tab>
                     </v-tabs>
                 </div>
 
@@ -416,6 +419,31 @@
                             </v-col>
                         </v-row>
                     </v-window-item>
+                    <v-window-item value="lineItems">
+                        <div class="transaction-line-items mt-2" v-if="transactionLineItems.length">
+                            <div class="d-flex align-center px-2 pb-1 text-caption text-medium-emphasis">
+                                <span class="flex-grow-1">{{ tt('Positions') }}</span>
+                                <span class="ms-4 text-no-wrap">{{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(transactionLineItems.length) }) }}</span>
+                            </div>
+                            <v-divider/>
+                            <div class="transaction-line-item d-flex align-center px-2 py-1"
+                                 :key="lineItemIdx" v-for="(lineItem, lineItemIdx) in transactionLineItems">
+                                <span class="text-truncate flex-grow-1">
+                                    {{ lineItem.name }}
+                                    <v-tooltip activator="parent" open-delay="500">{{ lineItem.name }}</v-tooltip>
+                                </span>
+                                <span class="ms-4 text-no-wrap">{{ getDisplayLineItemAmount(lineItem.amount) }}</span>
+                            </div>
+                            <v-divider/>
+                            <div class="d-flex align-center px-2 pt-1 font-weight-medium">
+                                <span class="flex-grow-1">{{ tt('Total Amount') }}</span>
+                                <span class="ms-4 text-no-wrap">{{ getDisplayLineItemAmount(transactionLineItemsTotalAmount) }}</span>
+                            </div>
+                            <div class="px-2 pt-1 text-caption text-error" v-if="!transactionLineItemsMatchAmount">
+                                {{ tt('These positions do not add up to the amount of this transaction.') }}
+                            </div>
+                        </div>
+                    </v-window-item>
                 </v-window>
             </v-card-text>
             <v-card-text>
@@ -546,7 +574,7 @@ import { SUPPORTED_IMAGE_EXTENSIONS } from '@/consts/file.ts';
 
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
-import { Transaction } from '@/models/transaction.ts';
+import { Transaction, type TransactionReceiptLineItem } from '@/models/transaction.ts';
 
 import { isDefined } from '@/lib/common.ts';
 import {
@@ -554,6 +582,7 @@ import {
     getCurrentUnixTime
 } from '@/lib/datetime.ts';
 import { formatCoordinate } from '@/lib/coordinate.ts';
+import { parseBigDecimal } from '@/lib/numeral.ts';
 import { generateRandomUUID } from '@/lib/misc.ts';
 import {
     getTransactionPrimaryCategoryName,
@@ -610,7 +639,7 @@ const props = defineProps<{
     show?: boolean;
 }>();
 
-const { tt } = useI18n();
+const { tt, formatNumberToLocalizedNumerals, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 
 const {
     mode,
@@ -705,6 +734,30 @@ const sourceAmountColor = computed<string | undefined>(() => {
     return undefined;
 });
 
+// the receipt lines this transaction was summed from, shown exactly as they were recorded at import -
+// nothing here writes them back, and only the Positions tab reads them
+const transactionLineItems = computed<TransactionReceiptLineItem[]>(() => {
+    return transaction.value.lineItems ?? [];
+});
+
+// summed over minor units, the same way the import summed them, so the total shown here is the one
+// the transaction was given rather than a re-rounded approximation of it
+const transactionLineItemsTotalAmount = computed<number>(() => {
+    let totalAmount = 0;
+
+    for (const lineItem of transactionLineItems.value) {
+        totalAmount += lineItem.amount;
+    }
+
+    return totalAmount;
+});
+
+// an amount corrected by hand after the import no longer follows its lines, and saying so is more
+// honest than quietly showing a list that does not explain the number above it
+const transactionLineItemsMatchAmount = computed<boolean>(() => {
+    return transactionLineItemsTotalAmount.value === transaction.value.sourceAmount;
+});
+
 const isTransactionModified = computed<boolean>(() => {
     if (mode.value === TransactionEditPageMode.Add) {
         return transactionsStore.isTransactionDraftModified(transaction.value, initOptions.value?.amount, initOptions.value?.categoryId, initOptions.value?.accountId, initOptions.value?.tagIds, firstVisibleAccountId.value);
@@ -714,6 +767,10 @@ const isTransactionModified = computed<boolean>(() => {
         return false;
     }
 });
+
+function getDisplayLineItemAmount(amount: number): string {
+    return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(amount), sourceAccountCurrency.value);
+}
 
 function open(options: TransactionEditOptions): Promise<TransactionEditResponse | undefined> {
     addByTemplateId.value = null;
@@ -1050,6 +1107,9 @@ function duplicate(withTime?: boolean, withGeoLocation?: boolean): void {
     }
 
     transaction.value.clearPictures();
+    // a duplicate is a new transaction that no receipt was read for, and nothing in the add path
+    // records lines, so it must not claim the ones it was copied from
+    transaction.value.lineItems = undefined;
     mode.value = TransactionEditPageMode.Add;
 }
 

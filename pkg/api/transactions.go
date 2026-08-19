@@ -946,6 +946,13 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 	var tagMap map[int64]*models.TransactionTag
 	var pictureInfos []*models.TransactionPictureInfo
 
+	lineItems, err := a.transactions.GetReceiptLineItemsByTransactionId(c, uid, transaction.TransactionId)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.TransactionGetHandler] failed to get transaction receipt line items for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
 	if !transactionGetReq.TrimCategory {
 		category, err = a.transactionCategories.GetCategoryByCategoryId(c, uid, transaction.CategoryId)
 
@@ -999,6 +1006,16 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 
 	if transactionGetReq.WithPictures && a.CurrentConfig().EnableTransactionPictures {
 		transactionResp.Pictures = a.GetTransactionPictureInfoResponseList(pictureInfos)
+	}
+
+	if len(lineItems) > 0 {
+		lineItemResps := make([]*models.TransactionReceiptLineItemResponse, len(lineItems))
+
+		for i := 0; i < len(lineItems); i++ {
+			lineItemResps[i] = lineItems[i].ToTransactionReceiptLineItemResponse()
+		}
+
+		transactionResp.LineItems = lineItemResps
 	}
 
 	return transactionResp, nil
@@ -2715,6 +2732,7 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 	}
 
 	newTransactionTagIdsMap := make(map[int][]int64, len(transactionImportReq.Transactions))
+	newTransactionLineItemsMap := make(map[int][]*models.TransactionReceiptLineItemRequest)
 
 	for i := 0; i < len(transactionImportReq.Transactions); i++ {
 		transactionCreateReq := transactionImportReq.Transactions[i]
@@ -2753,6 +2771,10 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		}
 
 		newTransactionTagIdsMap[i] = tagIds
+
+		if len(transactionCreateReq.LineItems) > 0 {
+			newTransactionLineItemsMap[i] = transactionCreateReq.LineItems
+		}
 	}
 
 	user, err := a.users.GetUserById(c, uid)
@@ -2794,7 +2816,7 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		}
 	}
 
-	err = a.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, func(currentProcess float64) {
+	err = a.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, newTransactionLineItemsMap, func(currentProcess float64) {
 		a.SetSubmissionRemarkIfEnable(duplicatechecker.DUPLICATE_CHECKER_TYPE_IMPORT_TRANSACTIONS, uid, transactionImportReq.ClientSessionId, fmt.Sprintf("processing:%.2f", currentProcess))
 	})
 	count := len(newTransactions)

@@ -230,6 +230,53 @@ describe('ImportReceipt', () => {
         expect(receipt.categoryGroups[0]!.lineItems[1]!.remembered).toBe(false);
     });
 
+    test('sends the lines a transaction was summed from along with it', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+        const transactions = receipt.toImportTransactions(0);
+
+        expect(transactions[0]!.lineItems).toEqual([
+            { name: 'Broccoli', amount: 149 },
+            { name: 'Kartoffeln früh', amount: 299 },
+            { name: 'Milchcreme Cookies', amount: 507 }
+        ]);
+
+        // what is sent is what the transaction is the sum of, so the two always agree
+        for (const transaction of transactions) {
+            const total = transaction.lineItems!.reduce((sum, lineItem) => sum + lineItem.amount, 0);
+            expect(total).toBe(transaction.sourceAmount);
+        }
+
+        expect(transactions[0]!.toCreateRequest().lineItems).toEqual(transactions[0]!.lineItems);
+    });
+
+    test('a line dragged to another category is sent with the transaction it now belongs to', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+        const foodGroup = receipt.categoryGroups[0]!;
+        const drinkGroup = receipt.categoryGroups[1]!;
+
+        drinkGroup.lineItems.push(...foodGroup.lineItems.splice(2, 1));
+
+        const transactions = receipt.toImportTransactions(0);
+
+        expect(transactions[0]!.lineItems).toEqual([
+            { name: 'Broccoli', amount: 149 },
+            { name: 'Kartoffeln früh', amount: 299 }
+        ]);
+        expect(transactions[1]!.lineItems).toContainEqual({ name: 'Milchcreme Cookies', amount: 507 });
+        expect(transactions[1]!.lineItems!.length).toBe(3);
+    });
+
+    test('a price corrected by hand is the price that is recorded', () => {
+        const receipt = ImportReceipt.of(createReceiptResponse(), 0, 'receipt.jpg')!;
+
+        receipt.categoryGroups[0]!.lineItems[2]!.amount = 149;
+
+        const transactions = receipt.toImportTransactions(0);
+
+        expect(transactions[0]!.sourceAmount).toBe(597);
+        expect(transactions[0]!.lineItems).toContainEqual({ name: 'Milchcreme Cookies', amount: 149 });
+    });
+
     test('leaves an import that is not a receipt to the ordinary import table', () => {
         const withoutLineItems = createReceiptResponse();
         expect(ImportReceipt.of({ items: withoutLineItems.items, totalCount: 3 }, 0, 'receipt.jpg')).toBeUndefined();

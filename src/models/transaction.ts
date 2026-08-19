@@ -29,6 +29,9 @@ export class Transaction implements TransactionInfoResponse {
     public tagIds: string[];
     public comment: string;
     public editable: boolean;
+    // the receipt lines this transaction was summed from, only ever read - nothing in the edit path
+    // writes them, so a transaction whose amount was corrected by hand keeps the lines it came with
+    public lineItems?: TransactionReceiptLineItem[];
 
     private _pictures?: TransactionPicture[];
     private _geoLocation?: TransactionGeoLocation;
@@ -363,6 +366,10 @@ export class Transaction implements TransactionInfoResponse {
             transaction.setLatitudeAndLongitude(transactionResponse.geoLocation.latitude, transactionResponse.geoLocation.longitude);
         }
 
+        if (transactionResponse.lineItems && transactionResponse.lineItems.length) {
+            transaction.lineItems = transactionResponse.lineItems;
+        }
+
         return transaction;
     }
 
@@ -529,6 +536,14 @@ export interface TransactionGeoLocationRequest {
     readonly longitude: number;
 }
 
+// TransactionReceiptLineItem is one line of the receipt a transaction was summed from: what was
+// bought and what it cost. Sent once, when an imported transaction is created, and read back with the
+// transaction so that its amount can be shown as the sum it actually is.
+export interface TransactionReceiptLineItem {
+    readonly name: string;
+    readonly amount: number;
+}
+
 export interface TransactionCreateRequest {
     readonly type: number;
     readonly categoryId: string;
@@ -544,6 +559,7 @@ export interface TransactionCreateRequest {
     readonly comment: string;
     readonly geoLocation?: TransactionGeoLocationRequest;
     readonly clientSessionId: string;
+    readonly lineItems?: TransactionReceiptLineItem[];
 }
 
 export interface TransactionModifyRequest {
@@ -673,6 +689,7 @@ export interface TransactionInfoResponse {
     readonly comment: string;
     readonly geoLocation?: TransactionGeoLocationResponse;
     readonly editable: boolean;
+    readonly lineItems?: TransactionReceiptLineItem[];
 }
 
 export interface TransactionStatisticRequest {

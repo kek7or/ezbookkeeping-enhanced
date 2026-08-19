@@ -213,6 +213,9 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
 
         if (setContextData) {
             transaction.setGeoLocation(transaction2.geoLocation);
+            // the receipt lines belong to that one transaction, so they are carried only when this is
+            // that transaction being opened - a draft or a template seeded from it starts without them
+            transaction.lineItems = transaction2.lineItems;
         }
     }
 }

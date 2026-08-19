@@ -1,7 +1,7 @@
 import { TransactionType } from '@/core/transaction.ts';
 import { TRANSACTION_MAX_COMMENT_LENGTH } from '@/consts/transaction.ts';
 
-import type { TransactionCreateRequest, TransactionGeoLocationResponse } from './transaction.ts';
+import type { TransactionCreateRequest, TransactionGeoLocationResponse, TransactionReceiptLineItem } from './transaction.ts';
 
 export class ImportTransaction implements ImportTransactionResponse {
     public type: number;
@@ -28,6 +28,10 @@ export class ImportTransaction implements ImportTransactionResponse {
     public index: number;
     public selected: boolean;
     public valid: boolean;
+    // the receipt lines this transaction is the sum of, set only when it was built from a recognized
+    // receipt, and kept so that the transaction can still answer what its amount is made of after the
+    // import dialog is gone
+    public lineItems?: TransactionReceiptLineItem[];
 
     private constructor(response: ImportTransactionResponse, index: number) {
         this.type = response.type;
@@ -71,7 +75,8 @@ export class ImportTransaction implements ImportTransactionResponse {
             pictureIds: [],
             comment: this.comment,
             geoLocation: this.geoLocation,
-            clientSessionId: ''
+            clientSessionId: '',
+            lineItems: this.lineItems
         };
     }
 

@@ -2031,6 +2031,8 @@
     "Transactions": "Transactions",
     "Transaction Pictures": "Transaction Pictures",
     "Pictures": "Pictures",
+    "Positions": "Positions",
+    "These positions do not add up to the amount of this transaction.": "These positions do not add up to the amount of this transaction.",
     "Add Transaction": "Add Transaction",
     "Edit Transaction": "Edit Transaction",
     "Add Transaction Template": "Add Transaction Template",

@@ -176,6 +176,11 @@ type TransactionCreateRequest struct {
 	Comment              string                         `json:"comment" binding:"max=255"`
 	GeoLocation          *TransactionGeoLocationRequest `json:"geoLocation" binding:"omitempty"`
 	ClientSessionId      string                         `json:"clientSessionId"`
+	// LineItems are the receipt lines this transaction is the sum of. Only the import path fills
+	// them in - a transaction entered by hand has nothing to itemize - and they are recorded once,
+	// when the transaction is created. A receipt longer than the limit is not a weekly shop, and
+	// the limit is what stops a malformed request from writing an unbounded number of rows.
+	LineItems []*TransactionReceiptLineItemRequest `json:"lineItems" binding:"omitempty,max=1000,dive"`
 }
 
 // TransactionModifyRequest represents all parameters of transaction modification request
@@ -420,6 +425,9 @@ type TransactionInfoResponse struct {
 	Comment              string                                   `json:"comment"`
 	GeoLocation          *TransactionGeoLocationResponse          `json:"geoLocation,omitempty"`
 	Editable             bool                                     `json:"editable"`
+	// LineItems are the receipt lines this transaction was summed from, in the order they were
+	// printed, absent for every transaction that did not come from a recognized receipt
+	LineItems []*TransactionReceiptLineItemResponse `json:"lineItems,omitempty"`
 }
 
 // TransactionCountResponse represents transaction count response

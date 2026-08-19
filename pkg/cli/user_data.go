@@ -872,7 +872,7 @@ func (l *UserDataCli) ImportTransaction(c *core.CliContext, username string, fil
 		return errs.ErrOperationFailed
 	}
 
-	err = l.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, nil)
+	err = l.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, nil, nil)
 
 	if err != nil {
 		log.CliErrorf(c, "[user_data.ImportTransaction] failed to create transaction, because %s", err.Error())

@@ -169,6 +169,12 @@ export class ImportReceipt {
             }, startIndex + transactions.length);
 
             transaction.selected = categoryGroup.selected;
+            // the lines travel with the transaction they were summed into, so that the total it was
+            // given can still be taken apart once the receipt itself is gone
+            transaction.lineItems = categoryGroup.lineItems.map(lineItem => ({
+                name: lineItem.name,
+                amount: lineItem.amount
+            }));
             transactions.push(transaction);
         }
 
