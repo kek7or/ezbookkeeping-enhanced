@@ -42,6 +42,16 @@ type TransactionReceiptRequest struct {
 	HasPrintedTotal bool   `json:"hasPrintedTotal"`
 }
 
+// TransactionReceiptModifyRequest represents all parameters of a request to rename a receipt.
+//
+// The name is the only thing about a receipt that can be changed after the fact. What the till printed
+// and when it was paid are facts about a piece of paper and are not the user's to revise; what the
+// shopping is called is nothing but theirs.
+type TransactionReceiptModifyRequest struct {
+	Id           int64  `json:"id,string" binding:"required,min=1"`
+	MerchantName string `json:"merchantName" binding:"max=255"`
+}
+
 // TransactionReceiptInfoResponse represents a view-object of the receipt a transaction was imported from
 type TransactionReceiptInfoResponse struct {
 	Id           int64  `json:"id,string"`

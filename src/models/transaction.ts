@@ -563,6 +563,13 @@ export interface TransactionReceipt {
     readonly hasPrintedTotal?: boolean;
 }
 
+// TransactionReceiptModifyRequest renames a receipt that is already in the ledger. The name is the
+// only part of a receipt that can be changed after importing - the rest is what the paper said.
+export interface TransactionReceiptModifyRequest {
+    readonly id: string;
+    readonly merchantName: string;
+}
+
 // TransactionReceiptRequest is one receipt submitted with an import, referenced by the receiptIndex
 // of every transaction that was read from it
 export interface TransactionReceiptRequest {

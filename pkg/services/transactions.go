@@ -1056,6 +1056,39 @@ func (s *TransactionService) CreateReceiptsForExistingTransactions(c core.Contex
 	return stampedCount, nil
 }
 
+// ModifyReceiptMerchantName renames the specified receipt.
+//
+// An empty name is allowed and is not the same as a failure: it puts the receipt back to being named
+// after what it is, which is where a receipt whose shop could not be read starts out anyway.
+func (s *TransactionService) ModifyReceiptMerchantName(c core.Context, uid int64, receiptId int64, merchantName string) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	if receiptId <= 0 {
+		return errs.ErrTransactionReceiptIdInvalid
+	}
+
+	updateModel := &models.TransactionReceipt{
+		MerchantName:    merchantName,
+		UpdatedUnixTime: time.Now().Unix(),
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		// the columns are named explicitly so that clearing the name writes an empty string rather
+		// than being skipped as an unset field
+		updatedRows, err := sess.ID(receiptId).Cols("merchant_name", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(updateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrTransactionReceiptNotFound
+		}
+
+		return nil
+	})
+}
+
 // CreateScheduledTransactions saves all scheduled transactions that should be created now
 func (s *TransactionService) CreateScheduledTransactions(c core.Context, currentUnixTime int64, interval time.Duration) error {
 	var allTemplates []*models.TransactionTemplate

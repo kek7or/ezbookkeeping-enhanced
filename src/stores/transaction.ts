@@ -1435,6 +1435,38 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
+    function modifyTransactionReceipt({ receiptId, merchantName }: { receiptId: string, merchantName: string }): Promise<boolean> {
+        return new Promise((resolve, reject) => {
+            services.modifyTransactionReceipt({
+                id: receiptId,
+                merchantName: merchantName
+            }).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to rename this receipt' });
+                    return;
+                }
+
+                // only the list shows a receipt name, so nothing else has to be reloaded - the amounts
+                // a rename does not touch are what everything else is built from
+                updateTransactionListInvalidState(true);
+
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('failed to rename receipt', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to rename this receipt' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function batchDeleteTransactions({ transactionIds, password }: { transactionIds: string[], password: string }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.batchDeleteTransaction({
@@ -1788,6 +1820,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         batchClearAllTagsFromTransaction,
         moveAllTransactionsBetweenAccounts,
         deleteTransaction,
+        modifyTransactionReceipt,
         batchDeleteTransactions,
         recognizeTransactionText,
         recognizeReceiptImage,

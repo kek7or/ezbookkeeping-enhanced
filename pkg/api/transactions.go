@@ -2702,6 +2702,31 @@ func (a *TransactionsApi) TransactionReceiptLineItemCategoryRememberHandler(c *c
 	return true, nil
 }
 
+// TransactionReceiptModifyHandler renames the specified receipt for the current user
+func (a *TransactionsApi) TransactionReceiptModifyHandler(c *core.WebContext) (any, *errs.Error) {
+	var receiptModifyReq models.TransactionReceiptModifyRequest
+	err := c.ShouldBindJSON(&receiptModifyReq)
+
+	if err != nil {
+		log.Warnf(c, "[transactions.TransactionReceiptModifyHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	merchantName := strings.TrimSpace(receiptModifyReq.MerchantName)
+
+	err = a.transactions.ModifyReceiptMerchantName(c, uid, receiptModifyReq.Id, merchantName)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.TransactionReceiptModifyHandler] failed to rename receipt \"id:%d\" for user \"uid:%d\", because %s", receiptModifyReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[transactions.TransactionReceiptModifyHandler] user \"uid:%d\" has renamed receipt \"id:%d\"", uid, receiptModifyReq.Id)
+
+	return true, nil
+}
+
 // TransactionImportHandler imports transactions by request parameters for current user
 func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *errs.Error) {
 	var transactionImportReq models.TransactionImportRequest

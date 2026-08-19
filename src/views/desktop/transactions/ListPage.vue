@@ -563,7 +563,13 @@
                                                 <td class="transaction-table-column-category">
                                                     <div class="d-flex align-center">
                                                         <v-icon size="24" :icon="mdiReceiptTextOutline"></v-icon>
-                                                        <span class="ms-2 font-weight-medium">{{ row.receiptGroup.receipt.merchantName || tt('Receipt') }}</span>
+                                                        <span class="receipt-name ms-2 font-weight-medium"
+                                                              :class="{ 'text-medium-emphasis': !row.receiptGroup.receipt.merchantName }"
+                                                              @click.stop="renameReceipt(row.receiptGroup)">
+                                                            {{ row.receiptGroup.receipt.merchantName || tt('Receipt') }}
+                                                            <v-icon class="receipt-name-edit ms-1" size="14" :icon="mdiPencilOutline"></v-icon>
+                                                            <v-tooltip activator="parent" open-delay="500">{{ tt('Rename Receipt') }}</v-tooltip>
+                                                        </span>
                                                         <v-chip class="ms-2" color="default" size="x-small">
                                                             {{ tt('format.misc.receiptTransactionCount', { count: formatNumberToLocalizedNumerals(row.receiptGroup.transactions.length) }) }}
                                                         </v-chip>
@@ -732,6 +738,7 @@
 
     <edit-dialog ref="editDialog" :type="TransactionEditPageType.Transaction" />
     <batch-delete-dialog ref="batchDeleteDialog" />
+    <receipt-rename-dialog ref="receiptRenameDialog" />
     <a-i-image-recognition-dialog ref="aiImageRecognitionDialog" />
     <import-dialog ref="importDialog" :persistent="true" />
 
@@ -761,6 +768,7 @@ import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
 import BatchDeleteDialog from '@/views/desktop/insights/dialogs/BatchDeleteDialog.vue';
+import ReceiptRenameDialog from './list/dialogs/ReceiptRenameDialog.vue';
 import AIImageRecognitionDialog from './list/dialogs/AIImageRecognitionDialog.vue';
 import ImportDialog from './import/ImportDialog.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
@@ -862,6 +870,7 @@ import {
     mdiTextBoxEditOutline,
     mdiReceiptTextOutline,
     mdiDeleteOutline,
+    mdiPencilOutline,
     mdiChevronRight,
     mdiChevronDown,
     mdiAlertOutline
@@ -887,6 +896,7 @@ type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 type EditDialogType = InstanceType<typeof EditDialog>;
 type BatchDeleteDialogType = InstanceType<typeof BatchDeleteDialog>;
+type ReceiptRenameDialogType = InstanceType<typeof ReceiptRenameDialog>;
 type AIImageRecognitionDialogType = InstanceType<typeof AIImageRecognitionDialog>;
 type ImportDialogType = InstanceType<typeof ImportDialog>;
 
@@ -987,6 +997,7 @@ const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editDialog = useTemplateRef<EditDialogType>('editDialog');
 const batchDeleteDialog = useTemplateRef<BatchDeleteDialogType>('batchDeleteDialog');
+const receiptRenameDialog = useTemplateRef<ReceiptRenameDialogType>('receiptRenameDialog');
 const aiImageRecognitionDialog = useTemplateRef<AIImageRecognitionDialogType>('aiImageRecognitionDialog');
 const importDialog = useTemplateRef<ImportDialogType>('importDialog');
 
@@ -1870,6 +1881,24 @@ function exportTransactions(fileExtension: string): void {
     });
 }
 
+// renameReceipt lets the user say what a shopping trip is called.
+//
+// It is the only way to name the trips that were never imported with a shop name - the ones recovered
+// from the transactions of August, and the ones whose header the model could not read - and the only
+// way to correct a name it read wrongly.
+function renameReceipt(receiptGroup: TransactionReceiptGroup): void {
+    receiptRenameDialog.value?.open({
+        receiptId: receiptGroup.receipt.id,
+        merchantName: receiptGroup.receipt.merchantName ?? ''
+    }).then(renamed => {
+        if (renamed) {
+            reload(false, false);
+        }
+    }).catch(() => {
+        // cancelled, and a receipt nobody renamed needs nothing reloaded
+    });
+}
+
 // removeReceipt deletes a whole shopping trip: every transaction that was imported from that receipt,
 // in one go.
 //
@@ -2058,10 +2087,27 @@ init(props);
     height: 40px !important;
 }
 
-/* the row a shopping trip is closed into. It reads as a heading for the rows it opens to, so it is
-   set apart from them rather than looking like one more transaction. */
-.v-table.transaction-table .transaction-table-row-receipt > td {
-    background-color: rgba(var(--v-theme-on-surface), 0.03);
+/* A shopping trip is a row like any other and is not shaded to say so. What sets it apart is what it
+   says - the receipt icon, the name, the count of what it holds - and not the colour it is drawn in,
+   which only reads as some other kind of transaction. */
+
+/* the name of a shopping trip is what you click to change it, so it has to look like something that
+   can be clicked rather than like the rest of the row */
+.v-table.transaction-table .transaction-table-row-receipt .receipt-name {
+    cursor: text;
+    border-bottom: 1px dashed rgba(var(--v-theme-on-surface), 0.25);
+}
+
+.v-table.transaction-table .transaction-table-row-receipt .receipt-name:hover {
+    border-bottom-color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.v-table.transaction-table .transaction-table-row-receipt .receipt-name .receipt-name-edit {
+    opacity: 0;
+}
+
+.v-table.transaction-table .transaction-table-row-receipt:hover .receipt-name .receipt-name-edit {
+    opacity: 0.6;
 }
 
 /* the delete action of a shopping trip is always there rather than appearing on hover: it is the only
@@ -2074,14 +2120,10 @@ init(props);
     opacity: 1;
 }
 
-/* the transactions of an opened shopping trip are indented under it, so that where the trip ends is
-   visible without a second separator */
+/* the transactions of an opened shopping trip are indented under it, which says where the trip starts
+   and ends without colouring anything */
 .v-table.transaction-table .transaction-table-row-in-receipt > td:first-child {
     padding-inline-start: 32px;
-}
-
-.v-table.transaction-table .transaction-table-row-in-receipt > td {
-    background-color: rgba(var(--v-theme-on-surface), 0.015);
 }
 
 .transaction-table .transaction-table-column-time {
