@@ -98,10 +98,19 @@ type ImportReceiptLineItemResponse struct {
 	Remembered bool `json:"remembered,omitempty"`
 }
 
-// ImportReceiptResponse represents the lines one receipt image was read as, in the order they are
-// printed on the receipt
+// ImportReceiptResponse represents one recognized receipt image: the lines it was read as, in the
+// order they are printed on it, and what the receipt states about itself as a whole.
+//
+// The receipt-level facts are returned so that the import can record the shopping trip the
+// transactions belong to, rather than only the transactions themselves.
 type ImportReceiptResponse struct {
 	LineItems []*ImportReceiptLineItemResponse `json:"lineItems"`
+	// MerchantName is the shop as printed on the receipt, empty when none could be read
+	MerchantName string `json:"merchantName,omitempty"`
+	// PrintedTotal is the total the till printed, in minor units, meaningful only when
+	// HasPrintedTotal says the receipt stated one at all
+	PrintedTotal    int64 `json:"printedTotal,omitempty"`
+	HasPrintedTotal bool  `json:"hasPrintedTotal,omitempty"`
 }
 
 // ImportTransactionResponsePageWrapper represents a response of imported transaction which contains items and count

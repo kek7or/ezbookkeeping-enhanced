@@ -22,7 +22,7 @@ import type { Account } from '@/models/account.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
 import { TransactionTagGroup } from '@/models/transaction_tag_group.ts';
 import type { TransactionTag } from '@/models/transaction_tag.ts';
-import { type Transaction, TransactionTagFilter } from '@/models/transaction.ts';
+import { type Transaction, type TransactionReceiptGroup, TransactionTagFilter } from '@/models/transaction.ts';
 import type { TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
 
 import {
@@ -431,6 +431,30 @@ export function useTransactionListPageBase() {
         return userDefaultCurrency.value;
     }
 
+    // the total of a shopping trip is formatted in the currency of the account that paid for it, which
+    // is the same account for every transaction of one receipt, so the first of them answers for all
+    function getDisplayReceiptGroupAmount(receiptGroup: TransactionReceiptGroup, inUserDefaultCurrency?: boolean): string {
+        const firstTransaction = receiptGroup.transactions[0];
+
+        if (!firstTransaction) {
+            return '';
+        }
+
+        return formatAmount(parseBigDecimal(receiptGroup.totalAmount), receiptGroup.hasHiddenAmount, getDisplayAmountCurrency(firstTransaction), inUserDefaultCurrency);
+    }
+
+    // what the till printed as the total, shown only where it disagrees with the transactions, so that
+    // the two numbers can be read against each other
+    function getDisplayReceiptPrintedTotal(receiptGroup: TransactionReceiptGroup, inUserDefaultCurrency?: boolean): string {
+        const firstTransaction = receiptGroup.transactions[0];
+
+        if (!firstTransaction || !receiptGroup.receipt.hasPrintedTotal) {
+            return '';
+        }
+
+        return formatAmount(parseBigDecimal(receiptGroup.receipt.printedTotal ?? 0), false, getDisplayAmountCurrency(firstTransaction), inUserDefaultCurrency);
+    }
+
     function getDisplayMonthTotalAmount(amount: BigDecimal, currency: string, symbol: string, incomplete: boolean, inDefaultCurrency?: boolean): string {
         const displayAmount = formatAmount(amount, false, currency, inDefaultCurrency);
         return symbol + displayAmount + (incomplete ? INCOMPLETE_AMOUNT_SUFFIX : '');
@@ -512,6 +536,8 @@ export function useTransactionListPageBase() {
         getDisplayTimeInDefaultTimezone,
         getDisplayAmount,
         getDisplayAmountCurrency,
+        getDisplayReceiptGroupAmount,
+        getDisplayReceiptPrintedTotal,
         getDisplayMonthTotalAmount,
         getTransactionTypeName,
         getTransactionPictureUrl

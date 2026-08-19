@@ -1,9 +1,11 @@
 import { TransactionType } from '@/core/transaction.ts';
 
+import type { TransactionReceiptRequest } from './transaction.ts';
 import {
     ImportTransaction,
     type ImportTransactionResponse,
     type ImportTransactionResponsePageWrapper,
+    type ImportReceiptResponse,
     type ImportReceiptLineItemResponse,
     type ReceiptLineItemCategoryRememberItem
 } from './imported_transaction.ts';
@@ -104,8 +106,15 @@ export class ImportReceipt {
     public readonly originalSourceAccountCurrency: string;
     public sourceAccountId: string;
     public categoryGroups: ImportReceiptCategoryGroup[];
+    // the shop the receipt was printed by, empty when the model could not read the header
+    public readonly merchantName: string;
+    // the total the till printed, in minor units, and whether the receipt stated one at all. It is
+    // kept apart from totalAmount because the two answer different questions: this is what the paper
+    // says was paid, that is what the groups currently add up to.
+    public readonly printedTotal: number;
+    public readonly hasPrintedTotal: boolean;
 
-    private constructor(index: number, fileName: string, firstTransaction: ImportTransactionResponse, categoryGroups: ImportReceiptCategoryGroup[]) {
+    private constructor(index: number, fileName: string, firstTransaction: ImportTransactionResponse, categoryGroups: ImportReceiptCategoryGroup[], receipt: ImportReceiptResponse) {
         this.index = index;
         this.fileName = fileName;
         this.type = TransactionType.Expense;
@@ -115,6 +124,19 @@ export class ImportReceipt {
         this.originalSourceAccountCurrency = firstTransaction.originalSourceAccountCurrency;
         this.sourceAccountId = firstTransaction.sourceAccountId;
         this.categoryGroups = categoryGroups;
+        this.merchantName = receipt.merchantName ?? '';
+        this.printedTotal = receipt.printedTotal ?? 0;
+        this.hasPrintedTotal = !!receipt.hasPrintedTotal;
+    }
+
+    // toRequest returns what is recorded about the shopping trip itself, which every transaction of
+    // this receipt will point at
+    public toRequest(): TransactionReceiptRequest {
+        return {
+            merchantName: this.merchantName,
+            printedTotal: this.printedTotal,
+            hasPrintedTotal: this.hasPrintedTotal
+        };
     }
 
     public get totalAmount(): number {
@@ -175,6 +197,9 @@ export class ImportReceipt {
                 name: lineItem.name,
                 amount: lineItem.amount
             }));
+            // every category of one receipt points back at it, which is what lets the transaction
+            // list show the shopping trip as one thing rather than as five unrelated rows
+            transaction.receiptIndex = this.index;
             transactions.push(transaction);
         }
 
@@ -216,9 +241,10 @@ export class ImportReceipt {
     // nothing that can be edited line by line - a text import, an image the model answered with whole
     // transactions instead of receipt lines, or a receipt whose lines the server could not return.
     public static of(response: ImportTransactionResponsePageWrapper, index: number, fileName: string): ImportReceipt | undefined {
-        const lineItems = response.receipt?.lineItems;
+        const receipt = response.receipt;
+        const lineItems = receipt?.lineItems;
 
-        if (!lineItems || lineItems.length < 1 || !response.items || response.items.length < 1) {
+        if (!receipt || !lineItems || lineItems.length < 1 || !response.items || response.items.length < 1) {
             return undefined;
         }
 
@@ -264,6 +290,6 @@ export class ImportReceipt {
             categoryGroup.lineItems.push(ImportReceiptLineItem.of(lineItem));
         }
 
-        return new ImportReceipt(index, fileName, firstTransaction, categoryGroups);
+        return new ImportReceipt(index, fileName, firstTransaction, categoryGroups, receipt);
     }
 }

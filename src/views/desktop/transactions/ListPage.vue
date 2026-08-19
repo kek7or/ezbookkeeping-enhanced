@@ -536,22 +536,71 @@
                                         </tr>
                                         </tbody>
 
-                                        <tbody :key="transaction.id"
-                                               :class="{ 'disabled': loading, 'has-bottom-border': idx < transactions.length - 1 }"
-                                               v-for="(transaction, idx) in transactions">
+                                        <tbody :key="row.key"
+                                               :class="{ 'disabled': loading, 'has-bottom-border': idx < transactionRows.length - 1 }"
+                                               v-for="(row, idx) in transactionRows">
                                             <tr class="transaction-list-row-date no-hover text-sm"
-                                                v-if="pageType === TransactionListPageType.List.type && (idx === 0 || (idx > 0 && (transaction.gregorianCalendarYearDashMonthDashDay !== transactions[idx - 1]!.gregorianCalendarYearDashMonthDashDay)))">
+                                                v-if="pageType === TransactionListPageType.List.type && (idx === 0 || (idx > 0 && (row.transaction.gregorianCalendarYearDashMonthDashDay !== transactionRows[idx - 1]!.transaction.gregorianCalendarYearDashMonthDashDay)))">
                                                 <td :colspan="showTagInTransactionListPage ? 6 : 5" class="font-weight-bold">
                                                     <div class="d-flex align-center">
-                                                        <span>{{ getDisplayLongDate(transaction) }}</span>
+                                                        <span>{{ getDisplayLongDate(row.transaction) }}</span>
                                                         <v-chip class="ms-1" color="default" size="x-small"
-                                                                v-if="transaction.displayDayOfWeek">
-                                                            {{ getWeekdayLongName(transaction.displayDayOfWeek) }}
+                                                                v-if="row.transaction.displayDayOfWeek">
+                                                            {{ getWeekdayLongName(row.transaction.displayDayOfWeek) }}
                                                         </v-chip>
                                                     </div>
                                                 </td>
                                             </tr>
+                                            <tr class="transaction-table-row-receipt cursor-pointer"
+                                                v-if="row.receiptGroup"
+                                                @click="toggleReceipt(row.receiptGroup)">
+                                                <td class="transaction-table-column-time">
+                                                    <div class="d-flex align-center">
+                                                        <v-icon size="20" :icon="isReceiptExpanded(row.receiptGroup) ? mdiChevronDown : mdiChevronRight"></v-icon>
+                                                        <span class="ms-1">{{ getDisplayTime(row.transaction) }}</span>
+                                                    </div>
+                                                </td>
+                                                <td class="transaction-table-column-category">
+                                                    <div class="d-flex align-center">
+                                                        <v-icon size="24" :icon="mdiReceiptTextOutline"></v-icon>
+                                                        <span class="ms-2 font-weight-medium">{{ row.receiptGroup.receipt.merchantName || tt('Receipt') }}</span>
+                                                        <v-chip class="ms-2" color="default" size="x-small">
+                                                            {{ tt('format.misc.receiptTransactionCount', { count: formatNumberToLocalizedNumerals(row.receiptGroup.transactions.length) }) }}
+                                                        </v-chip>
+                                                        <span class="ms-1 d-flex align-center" v-if="!row.receiptGroup.matchesPrintedTotal">
+                                                            <v-icon size="16" color="warning" :icon="mdiAlertOutline"></v-icon>
+                                                            <v-tooltip activator="parent">
+                                                                {{ tt('format.misc.receiptGroupTotalMismatch', {
+                                                                    calculated: getDisplayReceiptGroupAmount(row.receiptGroup),
+                                                                    stated: getDisplayReceiptPrintedTotal(row.receiptGroup)
+                                                                }) }}
+                                                            </v-tooltip>
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td class="transaction-table-column-amount text-expense">
+                                                    <span>{{ getDisplayReceiptGroupAmount(row.receiptGroup) }}</span>
+                                                </td>
+                                                <td class="transaction-table-column-account">
+                                                    <span v-if="row.transaction.sourceAccount">{{ row.transaction.sourceAccount.name }}</span>
+                                                </td>
+                                                <td class="transaction-table-column-tags" v-if="showTagInTransactionListPage"></td>
+                                                <td class="transaction-table-column-description">
+                                                    <div class="d-flex align-center">
+                                                        <span class="text-truncate">{{ getReceiptGroupCategoryNames(row.receiptGroup) }}</span>
+                                                        <v-btn class="receipt-delete-button ms-auto px-2" density="compact" size="small"
+                                                               color="default" variant="text"
+                                                               :disabled="loading" :prepend-icon="mdiDeleteOutline"
+                                                               @click.stop="removeReceipt(row.receiptGroup)">
+                                                            {{ tt('Delete') }}
+                                                        </v-btn>
+                                                    </div>
+                                                </td>
+                                            </tr>
                                             <tr class="transaction-table-row-data cursor-pointer"
+                                                :class="{ 'transaction-table-row-in-receipt': !!row.receiptGroup }"
+                                                :key="transaction.id"
+                                                v-for="transaction in getRowTransactions(row)"
                                                 @click="show(transaction)">
                                                 <td class="transaction-table-column-time">
                                                     <div class="d-flex flex-column">
@@ -682,6 +731,7 @@
                             @error="onShowDateRangeError" />
 
     <edit-dialog ref="editDialog" :type="TransactionEditPageType.Transaction" />
+    <batch-delete-dialog ref="batchDeleteDialog" />
     <a-i-image-recognition-dialog ref="aiImageRecognitionDialog" />
     <import-dialog ref="importDialog" :persistent="true" />
 
@@ -710,6 +760,7 @@ import PaginationButtons from '@/components/desktop/PaginationButtons.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditDialog from './list/dialogs/EditDialog.vue';
+import BatchDeleteDialog from '@/views/desktop/insights/dialogs/BatchDeleteDialog.vue';
 import AIImageRecognitionDialog from './list/dialogs/AIImageRecognitionDialog.vue';
 import ImportDialog from './import/ImportDialog.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
@@ -750,7 +801,7 @@ import { ThemeType } from '@/core/theme.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { TemplateType }  from '@/core/template.ts';
 import type { TransactionCategory } from '@/models/transaction_category.ts';
-import { type Transaction, TransactionTagFilter } from '@/models/transaction.ts';
+import { type Transaction, type TransactionListRow, type TransactionReceiptGroup, TransactionTagFilter } from '@/models/transaction.ts';
 import type { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import {
@@ -782,7 +833,7 @@ import {
     categoryTypeToTransactionType,
     transactionTypeToCategoryType
 } from '@/lib/category.ts';
-import { allTransactionPictures } from '@/lib/transaction.ts';
+import { allTransactionPictures, groupTransactionsByReceipt } from '@/lib/transaction.ts';
 import {
     isDataExportingEnabled,
     isDataImportingEnabled,
@@ -808,7 +859,12 @@ import {
     mdiPound,
     mdiMagicStaff,
     mdiTextBoxOutline,
-    mdiTextBoxEditOutline
+    mdiTextBoxEditOutline,
+    mdiReceiptTextOutline,
+    mdiDeleteOutline,
+    mdiChevronRight,
+    mdiChevronDown,
+    mdiAlertOutline
 } from '@mdi/js';
 
 interface TransactionListProps {
@@ -830,6 +886,7 @@ const props = defineProps<TransactionListProps>();
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 type EditDialogType = InstanceType<typeof EditDialog>;
+type BatchDeleteDialogType = InstanceType<typeof BatchDeleteDialog>;
 type AIImageRecognitionDialogType = InstanceType<typeof AIImageRecognitionDialog>;
 type ImportDialogType = InstanceType<typeof ImportDialog>;
 
@@ -904,6 +961,8 @@ const {
     getDisplayTimeInDefaultTimezone,
     getDisplayAmount,
     getDisplayAmountCurrency,
+    getDisplayReceiptGroupAmount,
+    getDisplayReceiptPrintedTotal,
     getDisplayMonthTotalAmount,
     getTransactionTypeName,
     getTransactionPictureUrl
@@ -927,6 +986,7 @@ const tagFilterMenu = useTemplateRef<VMenu>('tagFilterMenu');
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editDialog = useTemplateRef<EditDialogType>('editDialog');
+const batchDeleteDialog = useTemplateRef<BatchDeleteDialogType>('batchDeleteDialog');
 const aiImageRecognitionDialog = useTemplateRef<AIImageRecognitionDialogType>('aiImageRecognitionDialog');
 const importDialog = useTemplateRef<ImportDialogType>('importDialog');
 
@@ -1034,6 +1094,55 @@ const transactionsByDay = computed<Record<string, Transaction[]>>(() => {
 
     return transactionsByDay;
 });
+
+// the rows the table draws: a transaction on its own, or a shopping trip that opens to reveal the
+// transactions it was imported as. Every other view of this data - the gallery, the calendar, the
+// monthly totals - keeps working from the flat list, because grouping only changes how the rows are
+// drawn and never what they add up to.
+const transactionRows = computed<TransactionListRow[]>(() => groupTransactionsByReceipt(transactions.value));
+
+// which shopping trips are open. Trips start closed, which is the point of grouping them at all, and
+// what is open is remembered by receipt id so that reloading a page does not close what the user
+// opened to look at.
+const expandedReceiptIds = ref<Record<string, boolean>>({});
+
+function isReceiptExpanded(receiptGroup: TransactionReceiptGroup): boolean {
+    return !!expandedReceiptIds.value[receiptGroup.receipt.id];
+}
+
+function toggleReceipt(receiptGroup: TransactionReceiptGroup): void {
+    const receiptId = receiptGroup.receipt.id;
+
+    if (expandedReceiptIds.value[receiptId]) {
+        delete expandedReceiptIds.value[receiptId];
+    } else {
+        expandedReceiptIds.value[receiptId] = true;
+    }
+}
+
+// what a row actually draws as transaction rows: the one transaction it is, or the transactions of a
+// shopping trip once it has been opened
+function getRowTransactions(row: TransactionListRow): Transaction[] {
+    if (!row.receiptGroup) {
+        return [row.transaction];
+    }
+
+    return isReceiptExpanded(row.receiptGroup) ? row.receiptGroup.transactions : [];
+}
+
+// the categories a shopping trip was split into, which is what the closed row says about itself in
+// place of a description
+function getReceiptGroupCategoryNames(receiptGroup: TransactionReceiptGroup): string {
+    const names: string[] = [];
+
+    for (const transaction of receiptGroup.transactions) {
+        if (transaction.category && transaction.category.name && names.indexOf(transaction.category.name) < 0) {
+            names.push(transaction.category.name);
+        }
+    }
+
+    return names.join(', ');
+}
 
 const recentDateRangeIndex = computed<number>({
     get: () => getRecentDateRangeIndex(recentMonthDateRanges.value, query.value.dateType, query.value.minTime, query.value.maxTime, firstDayOfWeek.value, fiscalYearStart.value),
@@ -1761,6 +1870,32 @@ function exportTransactions(fileExtension: string): void {
     });
 }
 
+// removeReceipt deletes a whole shopping trip: every transaction that was imported from that receipt,
+// in one go.
+//
+// It goes through the same confirmation as any other bulk delete, password and all, because that is
+// what it is - four transactions disappearing from one click, of which only the first is visible while
+// the trip is closed. The count in the dialog says how many, so what is about to go is never a guess.
+function removeReceipt(receiptGroup: TransactionReceiptGroup): void {
+    batchDeleteDialog.value?.open({
+        updateIds: receiptGroup.transactions.map(transaction => transaction.id)
+    }).then(deletedCount => {
+        if (deletedCount > 0) {
+            snackbar.value?.showMessage('format.misc.youHaveDeletedTransactions', {
+                count: formatNumberToLocalizedNumerals(deletedCount)
+            });
+        }
+
+        reload(false, false);
+    }).catch(tryDeleted => {
+        // the dialog rejects on cancel as well, and a cancel that followed a failed attempt still has
+        // to reload: some of the transactions may already be gone
+        if (tryDeleted) {
+            reload(false, false);
+        }
+    });
+}
+
 function show(transaction: Transaction): void {
     editDialog.value?.open({
         id: transaction.id,
@@ -1921,6 +2056,32 @@ init(props);
 
 .v-table.transaction-table .transaction-list-row-date > td {
     height: 40px !important;
+}
+
+/* the row a shopping trip is closed into. It reads as a heading for the rows it opens to, so it is
+   set apart from them rather than looking like one more transaction. */
+.v-table.transaction-table .transaction-table-row-receipt > td {
+    background-color: rgba(var(--v-theme-on-surface), 0.03);
+}
+
+/* the delete action of a shopping trip is always there rather than appearing on hover: it is the only
+   way to remove a receipt, and an action nobody can find is not an action */
+.v-table.transaction-table .transaction-table-row-receipt .receipt-delete-button {
+    opacity: 0.55;
+}
+
+.v-table.transaction-table .transaction-table-row-receipt:hover .receipt-delete-button {
+    opacity: 1;
+}
+
+/* the transactions of an opened shopping trip are indented under it, so that where the trip ends is
+   visible without a second separator */
+.v-table.transaction-table .transaction-table-row-in-receipt > td:first-child {
+    padding-inline-start: 32px;
+}
+
+.v-table.transaction-table .transaction-table-row-in-receipt > td {
+    background-color: rgba(var(--v-theme-on-surface), 0.015);
 }
 
 .transaction-table .transaction-table-column-time {

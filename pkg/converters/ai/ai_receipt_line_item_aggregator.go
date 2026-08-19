@@ -24,6 +24,10 @@ const receiptTotalMismatchThreshold = int64(50)
 // transaction model, longer descriptions are truncated instead of failing the import
 const maxTransactionDescriptionLength = 255
 
+// maximumReceiptMerchantNameLength is the longest merchant name that can be stored with a receipt, in
+// runes, matching the column it is written to
+const maximumReceiptMerchantNameLength = 255
+
 // maxReceiptRefundQuantity is the largest number of returned articles a refund line is believed to
 // state. A quantity beyond this was misread, and multiplying by it would invent an amount far larger
 // than anything the receipt could have printed.
@@ -137,6 +141,7 @@ func (p *aiTransactionDataParser) aggregateReceiptLineItems(c core.Context, user
 	parsedLineItems := p.parseReceiptLineItems(c, user, result.LineItems)
 	applyRememberedReceiptCategories(c, user, parsedLineItems, lineItemCategories)
 	reportReceiptLineItems(parsedLineItems, receiptCollector)
+	p.reportReceipt(c, user, result, receiptCollector)
 	groups := make([]*receiptCategoryGroup, 0, len(parsedLineItems))
 	groupsByKey := make(map[receiptCategoryGroupKey]*receiptCategoryGroup, len(parsedLineItems))
 	lineItemsTotalAmount := int64(0)
@@ -382,6 +387,48 @@ func applyRememberedReceiptCategories(c core.Context, user *models.User, parsedL
 // The lines are reported as they are after parsing, with every deposit and discount already charged
 // against the item above it, so that a line the user sees is a purchase they can point at on the
 // receipt and the lines of a category always add up to that category's transaction.
+// reportReceipt hands back what the receipt states about itself as a whole - where the shopping was
+// done and what the till printed as the total - so that the import can record the shopping trip its
+// transactions belong to.
+//
+// The printed total is reported whether or not it agrees with the lines. Where it does not, the
+// disagreement is already a warning the user is shown, and keeping the receipt's own claim is what
+// lets that question still be answered later.
+func (p *aiTransactionDataParser) reportReceipt(c core.Context, user *models.User, result *aiTransactionDataParsedResult, receiptCollector *converter.ImportReceiptCollector) {
+	if receiptCollector == nil {
+		return
+	}
+
+	receiptCollector.SetMerchantName(truncateReceiptMerchantName(strings.TrimSpace(result.Merchant)))
+
+	receiptTotal := strings.TrimSpace(result.ReceiptTotal)
+
+	if receiptTotal == "" {
+		return
+	}
+
+	printedTotal, err := parseReceiptAmount(receiptTotal)
+
+	if err != nil {
+		log.Warnf(c, "[ai_receipt_line_item_aggregator.reportReceipt] cannot record the printed total of the receipt of user \"uid:%d\", because \"%s\" cannot be parsed", user.Uid, receiptTotal)
+		return
+	}
+
+	receiptCollector.SetPrintedTotal(printedTotal)
+}
+
+// truncateReceiptMerchantName cuts a merchant name to what the column can hold. A till prints a shop
+// name in a few words, so this only ever fires on a model that answered with the whole receipt header.
+func truncateReceiptMerchantName(merchantName string) string {
+	runes := []rune(merchantName)
+
+	if len(runes) <= maximumReceiptMerchantNameLength {
+		return merchantName
+	}
+
+	return string(runes[:maximumReceiptMerchantNameLength])
+}
+
 func reportReceiptLineItems(parsedLineItems []*receiptLineItem, receiptCollector *converter.ImportReceiptCollector) {
 	if receiptCollector == nil || len(parsedLineItems) < 1 {
 		return

@@ -153,6 +153,71 @@ func TestAggregateReceiptLineItems_ReportsTheLinesEachTransactionWasSummedFrom(t
 	}
 }
 
+func TestAggregateReceiptLineItems_ReportsWhatTheReceiptStatesAboutItself(t *testing.T) {
+	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		ReceiptTotal: "32.79",
+		Merchant:     "Lidl",
+		Time:         "2026-07-28 20:12:00",
+		AccountName:  "Checking account",
+		LineItems:    createTestReceiptLineItems(),
+	}, nil)
+
+	assert.NotNil(t, receipt)
+	assert.Equal(t, "Lidl", receipt.MerchantName)
+	assert.True(t, receipt.HasPrintedTotal)
+	assert.Equal(t, int64(3279), receipt.PrintedTotal)
+}
+
+func TestAggregateReceiptLineItems_ReportsThePrintedTotalEvenWhenItDisagreesWithTheLines(t *testing.T) {
+	lineItems := createTestReceiptLineItems()
+	lineItems[2].Price = "11.69" // a misread digit on Strauchtomaten, well past the mismatch threshold
+
+	_, warnings, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		ReceiptTotal: "32.79",
+		Merchant:     "Lidl",
+		LineItems:    lineItems,
+	}, nil)
+
+	// the disagreement is what the printed total is kept for, so it must survive the warning
+	assert.Equal(t, 1, len(warnings))
+	assert.NotNil(t, receipt)
+	assert.True(t, receipt.HasPrintedTotal)
+	assert.Equal(t, int64(3279), receipt.PrintedTotal)
+}
+
+func TestAggregateReceiptLineItems_ReportsNoPrintedTotalWhenTheReceiptStatesNone(t *testing.T) {
+	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		Merchant:  "Lidl",
+		LineItems: createTestReceiptLineItems(),
+	}, nil)
+
+	assert.NotNil(t, receipt)
+	assert.Equal(t, "Lidl", receipt.MerchantName)
+	assert.False(t, receipt.HasPrintedTotal)
+	assert.Equal(t, int64(0), receipt.PrintedTotal)
+}
+
+func TestAggregateReceiptLineItems_ReportsNoPrintedTotalWhenItCannotBeParsed(t *testing.T) {
+	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		ReceiptTotal: "Zu zahlen",
+		LineItems:    createTestReceiptLineItems(),
+	}, nil)
+
+	assert.NotNil(t, receipt)
+	assert.False(t, receipt.HasPrintedTotal)
+}
+
+func TestAggregateReceiptLineItems_MerchantNameIsCutToWhatCanBeStored(t *testing.T) {
+	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
+		Merchant:  strings.Repeat("ä", 300),
+		LineItems: createTestReceiptLineItems(),
+	}, nil)
+
+	assert.NotNil(t, receipt)
+	// cut by runes rather than bytes, so a name of umlauts is not cut in half through a character
+	assert.Equal(t, 255, len([]rune(receipt.MerchantName)))
+}
+
 func TestAggregateReceiptLineItems_ReportsNoReceiptWhenNoLineCouldBeParsed(t *testing.T) {
 	_, _, receipt := aggregateTestLineItemsWithReceipt(&aiTransactionDataParsedResult{
 		LineItems: []*models.RecognizedReceiptLineItem{

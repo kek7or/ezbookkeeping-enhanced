@@ -33,6 +33,7 @@ type aiTransactionDataParsedResult struct {
 	// a printed line was lost between reading the receipt and structuring it
 	RawLines      []string `json:"raw_lines"`
 	ReceiptTotal  string   `json:"receipt_total"`
+	Merchant      string   `json:"merchant"`
 	Time          string   `json:"time"`
 	AccountName   string   `json:"account"`
 	PaymentMethod string   `json:"payment_method"`

@@ -534,6 +534,51 @@ func (s *TransactionService) GetReceiptLineItemsByTransactionId(c core.Context, 
 	return lineItems, nil
 }
 
+// maximumReceiptIdsPerQuery is how many receipt ids are asked for in one statement, kept well under
+// the parameter limit of every supported database
+const maximumReceiptIdsPerQuery = 500
+
+// GetReceiptsByReceiptIds returns the receipts the specified transactions were imported from, keyed
+// by receipt id.
+//
+// Most transactions belong to no receipt, so an empty list of ids is answered with an empty map
+// rather than a query.
+func (s *TransactionService) GetReceiptsByReceiptIds(c core.Context, uid int64, receiptIds []int64) (map[int64]*models.TransactionReceipt, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if len(receiptIds) < 1 {
+		return make(map[int64]*models.TransactionReceipt), nil
+	}
+
+	receiptMap := make(map[int64]*models.TransactionReceipt, len(receiptIds))
+
+	// the ids are asked for in batches because the caller may be listing every transaction a user has
+	// ever had, and every database this runs on has a ceiling on how many parameters one statement
+	// may bind
+	for start := 0; start < len(receiptIds); start += maximumReceiptIdsPerQuery {
+		end := start + maximumReceiptIdsPerQuery
+
+		if end > len(receiptIds) {
+			end = len(receiptIds)
+		}
+
+		var receipts []*models.TransactionReceipt
+		err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).In("receipt_id", receiptIds[start:end]).Find(&receipts)
+
+		if err != nil {
+			return nil, err
+		}
+
+		for i := 0; i < len(receipts); i++ {
+			receiptMap[receipts[i].ReceiptId] = receipts[i]
+		}
+	}
+
+	return receiptMap, nil
+}
+
 // GetTransactionsByTransactionIds returns transaction models according to transaction ids
 func (s *TransactionService) GetTransactionsByTransactionIds(c core.Context, uid int64, transactionIds []int64) ([]*models.Transaction, error) {
 	if uid <= 0 {
@@ -657,7 +702,7 @@ func (s *TransactionService) CreateTransaction(c core.Context, transaction *mode
 // allLineItems holds, by the index of the transaction it belongs to, the receipt lines that
 // transaction is the sum of. They are written in the same database transaction as the transactions
 // themselves, so a receipt is never half-itemized.
-func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, allLineItems map[int][]*models.TransactionReceiptLineItemRequest, processHandler core.TaskProcessUpdateHandler) error {
+func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, transactions []*models.Transaction, allTagIds map[int][]int64, allLineItems map[int][]*models.TransactionReceiptLineItemRequest, receiptBatch *models.TransactionReceiptBatch, processHandler core.TaskProcessUpdateHandler) error {
 	now := time.Now().Unix()
 	currentProcess := float64(0)
 	processUpdateStep := int(math.Max(100.0, float64(len(transactions)/100.0)))
@@ -799,9 +844,26 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 		allTransactionLineItems[transaction.TransactionId] = transactionLineItems
 	}
 
+	// the receipts are given their ids and stamped onto the transactions here rather than inside the
+	// database transaction, so that every row is fully built before anything is written
+	newReceipts, err := s.buildBatchReceipts(uid, now, transactions, receiptBatch)
+
+	if err != nil {
+		return err
+	}
+
 	userDataDb := s.UserDataDB(uid)
 
 	return userDataDb.DoTransaction(c, func(sess *xorm.Session) error {
+		for i := 0; i < len(newReceipts); i++ {
+			_, err := sess.Insert(newReceipts[i])
+
+			if err != nil {
+				log.Errorf(c, "[transactions.BatchCreateTransactions] failed to add receipt \"id:%d\", because %s", newReceipts[i].ReceiptId, err.Error())
+				return err
+			}
+		}
+
 		for i := 0; i < len(transactions); i++ {
 			transaction := transactions[i]
 			transactionTagIndexes := allTransactionTagIndexes[transaction.TransactionId]
@@ -833,6 +895,73 @@ func (s *TransactionService) BatchCreateTransactions(c core.Context, uid int64, 
 
 		return nil
 	})
+}
+
+// buildBatchReceipts gives every receipt of an import its id and stamps it onto the transactions that
+// were read from it, returning the receipt rows still to be written.
+//
+// A transaction pointing at a receipt that was not submitted is refused rather than imported without
+// one: it means the client and the server disagree about what is being imported, and importing half
+// of that agreement would file the shopping trip as a handful of unrelated transactions.
+func (s *TransactionService) buildBatchReceipts(uid int64, now int64, transactions []*models.Transaction, receiptBatch *models.TransactionReceiptBatch) ([]*models.TransactionReceipt, error) {
+	if receiptBatch == nil || len(receiptBatch.Receipts) < 1 {
+		return nil, nil
+	}
+
+	if len(receiptBatch.Receipts) > models.MaximumReceiptsCountOfImport {
+		return nil, errs.ErrImportTooManyTransaction
+	}
+
+	receiptUuids := s.GenerateUuids(uuid.UUID_TYPE_DEFAULT, uint16(len(receiptBatch.Receipts)))
+
+	if len(receiptUuids) < len(receiptBatch.Receipts) {
+		return nil, errs.ErrSystemIsBusy
+	}
+
+	for i := 0; i < len(receiptBatch.Receipts); i++ {
+		receipt := receiptBatch.Receipts[i]
+		receipt.ReceiptId = receiptUuids[i]
+		receipt.Uid = uid
+		receipt.Deleted = false
+		receipt.CreatedUnixTime = now
+		receipt.UpdatedUnixTime = now
+	}
+
+	for transactionIndex, receiptIndex := range receiptBatch.ReceiptIndexes {
+		if transactionIndex < 0 || transactionIndex >= len(transactions) {
+			return nil, errs.ErrOperationFailed
+		}
+
+		if receiptIndex < 0 || receiptIndex >= len(receiptBatch.Receipts) {
+			return nil, errs.ErrOperationFailed
+		}
+
+		receipt := receiptBatch.Receipts[receiptIndex]
+		transactions[transactionIndex].ReceiptId = receipt.ReceiptId
+
+		// the receipt is booked at the time its transactions are, which is the one time they all
+		// share, so that a date the user corrected in the import dialog reaches the receipt too
+		receipt.TransactionTime = transactions[transactionIndex].TransactionTime
+	}
+
+	// a receipt none of the imported transactions ended up belonging to - every one of its category
+	// groups unselected or emptied - is not written at all, rather than left behind pointing at nothing
+	usedReceipts := make([]*models.TransactionReceipt, 0, len(receiptBatch.Receipts))
+	usedReceiptIds := make(map[int64]bool, len(receiptBatch.Receipts))
+
+	for i := 0; i < len(transactions); i++ {
+		if transactions[i].ReceiptId != 0 {
+			usedReceiptIds[transactions[i].ReceiptId] = true
+		}
+	}
+
+	for i := 0; i < len(receiptBatch.Receipts); i++ {
+		if usedReceiptIds[receiptBatch.Receipts[i].ReceiptId] {
+			usedReceipts = append(usedReceipts, receiptBatch.Receipts[i])
+		}
+	}
+
+	return usedReceipts, nil
 }
 
 // CreateScheduledTransactions saves all scheduled transactions that should be created now
@@ -2073,6 +2202,11 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 		DeletedUnixTime: now,
 	}
 
+	receiptUpdateModel := &models.TransactionReceipt{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		// Get and verify current transaction
 		oldTransaction := &models.Transaction{}
@@ -2137,6 +2271,25 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 
 		if err != nil {
 			return err
+		}
+
+		// A receipt outlives the deletion of any one of its transactions - the other categories of
+		// that shopping trip are still there and still belong together - but not the deletion of the
+		// last of them, which would leave a shopping trip nothing was bought on.
+		if oldTransaction.ReceiptId != 0 {
+			remaining, err := sess.Where("uid=? AND deleted=? AND receipt_id=?", uid, false, oldTransaction.ReceiptId).Count(&models.Transaction{})
+
+			if err != nil {
+				return err
+			}
+
+			if remaining < 1 {
+				_, err = sess.ID(oldTransaction.ReceiptId).Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(receiptUpdateModel)
+
+				if err != nil {
+					return err
+				}
+			}
 		}
 
 		// Update account table
@@ -2236,6 +2389,11 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 		DeletedUnixTime: now,
 	}
 
+	receiptUpdateModel := &models.TransactionReceipt{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
 	accountUpdateModel := &models.Account{
 		Balance:         0,
 		Deleted:         deleteAccount,
@@ -2266,6 +2424,13 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 
 		// Update all transaction receipt line items to deleted
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(lineItemUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// Update all receipts to deleted
+		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(receiptUpdateModel)
 
 		if err != nil {
 			return err

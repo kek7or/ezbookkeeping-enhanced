@@ -21,6 +21,7 @@ import { TRANSACTION_MIN_AMOUNT, TRANSACTION_MAX_AMOUNT } from '@/consts/transac
 import {
     type TransactionDraft,
     type TransactionCreateRequest,
+    type TransactionReceiptRequest,
     type TransactionInfoResponse,
     type TransactionPageWrapper,
     type TransactionReconciliationStatementResponse,
@@ -36,6 +37,7 @@ import {
     type ReceiptLineItemCategoryRememberItem,
     ImportTransaction
 } from '@/models/imported_transaction.ts';
+import { ImportReceipt } from '@/models/imported_receipt.ts';
 import {
     type ExportTransactionDataRequest
 } from '@/models/data_management.ts';
@@ -1587,7 +1589,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
-    function importTransactions({ transactions, clientSessionId }: { transactions: ImportTransaction[], clientSessionId: string }): Promise<number> {
+    function importTransactions({ transactions, receipts, clientSessionId }: { transactions: ImportTransaction[], receipts?: ImportReceipt[], clientSessionId: string }): Promise<number> {
         const submitTransactions: TransactionCreateRequest[] = [];
 
         if (transactions) {
@@ -1597,9 +1599,17 @@ export const useTransactionsStore = defineStore('transactions', () => {
             }
         }
 
+        // the receipts are sent in the order their transactions refer to them by, so the array is
+        // passed whole rather than filtered - dropping one would shift every index after it onto the
+        // wrong shopping trip. A receipt nothing was imported from is discarded by the server.
+        const submitReceipts: TransactionReceiptRequest[] | undefined = receipts && receipts.length
+            ? receipts.map(receipt => receipt.toRequest())
+            : undefined;
+
         return new Promise((resolve, reject) => {
             services.importTransactions({
                 transactions: submitTransactions,
+                receipts: submitReceipts,
                 clientSessionId: clientSessionId
             }).then(response => {
                 const data = response.data;

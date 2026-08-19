@@ -32,6 +32,9 @@ export class Transaction implements TransactionInfoResponse {
     // the receipt lines this transaction was summed from, only ever read - nothing in the edit path
     // writes them, so a transaction whose amount was corrected by hand keeps the lines it came with
     public lineItems?: TransactionReceiptLineItem[];
+    // the shopping trip this transaction was one category of, set only for transactions imported from
+    // a recognized receipt. Read only - nothing in the edit path writes or clears it.
+    public receipt?: TransactionReceipt;
 
     private _pictures?: TransactionPicture[];
     private _geoLocation?: TransactionGeoLocation;
@@ -370,6 +373,10 @@ export class Transaction implements TransactionInfoResponse {
             transaction.lineItems = transactionResponse.lineItems;
         }
 
+        if (transactionResponse.receipt) {
+            transaction.receipt = transactionResponse.receipt;
+        }
+
         return transaction;
     }
 
@@ -544,6 +551,85 @@ export interface TransactionReceiptLineItem {
     readonly amount: number;
 }
 
+// TransactionReceipt is the shopping trip a transaction was one category of: one visit to one shop,
+// paid once. Several transactions share it, which is what lets the list show them together instead of
+// as unrelated rows that happen to fall in the same second.
+export interface TransactionReceipt {
+    readonly id: string;
+    readonly merchantName?: string;
+    // the total the till printed, in minor units. It is what the paper claims, not what the
+    // transactions sum to, and the two can differ once a transaction has been corrected by hand.
+    readonly printedTotal?: number;
+    readonly hasPrintedTotal?: boolean;
+}
+
+// TransactionReceiptRequest is one receipt submitted with an import, referenced by the receiptIndex
+// of every transaction that was read from it
+export interface TransactionReceiptRequest {
+    readonly merchantName: string;
+    readonly printedTotal: number;
+    readonly hasPrintedTotal: boolean;
+}
+
+// TransactionReceiptGroup is one shopping trip as the transaction list shows it: the receipt, and the
+// transactions that were imported from it.
+//
+// A receipt only becomes a group when it produced more than one transaction. One category bought at
+// one shop is a single row either way, and wrapping it in something that opens to reveal itself would
+// be a control that does nothing.
+export class TransactionReceiptGroup {
+    public readonly receipt: TransactionReceipt;
+    public readonly transactions: Transaction[];
+
+    public constructor(receipt: TransactionReceipt, transactions: Transaction[]) {
+        this.receipt = receipt;
+        this.transactions = transactions;
+    }
+
+    // the sum is over minor units, the same way the import summed the receipt lines, so the total
+    // shown for a shopping trip cannot drift from the rows it opens to
+    public get totalAmount(): number {
+        let totalAmount = 0;
+
+        for (const transaction of this.transactions) {
+            totalAmount += transaction.sourceAmount;
+        }
+
+        return totalAmount;
+    }
+
+    // a trip is shown as hidden as soon as any one of its transactions is, because a total that left
+    // the hidden ones out would be a different number presented as the same one
+    public get hasHiddenAmount(): boolean {
+        for (const transaction of this.transactions) {
+            if (transaction.hideAmount) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // whether the transactions still add up to what the till printed. They stop doing so when one of
+    // them has been corrected by hand since the import, which is worth saying rather than hiding.
+    public get matchesPrintedTotal(): boolean {
+        if (!this.receipt.hasPrintedTotal) {
+            return true;
+        }
+
+        return this.totalAmount === (this.receipt.printedTotal ?? 0);
+    }
+}
+
+// TransactionListRow is one row of the transaction list. It is anchored on a transaction either way -
+// the one it shows, or the first of the shopping trip it opens to - so that everything the list reads
+// off a row to place it, the date it falls on above all, is read the same way for both.
+export interface TransactionListRow {
+    readonly key: string;
+    readonly transaction: Transaction;
+    readonly receiptGroup?: TransactionReceiptGroup;
+}
+
 export interface TransactionCreateRequest {
     readonly type: number;
     readonly categoryId: string;
@@ -560,6 +646,9 @@ export interface TransactionCreateRequest {
     readonly geoLocation?: TransactionGeoLocationRequest;
     readonly clientSessionId: string;
     readonly lineItems?: TransactionReceiptLineItem[];
+    // which of the receipts submitted with this import the transaction was read from. Undefined for
+    // every transaction that came from anything other than a recognized receipt image.
+    readonly receiptIndex?: number;
 }
 
 export interface TransactionModifyRequest {
@@ -620,6 +709,9 @@ export interface TransactionBatchDeleteRequest {
 
 export interface TransactionImportRequest {
     readonly transactions: TransactionCreateRequest[];
+    // the receipts these transactions were read from, in the order their indexes refer to. Absent for
+    // an import that is not of receipt images.
+    readonly receipts?: TransactionReceiptRequest[];
     readonly clientSessionId: string;
 }
 
@@ -690,6 +782,7 @@ export interface TransactionInfoResponse {
     readonly geoLocation?: TransactionGeoLocationResponse;
     readonly editable: boolean;
     readonly lineItems?: TransactionReceiptLineItem[];
+    readonly receipt?: TransactionReceipt;
 }
 
 export interface TransactionStatisticRequest {

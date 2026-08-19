@@ -125,8 +125,8 @@ const (
 // Transaction represents transaction data stored in database
 type Transaction struct {
 	TransactionId        int64             `xorm:"PK"`
-	Uid                  int64             `xorm:"UNIQUE(UQE_transaction_uid_time) INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
-	Deleted              bool              `xorm:"INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) NOT NULL"`
+	Uid                  int64             `xorm:"UNIQUE(UQE_transaction_uid_time) INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL"`
+	Deleted              bool              `xorm:"INDEX(IDX_transaction_uid_deleted_time) INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) INDEX(IDX_transaction_uid_deleted_category_id_time) INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_time_longitude_latitude) INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL"`
 	Type                 TransactionDbType `xorm:"INDEX(IDX_transaction_uid_deleted_type_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) NOT NULL"`
 	CategoryId           int64             `xorm:"INDEX(IDX_transaction_uid_deleted_category_id_time) NOT NULL"`
 	AccountId            int64             `xorm:"INDEX(IDX_transaction_uid_deleted_account_id_time) INDEX(IDX_transaction_uid_deleted_type_account_id_time) NOT NULL"`
@@ -138,6 +138,12 @@ type Transaction struct {
 	RelatedAccountAmount int64             `xorm:"NOT NULL"`
 	HideAmount           bool              `xorm:"NOT NULL"`
 	Comment              string            `xorm:"VARCHAR(255) NOT NULL"`
+	// ReceiptId is the receipt this transaction was imported from, zero for every transaction that
+	// was not. It is what makes the transactions of one shopping trip recognizable as one, which the
+	// transaction time alone cannot do - two unrelated things can be booked at the same second.
+	// the default is what lets this column be added to a table that already has rows: every
+	// transaction that existed before receipts did belongs to none, which is exactly zero
+	ReceiptId            int64             `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
 	GeoLongitude         float64           `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
 	GeoLatitude          float64           `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
 	CreatedIp            string            `xorm:"VARCHAR(39)"`
@@ -181,6 +187,10 @@ type TransactionCreateRequest struct {
 	// when the transaction is created. A receipt longer than the limit is not a weekly shop, and
 	// the limit is what stops a malformed request from writing an unbounded number of rows.
 	LineItems []*TransactionReceiptLineItemRequest `json:"lineItems" binding:"omitempty,max=1000,dive"`
+	// ReceiptIndex says which of the receipts submitted alongside this transaction it was read from,
+	// as an index into TransactionImportRequest.Receipts. It is a pointer because zero is a valid
+	// index: a transaction that belongs to no receipt has to be able to say nothing at all.
+	ReceiptIndex *int32 `json:"receiptIndex,omitempty" binding:"omitempty,min=0"`
 }
 
 // TransactionModifyRequest represents all parameters of transaction modification request
@@ -203,8 +213,12 @@ type TransactionModifyRequest struct {
 
 // TransactionImportRequest represents all parameters of transaction import request
 type TransactionImportRequest struct {
-	Transactions    []*TransactionCreateRequest `json:"transactions"`
-	ClientSessionId string                      `json:"clientSessionId"`
+	Transactions []*TransactionCreateRequest `json:"transactions"`
+	// Receipts are the receipts these transactions were read from, each referenced by the
+	// ReceiptIndex of the transactions it produced. An import that is not of receipt images - a
+	// spreadsheet, a bank statement - carries none.
+	Receipts        []*TransactionReceiptRequest `json:"receipts" binding:"omitempty,max=200,dive"`
+	ClientSessionId string                       `json:"clientSessionId"`
 }
 
 // TransactionImportProcessRequest represents all parameters of transaction import process request
@@ -428,6 +442,9 @@ type TransactionInfoResponse struct {
 	// LineItems are the receipt lines this transaction was summed from, in the order they were
 	// printed, absent for every transaction that did not come from a recognized receipt
 	LineItems []*TransactionReceiptLineItemResponse `json:"lineItems,omitempty"`
+	// Receipt is the shopping trip this transaction was one category of, absent for every
+	// transaction that was not imported from a receipt. Transactions sharing one are shown together.
+	Receipt *TransactionReceiptInfoResponse `json:"receipt,omitempty"`
 }
 
 // TransactionCountResponse represents transaction count response

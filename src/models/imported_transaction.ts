@@ -32,6 +32,9 @@ export class ImportTransaction implements ImportTransactionResponse {
     // receipt, and kept so that the transaction can still answer what its amount is made of after the
     // import dialog is gone
     public lineItems?: TransactionReceiptLineItem[];
+    // which of the receipts being imported this transaction was read from. Set only by the receipt
+    // path, so a spreadsheet row carries nothing and is imported belonging to no shopping trip.
+    public receiptIndex?: number;
 
     private constructor(response: ImportTransactionResponse, index: number) {
         this.type = response.type;
@@ -76,7 +79,8 @@ export class ImportTransaction implements ImportTransactionResponse {
             comment: this.comment,
             geoLocation: this.geoLocation,
             clientSessionId: '',
-            lineItems: this.lineItems
+            lineItems: this.lineItems,
+            receiptIndex: this.receiptIndex
         };
     }
 
@@ -195,6 +199,12 @@ export interface ReceiptLineItemCategoryRememberItem {
 
 export interface ImportReceiptResponse {
     readonly lineItems: ImportReceiptLineItemResponse[];
+    // the shop as printed in the receipt header, absent when none could be read
+    readonly merchantName?: string;
+    // the total the till printed, in minor units, meaningful only when hasPrintedTotal says the
+    // receipt stated one at all
+    readonly printedTotal?: number;
+    readonly hasPrintedTotal?: boolean;
 }
 
 export interface ImportTransactionResponsePageWrapper {

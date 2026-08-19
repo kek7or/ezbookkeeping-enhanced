@@ -4,7 +4,7 @@ import { Account } from '@/models/account.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import { TransactionTag } from '@/models/transaction_tag.ts';
 import { TransactionPicture, type TransactionPictureInfoBasicResponse } from '@/models/transaction_picture_info.ts';
-import { Transaction } from '@/models/transaction.ts';
+import { Transaction, TransactionReceiptGroup, type TransactionListRow } from '@/models/transaction.ts';
 
 import {
     isDefined,
@@ -216,6 +216,74 @@ export function setTransactionModelByTransaction(transaction: Transaction, trans
             // the receipt lines belong to that one transaction, so they are carried only when this is
             // that transaction being opened - a draft or a template seeded from it starts without them
             transaction.lineItems = transaction2.lineItems;
+            // the receipt is carried on the same terms: a duplicate is a new purchase, and claiming
+            // the shopping trip it was copied from would group it with transactions it has nothing
+            // to do with
+            transaction.receipt = transaction2.receipt;
         }
     }
+}
+
+// groupTransactionsByReceipt turns a list of transactions into the rows the transaction list shows,
+// collapsing the transactions of one shopping trip into a single row that opens to reveal them.
+//
+// The order the transactions came in is kept exactly: a trip takes the place of the first of its
+// transactions, and everything else stays where it was. This matters because the list is sorted by
+// time and the caller is free to append more pages to it - grouping must never move a row past a day
+// boundary it did not already belong to.
+//
+// A receipt that produced only one transaction is left as an ordinary row. So is one whose other
+// transactions have not been loaded yet: a shopping trip split across two pages shows the part that
+// is here, and becomes a group once the rest arrives.
+export function groupTransactionsByReceipt(transactions: Transaction[]): TransactionListRow[] {
+    const transactionsByReceiptId: Record<string, Transaction[]> = {};
+
+    for (const transaction of transactions) {
+        if (!transaction.receipt) {
+            continue;
+        }
+
+        const receiptTransactions: Transaction[] = transactionsByReceiptId[transaction.receipt.id] ?? [];
+        receiptTransactions.push(transaction);
+        transactionsByReceiptId[transaction.receipt.id] = receiptTransactions;
+    }
+
+    const rows: TransactionListRow[] = [];
+    const emittedReceiptIds: Record<string, boolean> = {};
+
+    for (const transaction of transactions) {
+        const receipt = transaction.receipt;
+
+        if (!receipt) {
+            rows.push({
+                key: transaction.id,
+                transaction: transaction
+            });
+            continue;
+        }
+
+        const receiptTransactions = transactionsByReceiptId[receipt.id] as Transaction[];
+
+        if (receiptTransactions.length < 2) {
+            rows.push({
+                key: transaction.id,
+                transaction: transaction
+            });
+            continue;
+        }
+
+        if (emittedReceiptIds[receipt.id]) {
+            continue;
+        }
+
+        emittedReceiptIds[receipt.id] = true;
+
+        rows.push({
+            key: `receipt_${receipt.id}`,
+            transaction: receiptTransactions[0] as Transaction,
+            receiptGroup: new TransactionReceiptGroup(receipt, receiptTransactions)
+        });
+    }
+
+    return rows;
 }

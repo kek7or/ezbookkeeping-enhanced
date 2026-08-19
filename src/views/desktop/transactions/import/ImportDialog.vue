@@ -1312,6 +1312,10 @@ function submit(): void {
 
         transactionsStore.importTransactions({
             transactions: transactions,
+            // the receipts are sent only when the whole batch was read as receipts, which is the same
+            // condition under which the transactions being imported came from them and carry an index
+            // into this array
+            receipts: hasEditableReceipts.value ? importReceipts.value : undefined,
             clientSessionId: clientSessionId.value
         }).then(response => {
             if (showProcessTimer) {

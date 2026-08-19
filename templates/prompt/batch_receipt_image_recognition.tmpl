@@ -35,6 +35,7 @@ If the image contains no financial information at all, return `{"line_items": []
 {
   "raw_lines": ["string (one printed item line, copied character for character)"],
   "receipt_total": "string (the total printed on the receipt: 'Zu zahlen' / 'Summe' / 'Gesamt')",
+  "merchant": "string (the shop name printed in the receipt header)",
   "time": "string (receipt date and time, format: YYYY-MM-DD HH:mm:ss)",
   "payment_method": "string (how the receipt was paid: cash | debit | credit)",
   "account": "string (source account name, only if the receipt names one directly)",
@@ -119,6 +120,17 @@ in the image again here. Take each price from its own `raw_lines` entry.
 
 `receipt_total` is read from the total line, verbatim. It is a reading, not a calculation. If
 no total is printed, omit the field.
+
+### Merchant
+`merchant` is the name of the shop, read from the header at the top of the receipt - "Lidl",
+"REWE", "dm-drogerie markt", "Rossmann". Copy the name only:
+
+- Leave out the branch address, the street, the postcode, the phone number and the tax number
+  printed under it, and leave out any legal-form suffix printed with it ("GmbH & Co. KG",
+  "Vertriebs-GmbH", "SE & Co. KGaA").
+- Do not translate it and do not tidy up its spelling. It is a name.
+- If the header is unreadable or the image does not show it, omit the field. A guess from the
+  kind of articles bought is worse than nothing.
 
 ### Payment method
 Find the payment block near the bottom of the receipt, below the total, and report how it was

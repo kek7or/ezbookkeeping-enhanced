@@ -1018,6 +1018,19 @@ func (a *TransactionsApi) TransactionGetHandler(c *core.WebContext) (any, *errs.
 		transactionResp.LineItems = lineItemResps
 	}
 
+	if transaction.ReceiptId != 0 {
+		receiptMap, err := a.transactions.GetReceiptsByReceiptIds(c, uid, []int64{transaction.ReceiptId})
+
+		if err != nil {
+			log.Errorf(c, "[transactions.TransactionGetHandler] failed to get receipt of transaction \"id:%d\" for user \"uid:%d\", because %s", transaction.TransactionId, uid, err.Error())
+			return nil, errs.Or(err, errs.ErrOperationFailed)
+		}
+
+		if receipt := receiptMap[transaction.ReceiptId]; receipt != nil {
+			transactionResp.Receipt = receipt.ToTransactionReceiptInfoResponse()
+		}
+	}
+
 	return transactionResp, nil
 }
 
@@ -2733,6 +2746,7 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 
 	newTransactionTagIdsMap := make(map[int][]int64, len(transactionImportReq.Transactions))
 	newTransactionLineItemsMap := make(map[int][]*models.TransactionReceiptLineItemRequest)
+	newTransactionReceiptIndexes := make(map[int]int)
 
 	for i := 0; i < len(transactionImportReq.Transactions); i++ {
 		transactionCreateReq := transactionImportReq.Transactions[i]
@@ -2775,6 +2789,17 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		if len(transactionCreateReq.LineItems) > 0 {
 			newTransactionLineItemsMap[i] = transactionCreateReq.LineItems
 		}
+
+		if transactionCreateReq.ReceiptIndex != nil {
+			receiptIndex := int(*transactionCreateReq.ReceiptIndex)
+
+			if receiptIndex >= len(transactionImportReq.Receipts) {
+				log.Warnf(c, "[transactions.TransactionImportHandler] transaction \"index:%d\" refers to receipt \"index:%d\" which was not submitted", i, receiptIndex)
+				return nil, errs.ErrIncompleteOrIncorrectSubmission
+			}
+
+			newTransactionReceiptIndexes[i] = receiptIndex
+		}
 	}
 
 	user, err := a.users.GetUserById(c, uid)
@@ -2816,7 +2841,30 @@ func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *er
 		}
 	}
 
-	err = a.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, newTransactionLineItemsMap, func(currentProcess float64) {
+	// the receipts are carried alongside the transactions rather than inside them, because a receipt
+	// is what several of them have in common - it is written once and every transaction read from it
+	// is stamped with its id
+	var receiptBatch *models.TransactionReceiptBatch
+
+	if len(newTransactionReceiptIndexes) > 0 {
+		receipts := make([]*models.TransactionReceipt, len(transactionImportReq.Receipts))
+
+		for i := 0; i < len(transactionImportReq.Receipts); i++ {
+			receiptReq := transactionImportReq.Receipts[i]
+			receipts[i] = &models.TransactionReceipt{
+				MerchantName:    receiptReq.MerchantName,
+				PrintedTotal:    receiptReq.PrintedTotal,
+				HasPrintedTotal: receiptReq.HasPrintedTotal,
+			}
+		}
+
+		receiptBatch = &models.TransactionReceiptBatch{
+			Receipts:       receipts,
+			ReceiptIndexes: newTransactionReceiptIndexes,
+		}
+	}
+
+	err = a.transactions.BatchCreateTransactions(c, user.Uid, newTransactions, newTransactionTagIdsMap, newTransactionLineItemsMap, receiptBatch, func(currentProcess float64) {
 		a.SetSubmissionRemarkIfEnable(duplicatechecker.DUPLICATE_CHECKER_TYPE_IMPORT_TRANSACTIONS, uid, transactionImportReq.ClientSessionId, fmt.Sprintf("processing:%.2f", currentProcess))
 	})
 	count := len(newTransactions)
@@ -3123,9 +3171,53 @@ func (a *TransactionsApi) getTransactionResponseListResult(c *core.WebContext, u
 		}
 	}
 
+	if err := a.fillTransactionReceipts(c, user.Uid, transactions, result); err != nil {
+		return nil, err
+	}
+
 	sort.Sort(result)
 
 	return result, nil
+}
+
+// fillTransactionReceipts attaches the receipt each transaction was imported from, so that the list
+// can show the transactions of one shopping trip together instead of as unrelated rows that happen
+// to share a second.
+//
+// Most transactions belong to no receipt, and a page made up entirely of those costs no query at all.
+// A receipt that has since been deleted simply leaves its transactions ungrouped rather than failing
+// the whole list.
+func (a *TransactionsApi) fillTransactionReceipts(c *core.WebContext, uid int64, transactions []*models.Transaction, result models.TransactionInfoResponseSlice) error {
+	receiptIds := make([]int64, 0, len(transactions))
+
+	for i := 0; i < len(transactions); i++ {
+		if transactions[i].ReceiptId != 0 {
+			receiptIds = append(receiptIds, transactions[i].ReceiptId)
+		}
+	}
+
+	if len(receiptIds) < 1 {
+		return nil
+	}
+
+	receiptMap, err := a.transactions.GetReceiptsByReceiptIds(c, uid, utils.ToUniqueInt64Slice(receiptIds))
+
+	if err != nil {
+		log.Errorf(c, "[transactions.fillTransactionReceipts] failed to get receipts for user \"uid:%d\", because %s", uid, err.Error())
+		return errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	for i := 0; i < len(transactions); i++ {
+		if transactions[i].ReceiptId == 0 || result[i] == nil {
+			continue
+		}
+
+		if receipt := receiptMap[transactions[i].ReceiptId]; receipt != nil {
+			result[i].Receipt = receipt.ToTransactionReceiptInfoResponse()
+		}
+	}
+
+	return nil
 }
 
 func (a *TransactionsApi) createNewTransactionModel(uid int64, transactionCreateReq *models.TransactionCreateRequest, clientIp string) *models.Transaction {
