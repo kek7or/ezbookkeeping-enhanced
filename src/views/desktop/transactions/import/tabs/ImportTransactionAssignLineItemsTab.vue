@@ -8,6 +8,15 @@
         <div class="import-receipt mb-6" :key="receipt.index" v-for="receipt in receipts">
             <div class="import-receipt-header d-flex align-center flex-wrap gap-2 mb-3 py-2">
                 <v-chip size="small" label variant="tonal" :prepend-icon="mdiReceiptTextOutline">{{ receipt.fileName }}</v-chip>
+                <div class="import-receipt-name">
+                    <v-text-field density="compact" variant="plain" single-line hide-details
+                                  :disabled="!!disabled"
+                                  :maxlength="TRANSACTION_RECEIPT_MAX_MERCHANT_NAME_LENGTH"
+                                  :placeholder="tt('Name this receipt')"
+                                  v-model="receipt.merchantName">
+                    </v-text-field>
+                    <v-tooltip activator="parent" open-delay="500">{{ tt('What this shopping is called in the transaction list') }}</v-tooltip>
+                </div>
                 <div class="import-receipt-time">
                     <date-time-select density="compact" variant="plain"
                                       :disabled="!!disabled"
@@ -218,6 +227,8 @@ import { TransactionTag } from '@/models/transaction_tag.ts';
 import { ImportTransaction } from '@/models/imported_transaction.ts';
 import { ImportReceipt, ImportReceiptCategoryGroup } from '@/models/imported_receipt.ts';
 
+import { TRANSACTION_RECEIPT_MAX_MERCHANT_NAME_LENGTH } from '@/consts/transaction.ts';
+
 import { parseBigDecimal } from '@/lib/numeral.ts';
 import { getTransactionPrimaryCategoryName, getTransactionSecondaryCategoryName } from '@/lib/category.ts';
 
@@ -374,6 +385,11 @@ defineExpose({
         top: 0;
         z-index: 2;
         background-color: rgb(var(--v-theme-surface));
+    }
+
+    .import-receipt-name {
+        min-width: 140px;
+        max-width: 220px;
     }
 
     .import-receipt-time {

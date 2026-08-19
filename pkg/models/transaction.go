@@ -143,14 +143,14 @@ type Transaction struct {
 	// transaction time alone cannot do - two unrelated things can be booked at the same second.
 	// the default is what lets this column be added to a table that already has rows: every
 	// transaction that existed before receipts did belongs to none, which is exactly zero
-	ReceiptId            int64             `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
-	GeoLongitude         float64           `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
-	GeoLatitude          float64           `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
-	CreatedIp            string            `xorm:"VARCHAR(39)"`
-	ScheduledCreated     bool
-	CreatedUnixTime      int64
-	UpdatedUnixTime      int64
-	DeletedUnixTime      int64
+	ReceiptId        int64   `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
+	GeoLongitude     float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
+	GeoLatitude      float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
+	CreatedIp        string  `xorm:"VARCHAR(39)"`
+	ScheduledCreated bool
+	CreatedUnixTime  int64
+	UpdatedUnixTime  int64
+	DeletedUnixTime  int64
 }
 
 // TransactionWithAccountBalance represents a transaction item with account balance

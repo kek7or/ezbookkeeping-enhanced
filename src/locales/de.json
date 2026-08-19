@@ -2026,6 +2026,8 @@
     "Pictures": "Bilder",
     "Positions": "Positionen",
     "Receipt": "Beleg",
+    "Name this receipt": "Beleg benennen",
+    "What this shopping is called in the transaction list": "Wie dieser Einkauf in der Transaktionsliste heißt",
     "These positions do not add up to the amount of this transaction.": "Diese Positionen ergeben nicht den Betrag dieser Transaktion.",
     "Add Transaction": "Transaktion hinzufügen",
     "Edit Transaction": "Transaktion bearbeiten",

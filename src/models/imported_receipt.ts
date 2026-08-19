@@ -106,8 +106,10 @@ export class ImportReceipt {
     public readonly originalSourceAccountCurrency: string;
     public sourceAccountId: string;
     public categoryGroups: ImportReceiptCategoryGroup[];
-    // the shop the receipt was printed by, empty when the model could not read the header
-    public readonly merchantName: string;
+    // what this shopping trip is called. It starts as the shop the model read off the header and is
+    // the user's to change - a name they would recognize is worth more than the one that was printed,
+    // and where nothing could be read they are the only one who knows it.
+    public merchantName: string;
     // the total the till printed, in minor units, and whether the receipt stated one at all. It is
     // kept apart from totalAmount because the two answer different questions: this is what the paper
     // says was paid, that is what the groups currently add up to.
@@ -133,7 +135,9 @@ export class ImportReceipt {
     // this receipt will point at
     public toRequest(): TransactionReceiptRequest {
         return {
-            merchantName: this.merchantName,
+            // trimmed here rather than as it is typed, so that a space in the middle of typing a name
+            // is not swallowed under the cursor
+            merchantName: this.merchantName.trim(),
             printedTotal: this.printedTotal,
             hasPrintedTotal: this.hasPrintedTotal
         };
