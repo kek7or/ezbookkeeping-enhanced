@@ -106,6 +106,10 @@ type DebtEntryListByTransactionRequest struct {
 
 // DebtEntryCreateRequest represents one thing to be attached to a person
 type DebtEntryCreateRequest struct {
+	// PersonId is who owes this one. It is absent when the whole request is owed by the single
+	// person named at the top of it, and set when one thing is shared out among several people -
+	// a dish everybody ate is one entry per eater, each for that eater's share.
+	PersonId      int64 `json:"personId,string"`
 	TransactionId int64 `json:"transactionId,string" binding:"required,min=1"`
 	// LineItemId is the position that is owed, or absent when the whole transaction is
 	LineItemId int64 `json:"lineItemId,string"`
@@ -116,10 +120,13 @@ type DebtEntryCreateRequest struct {
 // DebtEntryCreateBatchRequest represents all parameters of a request to attach things to a person.
 //
 // A batch, because a receipt is read as a whole - the positions somebody is to pay for are ticked
-// off in one sitting and belong to one person, and attaching them one request at a time would let
-// half of them land.
+// off in one sitting, and attaching them one request at a time would let half of them land. A split
+// is the same thing seen from the other side: the shares of one position are only meaningful
+// together, so they are written together or not at all.
 type DebtEntryCreateBatchRequest struct {
-	PersonId int64                     `json:"personId,string" binding:"required,min=1"`
+	// PersonId is who owes everything in this batch, and may be left out when every entry names its
+	// own person, which is what a split does
+	PersonId int64                     `json:"personId,string"`
 	Entries  []*DebtEntryCreateRequest `json:"entries" binding:"required,min=1,max=500,dive"`
 }
 
@@ -205,6 +212,9 @@ type DebtEntryInfoResponse struct {
 	// on the debts page the same way it is named everywhere else
 	CategoryId int64  `json:"categoryId,string,omitempty"`
 	Comment    string `json:"comment,omitempty"`
+	// ReceiptId is the shopping trip the transaction belongs to, when it came from one. It is what
+	// lets the things owed off one receipt be shown together rather than as a run of unrelated rows.
+	ReceiptId int64 `json:"receiptId,string,omitempty"`
 	// MerchantName is the shop of the receipt the transaction was imported from, when it had one
 	MerchantName string `json:"merchantName,omitempty"`
 	// Missing says the transaction this points at is no longer in the ledger. The entry is still

@@ -240,11 +240,40 @@ func (a *DebtsApi) EntryCreateBatchHandler(c *core.WebContext) (any, *errs.Error
 	}
 
 	uid := c.GetCurrentUid()
-	_, err = a.debts.GetPersonByPersonId(c, uid, entryCreateReq.PersonId)
+
+	// every entry is owed by somebody: the person the request names, or the one the entry names when
+	// a thing is being shared out
+	personIds := make([]int64, 0, len(entryCreateReq.Entries))
+	entryPersonIds := make([]int64, len(entryCreateReq.Entries))
+
+	for i := 0; i < len(entryCreateReq.Entries); i++ {
+		personId := entryCreateReq.Entries[i].PersonId
+
+		if personId <= 0 {
+			personId = entryCreateReq.PersonId
+		}
+
+		if personId <= 0 {
+			log.Warnf(c, "[debts.EntryCreateBatchHandler] entry %d names no person for user \"uid:%d\"", i, uid)
+			return nil, errs.ErrDebtPersonIdInvalid
+		}
+
+		entryPersonIds[i] = personId
+		personIds = append(personIds, personId)
+	}
+
+	personMap, err := a.debts.GetPersonsByPersonIds(c, uid, personIds)
 
 	if err != nil {
-		log.Errorf(c, "[debts.EntryCreateBatchHandler] failed to get person \"id:%d\" for user \"uid:%d\", because %s", entryCreateReq.PersonId, uid, err.Error())
+		log.Errorf(c, "[debts.EntryCreateBatchHandler] failed to get people for user \"uid:%d\", because %s", uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	for i := 0; i < len(entryPersonIds); i++ {
+		if _, exists := personMap[entryPersonIds[i]]; !exists {
+			log.Warnf(c, "[debts.EntryCreateBatchHandler] the person \"id:%d\" does not exist for user \"uid:%d\"", entryPersonIds[i], uid)
+			return nil, errs.ErrDebtPersonNotFound
+		}
 	}
 
 	transactionIds := make([]int64, 0, len(entryCreateReq.Entries))
@@ -331,7 +360,7 @@ func (a *DebtsApi) EntryCreateBatchHandler(c *core.WebContext) (any, *errs.Error
 		}
 
 		entries[i] = &models.DebtEntry{
-			PersonId:        entryCreateReq.PersonId,
+			PersonId:        entryPersonIds[i],
 			TransactionId:   transaction.TransactionId,
 			LineItemId:      entryReq.LineItemId,
 			Amount:          amount,
@@ -347,7 +376,7 @@ func (a *DebtsApi) EntryCreateBatchHandler(c *core.WebContext) (any, *errs.Error
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	log.Infof(c, "[debts.EntryCreateBatchHandler] user \"uid:%d\" has attached %d entries to person \"id:%d\"", uid, len(entries), entryCreateReq.PersonId)
+	log.Infof(c, "[debts.EntryCreateBatchHandler] user \"uid:%d\" has attached %d entries to %d people", uid, len(entries), len(personMap))
 
 	entryResps, err := a.getDescribedEntryResponses(c, uid, entries)
 
@@ -653,6 +682,8 @@ func (a *DebtsApi) getDescribedEntryResponses(c *core.WebContext, uid int64, ent
 
 		entryResp.CategoryId = transaction.CategoryId
 		entryResp.Comment = transaction.Comment
+
+		entryResp.ReceiptId = transaction.ReceiptId
 
 		if receipt, exists := receiptMap[transaction.ReceiptId]; exists {
 			entryResp.MerchantName = receipt.MerchantName

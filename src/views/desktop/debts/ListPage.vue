@@ -21,7 +21,15 @@
                     </div>
                 </template>
 
-                <v-card-text class="pt-0">
+                <v-card-text class="pb-0">
+                    <span class="text-subtitle-2">{{ tt('Total Owed to You') }}</span>
+                    <p class="text-h5 mt-1 mb-0">
+                        <span v-if="totalOwed.length">{{ getDisplayAmounts(totalOwed) }}</span>
+                        <span v-else-if="!totalOwed.length">{{ tt('Nothing') }}</span>
+                    </p>
+                </v-card-text>
+
+                <v-card-text>
                     <v-list class="pt-0" density="comfortable" v-if="allPeople.length">
                         <v-list-item class="px-3" rounded
                                      :key="person.id" v-for="person in allPeople"
@@ -93,7 +101,14 @@
                     <v-table density="comfortable" v-if="visibleEntries.length">
                         <thead>
                             <tr>
-                                <th class="debt-entry-select"></th>
+                                <th class="debt-entry-select">
+                                    <v-checkbox density="compact" hide-details
+                                                :disabled="updating || !selectableEntries.length"
+                                                :indeterminate="someSelected"
+                                                v-model="allSelected">
+                                        <v-tooltip activator="parent">{{ allSelected ? tt('Select None') : tt('Select All') }}</v-tooltip>
+                                    </v-checkbox>
+                                </th>
                                 <th>{{ tt('Description') }}</th>
                                 <th>{{ tt('Transaction Time') }}</th>
                                 <th class="text-end">{{ tt('Amount') }}</th>
@@ -101,7 +116,37 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <tr :key="entry.id" v-for="entry in visibleEntries" :class="{ 'text-medium-emphasis': entry.settled }">
+                            <template :key="row.key" v-for="row in entryRows">
+                            <tr class="debt-entry-receipt-row cursor-pointer"
+                                v-if="row.receiptGroup"
+                                @click="toggleReceipt(row.receiptGroup)">
+                                <td class="debt-entry-select">
+                                    <v-checkbox density="compact" hide-details
+                                                :disabled="updating || !row.receiptGroup.openEntryIds.length"
+                                                :indeterminate="isReceiptPartlySelected(row.receiptGroup)"
+                                                :model-value="isReceiptSelected(row.receiptGroup)"
+                                                @click.stop
+                                                @update:model-value="(selected: boolean | null) => selectReceipt(row.receiptGroup!, !!selected)"></v-checkbox>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-center">
+                                        <v-icon size="20" :icon="isReceiptExpanded(row.receiptGroup) ? mdiChevronDown : mdiChevronRight"></v-icon>
+                                        <v-icon class="ms-1" size="20" :icon="mdiReceiptTextOutline"></v-icon>
+                                        <span class="ms-2 font-weight-medium"
+                                              :class="{ 'text-medium-emphasis': !row.receiptGroup.merchantName }">
+                                            {{ row.receiptGroup.merchantName || tt('Receipt') }}
+                                        </span>
+                                        <v-chip class="ms-2" size="x-small" label>
+                                            {{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(row.receiptGroup.entries.length) }) }}
+                                        </v-chip>
+                                    </div>
+                                </td>
+                                <td class="text-no-wrap">{{ getDisplayTime(row.entry.time) }}</td>
+                                <td class="text-end text-no-wrap font-weight-medium">{{ getDisplayAmount(row.receiptGroup.totalAmount, row.receiptGroup.currency) }}</td>
+                                <td></td>
+                            </tr>
+                            <tr :key="entry.id" v-for="entry in getRowEntries(row)"
+                                :class="{ 'text-medium-emphasis': entry.settled, 'debt-entry-in-receipt': !!row.receiptGroup }">
                                 <td class="debt-entry-select">
                                     <v-checkbox density="compact" hide-details
                                                 :disabled="updating"
@@ -145,6 +190,7 @@
                                     </v-btn>
                                 </td>
                             </tr>
+                            </template>
                         </tbody>
                     </v-table>
 
@@ -161,9 +207,14 @@
                             {{ tt('format.misc.debtSelectedCountAndAmount', { count: displaySelectedCount, amount: getDisplayAmounts(selectedTotals) }) }}
                         </span>
                         <span class="text-body-1 text-medium-emphasis" v-else-if="!selectedOpenEntries.length">
-                            {{ tt('Tick what has been paid back') }}
+                            {{ tt('Tick what has been paid back, or what is no longer owed') }}
                         </span>
                         <v-spacer/>
+                        <v-btn color="error" variant="tonal"
+                               :disabled="!selectedEntries.length || updating" @click="detachSelected">
+                            {{ tt('Detach') }}
+                            <v-tooltip activator="parent" open-delay="500">{{ tt('Stop these being owed, without recording any payment') }}</v-tooltip>
+                        </v-btn>
                         <v-btn :disabled="!selectedOpenEntries.length || updating" @click="recordRepayment">
                             {{ tt('Record Repayment') }}
                             <v-progress-circular indeterminate size="20" class="ms-2" v-if="updating"></v-progress-circular>
@@ -206,8 +257,8 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
-import type { DebtAmount, DebtEntryInfoResponse, DebtPersonInfoResponse } from '@/models/debt.ts';
-import { sumDebtAmountsByCurrency } from '@/models/debt.ts';
+import type { DebtAmount, DebtEntryInfoResponse, DebtEntryReceiptGroup, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
+import { sumDebtAmountsByCurrency, groupDebtEntriesByReceipt } from '@/models/debt.ts';
 
 import { parseBigDecimal } from '@/lib/numeral.ts';
 import { parseDateTimeFromUnixTime } from '@/lib/datetime.ts';
@@ -223,7 +274,10 @@ import {
     mdiRenameOutline,
     mdiHandCoinOutline,
     mdiEyeOutline,
-    mdiEyeOffOutline
+    mdiEyeOffOutline,
+    mdiChevronDown,
+    mdiChevronRight,
+    mdiReceiptTextOutline
 } from '@mdi/js';
 
 type AddLoanDialogType = InstanceType<typeof AddLoanDialog>;
@@ -260,8 +314,85 @@ const visibleEntries = computed<DebtEntryInfoResponse[]>(() => showSettled.value
 
 const openTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(openEntries.value));
 
+// what everybody together still owes, added from the standing totals the server keeps for each
+// person, so it counts the people whose debts are not on screen as well as the one who is
+const totalOwed = computed<DebtAmount[]>(() => {
+    const allOpenAmounts: DebtAmount[] = [];
+
+    for (const person of allPeople.value) {
+        for (const openAmount of person.openAmounts ?? []) {
+            allOpenAmounts.push(openAmount);
+        }
+    }
+
+    return sumDebtAmountsByCurrency(allOpenAmounts);
+});
+
 // only what is still open can be paid back, so a ticked settled row is ignored rather than counted
 const selectedOpenEntries = computed<DebtEntryInfoResponse[]>(() => openEntries.value.filter(entry => selectedEntryIds.value.indexOf(entry.id) >= 0));
+
+// everything ticked, whether it is still owed or already paid back. Detaching works on all of it,
+// because a row put there by mistake is a mistake either way.
+const selectedEntries = computed<DebtEntryInfoResponse[]>(() => visibleEntries.value.filter(entry => selectedEntryIds.value.indexOf(entry.id) >= 0));
+
+// ticking the whole column means everything a repayment could cover, which is what is still open -
+// a settled row is shown for the record and there is nothing left to do to it
+const selectableEntries = computed<DebtEntryInfoResponse[]>(() => visibleEntries.value.filter(entry => !entry.settled));
+
+const allSelected = computed<boolean>({
+    get: () => selectableEntries.value.length > 0 && selectedOpenEntries.value.length >= selectableEntries.value.length,
+    set: (selectAll: boolean) => {
+        selectedEntryIds.value = selectAll ? selectableEntries.value.map(entry => entry.id) : [];
+    }
+});
+
+const someSelected = computed<boolean>(() => selectedOpenEntries.value.length > 0 && !allSelected.value);
+
+// what somebody owes off one shopping trip is one row until it is opened, so a receipt of a dozen
+// articles reads as the one trip it was rather than filling the page
+const entryRows = computed<DebtEntryRow[]>(() => groupDebtEntriesByReceipt(visibleEntries.value));
+
+const expandedReceiptIds = ref<Record<string, boolean>>({});
+
+function isReceiptExpanded(receiptGroup: DebtEntryReceiptGroup): boolean {
+    return !!expandedReceiptIds.value[receiptGroup.receiptId];
+}
+
+function toggleReceipt(receiptGroup: DebtEntryReceiptGroup): void {
+    expandedReceiptIds.value[receiptGroup.receiptId] = !expandedReceiptIds.value[receiptGroup.receiptId];
+}
+
+// a collapsed trip shows nothing of itself but its own row, and an ungrouped row is simply itself
+function getRowEntries(row: DebtEntryRow): DebtEntryInfoResponse[] {
+    if (!row.receiptGroup) {
+        return [row.entry];
+    }
+
+    return isReceiptExpanded(row.receiptGroup) ? row.receiptGroup.entries : [];
+}
+
+function isReceiptSelected(receiptGroup: DebtEntryReceiptGroup): boolean {
+    if (!receiptGroup.openEntryIds.length) {
+        return false;
+    }
+
+    return receiptGroup.openEntryIds.every(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
+}
+
+function isReceiptPartlySelected(receiptGroup: DebtEntryReceiptGroup): boolean {
+    return !isReceiptSelected(receiptGroup) && receiptGroup.openEntryIds.some(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
+}
+
+// ticking a trip ticks everything still open on it, which is what somebody paying a shopping trip
+// back pays back
+function selectReceipt(receiptGroup: DebtEntryReceiptGroup, selected: boolean): void {
+    if (selected) {
+        const missingIds = receiptGroup.openEntryIds.filter(entryId => selectedEntryIds.value.indexOf(entryId) < 0);
+        selectedEntryIds.value = selectedEntryIds.value.concat(missingIds);
+    } else {
+        selectedEntryIds.value = selectedEntryIds.value.filter(entryId => receiptGroup.openEntryIds.indexOf(entryId) < 0);
+    }
+}
 const selectedTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(selectedOpenEntries.value));
 const displaySelectedCount = computed<string>(() => formatNumberToLocalizedNumerals(selectedOpenEntries.value.length));
 
@@ -477,6 +608,34 @@ function renameEntry(entry: DebtEntryInfoResponse): void {
     });
 }
 
+// detachSelected takes things off somebody's bill without any money changing hands - bought for
+// them and then not, counted twice, or simply forgiven. The transactions stay exactly as they are.
+function detachSelected(): void {
+    if (!selectedEntries.value.length) {
+        return;
+    }
+
+    const entryIds = selectedEntries.value.map(entry => entry.id);
+
+    confirmDialog.value?.open('Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.').then(() => {
+        updating.value = true;
+
+        debtsStore.deleteEntries({ ids: entryIds }).then(() => {
+            updating.value = false;
+            selectedEntryIds.value = [];
+            reload(true);
+
+            snackbar.value?.showMessage('These are no longer owed');
+        }).catch(error => {
+            updating.value = false;
+
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
+    });
+}
+
 function detach(entry: DebtEntryInfoResponse): void {
     updating.value = true;
 
@@ -588,5 +747,9 @@ onMounted(() => {
 
 .debt-entry-select .v-selection-control {
     min-height: unset;
+}
+
+.v-table .debt-entry-in-receipt > td:nth-child(2) {
+    padding-inline-start: 32px;
 }
 </style>

@@ -64,6 +64,32 @@ func (s *DebtService) GetPersonByPersonId(c core.Context, uid int64, personId in
 	return person, nil
 }
 
+// GetPersonsByPersonIds returns the people with the given ids that belong to this user, keyed by id
+func (s *DebtService) GetPersonsByPersonIds(c core.Context, uid int64, personIds []int64) (map[int64]*models.DebtPerson, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if len(personIds) < 1 {
+		return nil, errs.ErrDebtPersonIdInvalid
+	}
+
+	var persons []*models.DebtPerson
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).In("person_id", personIds).Find(&persons)
+
+	if err != nil {
+		return nil, err
+	}
+
+	personMap := make(map[int64]*models.DebtPerson, len(persons))
+
+	for i := 0; i < len(persons); i++ {
+		personMap[persons[i].PersonId] = persons[i]
+	}
+
+	return personMap, nil
+}
+
 // GetMaxDisplayOrder returns the display order of the person listed last
 func (s *DebtService) GetMaxDisplayOrder(c core.Context, uid int64) (int32, error) {
 	if uid <= 0 {

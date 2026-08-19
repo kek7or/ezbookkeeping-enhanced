@@ -2,12 +2,13 @@
     <div class="transaction-owed-by mt-2">
         <div class="d-flex align-center px-2 pb-1">
             <v-select class="flex-grow-1" density="compact" hide-details persistent-placeholder
+                      multiple chips closable-chips
                       item-title="name" item-value="id"
                       :disabled="loading || submitting"
                       :label="tt('Owed By')"
                       :placeholder="tt('Nobody')"
                       :items="allPeople"
-                      v-model="selectedPersonId">
+                      v-model="selectedPersonIds">
             </v-select>
             <v-btn class="ms-2" density="comfortable" color="default" variant="text" :icon="true"
                    :disabled="loading || submitting" @click="addPerson">
@@ -26,7 +27,7 @@
             <v-chip class="ms-2" size="small" label
                     :key="entry.id" v-for="entry in wholeTransactionEntries"
                     :closable="!submitting" @click:close="detach(entry)">
-                {{ getPersonName(entry.personId) }}
+                {{ getEntryChipText(entry) }}
             </v-chip>
             <span class="ms-4 text-no-wrap">{{ getDisplayAmount(amount) }}</span>
         </div>
@@ -49,13 +50,20 @@
                 <v-chip class="ms-2" size="small" label
                         :key="entry.id" v-for="entry in getLineItemEntries(lineItem.id)"
                         :closable="!submitting" @click:close="detach(entry)">
-                    {{ getPersonName(entry.personId) }}
+                    {{ getEntryChipText(entry) }}
                 </v-chip>
                 <span class="ms-4 text-no-wrap">{{ getDisplayAmount(lineItem.amount) }}</span>
             </div>
         </template>
 
         <v-divider/>
+
+        <div class="d-flex align-center px-2 pt-2" v-if="isSplit">
+            <v-checkbox class="flex-grow-0" density="compact" hide-details
+                        :disabled="loading || submitting"
+                        :label="tt('Count me in the split')"
+                        v-model="includeMyShare"></v-checkbox>
+        </div>
 
         <div class="d-flex align-center px-2 pt-2">
             <span class="text-caption text-medium-emphasis flex-grow-1" v-if="!hasSelection">
@@ -68,6 +76,10 @@
                 {{ tt('Attach') }}
                 <v-progress-circular indeterminate size="20" class="ms-2" v-if="submitting"></v-progress-circular>
             </v-btn>
+        </div>
+
+        <div class="px-2 pt-1 text-caption text-medium-emphasis" v-if="hasSelection && sharePreview">
+            {{ sharePreview }}
         </div>
 
         <div class="px-2 pt-2 text-caption text-medium-emphasis" v-if="!lineItems.length">
@@ -89,7 +101,9 @@ import { useDebtsStore } from '@/stores/debt.ts';
 
 import type { ErrorResponse } from '@/core/api.ts';
 import type { TransactionReceiptLineItem } from '@/models/transaction.ts';
-import type { DebtEntryInfoResponse, DebtPersonInfoResponse } from '@/models/debt.ts';
+import type { DebtEntryCreateRequest, DebtEntryInfoResponse, DebtPersonInfoResponse } from '@/models/debt.ts';
+
+import { splitAmountEvenly } from '@/models/debt.ts';
 
 import { parseBigDecimal } from '@/lib/numeral.ts';
 
@@ -98,6 +112,12 @@ import {
 } from '@mdi/js';
 
 type RenameDialogType = InstanceType<typeof RenameDialog>;
+
+// AttachTarget is one thing that can be owed: the transaction as a whole, or one of its positions
+interface AttachTarget {
+    lineItemId?: string;
+    amount: number;
+}
 
 const props = defineProps<{
     transactionId: string;
@@ -120,9 +140,12 @@ const renameDialog = useTemplateRef<RenameDialogType>('renameDialog');
 const loading = ref<boolean>(true);
 const submitting = ref<boolean>(false);
 const entries = ref<DebtEntryInfoResponse[]>([]);
-const selectedPersonId = ref<string>('');
+const selectedPersonIds = ref<string[]>([]);
 const wholeTransactionSelected = ref<boolean>(false);
 const selectedLineItemIds = ref<string[]>([]);
+// what everybody ate is not owed by everybody else alone - the one who paid had their share of it
+// too, and counting them in is what stops the friends being charged for the whole dish
+const includeMyShare = ref<boolean>(true);
 
 const allPeople = computed<DebtPersonInfoResponse[]>(() => debtsStore.allPeople);
 
@@ -136,22 +159,89 @@ const attachableLineItems = computed<TransactionReceiptLineItem[]>(() => props.l
 
 const hasSelection = computed<boolean>(() => wholeTransactionSelected.value || selectedLineItemIds.value.length > 0);
 
-const canAttach = computed<boolean>(() => hasSelection.value && !!selectedPersonId.value);
+// one person owes the whole of what is ticked; two or more share it
+const isSplit = computed<boolean>(() => selectedPersonIds.value.length > 1);
 
-const selectedAmount = computed<number>(() => {
+const canAttach = computed<boolean>(() => hasSelection.value && selectedPersonIds.value.length > 0);
+
+// shareCount counts the payer as well when they are in on it, so that a dish split with two friends
+// is a third each rather than a half each
+const shareCount = computed<number>(() => selectedPersonIds.value.length + (isSplit.value && includeMyShare.value ? 1 : 0));
+
+// the things that were ticked, each with what it cost. A position is split on its own rather than
+// thrown into one pot, so every share still says which article it is a share of.
+const selectedTargets = computed<AttachTarget[]>(() => {
+    const targets: AttachTarget[] = [];
+
     if (wholeTransactionSelected.value) {
-        return props.amount;
+        targets.push({ amount: props.amount });
     }
-
-    let total = 0;
 
     for (const lineItem of attachableLineItems.value) {
         if (lineItem.id && selectedLineItemIds.value.indexOf(lineItem.id) >= 0) {
-            total += lineItem.amount;
+            targets.push({ lineItemId: lineItem.id, amount: lineItem.amount });
         }
     }
 
+    return targets;
+});
+
+const selectedAmount = computed<number>(() => {
+    let total = 0;
+
+    for (const target of selectedTargets.value) {
+        total += target.amount;
+    }
+
     return total;
+});
+
+// payerTakesAShare says the one who paid ate some of this too, so their share is simply kept and
+// never written down as owed by anybody
+const payerTakesAShare = computed<boolean>(() => isSplit.value && includeMyShare.value);
+
+// what each person ends up owing, and what the payer keeps, added over everything that was ticked
+const shares = computed<{ people: Record<string, number>, mine: number }>(() => {
+    const people: Record<string, number> = {};
+    let mine = 0;
+
+    for (const personId of selectedPersonIds.value) {
+        people[personId] = 0;
+    }
+
+    for (const target of selectedTargets.value) {
+        const targetShares = splitAmountEvenly(target.amount, shareCount.value);
+
+        if (payerTakesAShare.value) {
+            mine += targetShares[0] ?? 0;
+        }
+
+        for (let i = 0; i < selectedPersonIds.value.length; i++) {
+            const personId = selectedPersonIds.value[i] as string;
+            const share = targetShares[payerTakesAShare.value ? i + 1 : i] ?? 0;
+            people[personId] = (people[personId] ?? 0) + share;
+        }
+    }
+
+    return { people: people, mine: mine };
+});
+
+const sharePreview = computed<string>(() => {
+    if (!hasSelection.value || !selectedPersonIds.value.length) {
+        return '';
+    }
+
+    const parts: string[] = [];
+
+    for (const personId of selectedPersonIds.value) {
+        parts.push(`${getPersonName(personId)} ${getDisplayAmount(shares.value.people[personId] ?? 0)}`);
+    }
+
+    if (payerTakesAShare.value) {
+        parts.push(tt('format.misc.debtYourShare', { amount: getDisplayAmount(shares.value.mine) }));
+    }
+
+    return parts.join(' · ');
 });
 
 function getDisplayAmount(amount: number): string {
@@ -160,6 +250,12 @@ function getDisplayAmount(amount: number): string {
 
 function getPersonName(personId: string): string {
     return debtsStore.allPeopleMap[personId]?.name ?? '';
+}
+
+// a chip carries the amount as well as the name, because once a thing is shared out the interesting
+// part is not that somebody owes for it but how much of it they owe
+function getEntryChipText(entry: DebtEntryInfoResponse): string {
+    return `${getPersonName(entry.personId)} ${getDisplayAmount(entry.amount)}`;
 }
 
 function getLineItemEntries(lineItemId?: string): DebtEntryInfoResponse[] {
@@ -184,8 +280,9 @@ function reload(): void {
         entries.value = transactionEntries;
         loading.value = false;
 
-        if (!selectedPersonId.value && allPeople.value.length) {
-            selectedPersonId.value = allPeople.value[0]?.id ?? '';
+        // preselected only when there is nobody else it could be
+        if (!selectedPersonIds.value.length && allPeople.value.length === 1) {
+            selectedPersonIds.value = [allPeople.value[0]?.id ?? ''];
         }
     }).catch(error => {
         loading.value = false;
@@ -202,7 +299,7 @@ function addPerson(): void {
 
         debtsStore.addPerson({ name: newName }).then(person => {
             submitting.value = false;
-            selectedPersonId.value = person.id;
+            selectedPersonIds.value = selectedPersonIds.value.concat([person.id]);
         }).catch(error => {
             submitting.value = false;
 
@@ -218,25 +315,39 @@ function attach(): void {
         return;
     }
 
-    const newEntries = [];
+    const newEntries: DebtEntryCreateRequest[] = [];
 
-    if (wholeTransactionSelected.value) {
-        newEntries.push({
-            transactionId: props.transactionId
-        });
+    for (const target of selectedTargets.value) {
+        const targetShares = splitAmountEvenly(target.amount, shareCount.value);
+
+        for (let i = 0; i < selectedPersonIds.value.length; i++) {
+            const share = targetShares[payerTakesAShare.value ? i + 1 : i] ?? 0;
+
+            // a share of nothing is nobody's debt, and sending it as a zero would be read as
+            // asking for the whole amount
+            if (share <= 0) {
+                continue;
+            }
+
+            newEntries.push({
+                personId: selectedPersonIds.value[i] as string,
+                transactionId: props.transactionId,
+                lineItemId: target.lineItemId,
+                amount: share
+            });
+        }
     }
 
-    for (const lineItemId of selectedLineItemIds.value) {
-        newEntries.push({
-            transactionId: props.transactionId,
-            lineItemId: lineItemId
-        });
+    if (!newEntries.length) {
+        emit('message', 'There is nothing to attach');
+        return;
     }
+
+    const splitBetweenPeople = isSplit.value;
 
     submitting.value = true;
 
     debtsStore.attachEntries({
-        personId: selectedPersonId.value,
         entries: newEntries
     }).then(createdEntries => {
         submitting.value = false;
@@ -244,7 +355,7 @@ function attach(): void {
         wholeTransactionSelected.value = false;
         selectedLineItemIds.value = [];
 
-        emit('message', 'This is now owed by this person');
+        emit('message', splitBetweenPeople ? 'This has been split between them' : 'This is now owed by this person');
     }).catch(error => {
         submitting.value = false;
 

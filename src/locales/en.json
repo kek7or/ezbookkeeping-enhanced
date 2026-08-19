@@ -155,6 +155,7 @@
             "receiptLinesNotItemized": "{count} lines were read off the receipt but did not become transactions, so what they cost is missing from this import. Please add them manually after importing.",
             "receiptLineItemCount": "{count} items",
             "debtSelectedAmount": "{amount} selected",
+            "debtYourShare": "your share {amount}",
             "debtSelectedCountAndAmount": "{count} selected, {amount}",
             "debtRepaymentComment": "Paid back by {name}",
             "receiptTransactionCount": "{count} transactions",
@@ -2852,5 +2853,13 @@
     "What was lent": "What was lent",
     "By Hand": "By Hand",
     "Unable to record this loan": "Unable to record this loan",
+    "Count me in the split": "Count me in the split",
+    "This has been split between them": "This has been split between them",
+    "There is nothing to attach": "There is nothing to attach",
+    "Total Owed to You": "Total Owed to You",
+    "Stop these being owed, without recording any payment": "Stop these being owed, without recording any payment",
+    "Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.": "Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.",
+    "These are no longer owed": "These are no longer owed",
+    "Tick what has been paid back, or what is no longer owed": "Tick what has been paid back, or what is no longer owed",
     "Click to close": "Click to close"
 }
