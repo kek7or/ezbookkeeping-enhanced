@@ -365,6 +365,24 @@ var UserData = &cli.Command{
 			},
 		},
 		{
+			Name:   "receipt-backfill-august-2026",
+			Usage:  "Group the August 2026 transactions into the receipts they were imported from, by the second they were booked at",
+			Action: bindAction(backfillReceiptsFromTransactionTime),
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:     "username",
+					Aliases:  []string{"n"},
+					Required: true,
+					Usage:    "Specific user name",
+				},
+				&cli.BoolFlag{
+					Name:    "dry-run",
+					Aliases: []string{"d"},
+					Usage:   "Report which transactions would be grouped without changing anything",
+				},
+			},
+		},
+		{
 			Name:   "transaction-import",
 			Usage:  "Import transactions to specified user",
 			Action: bindAction(importUserTransaction),
@@ -883,6 +901,34 @@ func learnReceiptLineItemCategories(c *core.CliContext) error {
 		log.CliInfof(c, "[user_data.learnReceiptLineItemCategories] %d articles read from %d transactions would be remembered, nothing was changed", articleCount, transactionCount)
 	} else {
 		log.CliInfof(c, "[user_data.learnReceiptLineItemCategories] %d articles read from %d transactions have been remembered for user \"%s\"", articleCount, transactionCount, username)
+	}
+
+	return nil
+}
+
+func backfillReceiptsFromTransactionTime(c *core.CliContext) error {
+	_, err := initializeSystem(c)
+
+	if err != nil {
+		return err
+	}
+
+	username := c.String("username")
+	dryRun := c.Bool("dry-run")
+
+	log.CliInfof(c, "[user_data.backfillReceiptsFromTransactionTime] starting grouping the August 2026 transactions of user \"%s\" into receipts", username)
+
+	receiptCount, transactionCount, err := clis.UserData.BackfillReceiptsFromTransactionTime(c, username, dryRun)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.backfillReceiptsFromTransactionTime] error occurs when grouping the transactions of user \"%s\"", username)
+		return err
+	}
+
+	if dryRun {
+		log.CliInfof(c, "[user_data.backfillReceiptsFromTransactionTime] %d receipts over %d transactions would be created, nothing was changed", receiptCount, transactionCount)
+	} else {
+		log.CliInfof(c, "[user_data.backfillReceiptsFromTransactionTime] %d receipts over %d transactions have been created for user \"%s\"", receiptCount, transactionCount, username)
 	}
 
 	return nil

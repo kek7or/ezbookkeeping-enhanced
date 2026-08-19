@@ -1009,6 +1009,179 @@ func (l *UserDataCli) LearnReceiptLineItemCategoriesFromTransactions(c *core.Cli
 	return len(distinctNames), readTransactionCount, nil
 }
 
+// backfillReceiptYear and backfillReceiptMonth are the one month this backfill is allowed to touch.
+//
+// They are constants rather than flags on purpose. Grouping transactions by the second they were
+// booked at is a guess - a good one for a month that is known to be receipt imports, and a bad one
+// for a month of transactions entered by hand or loaded from a bank statement, where two things
+// falling in the same second means nothing. Nothing outside this month is read, so the command cannot
+// be pointed somewhere the guess does not hold.
+const backfillReceiptYear = 2026
+const backfillReceiptMonth = time.August
+
+// BackfillReceiptsFromTransactionTime gives receipts to the transactions of August 2026 that were
+// imported before receipts existed, by reading which of them were booked at the same second.
+//
+// A receipt import books every transaction it produces at the one time the receipt was paid, and the
+// database keeps them apart by counting up the last three digits of the transaction time. So the
+// transactions of one shopping trip are exactly the expenses that share a second - which is the only
+// trace of the receipt left in a ledger that never recorded one.
+//
+// It is a guess, and it is narrowed to where the guess holds:
+//
+//   - Only August 2026, judged in each transaction's own timezone, so that what is grouped is what the
+//     transaction list shows under an August date.
+//   - Only expenses. A receipt produces nothing else, and an income or a transfer that happens to fall
+//     in the same second is not part of the shopping.
+//   - Only within one account. A receipt is paid once, from one account.
+//   - Only where two or more transactions share the second. A single transaction is not a shopping
+//     trip, and giving it a receipt would only put a row in the list that opens to itself.
+//   - Never at exactly midnight, which is where transactions entered by hand for a whole day land.
+//   - Only transactions that do not already belong to a receipt, so a receipt imported normally is
+//     never disturbed and a second run finds nothing left to do.
+//
+// The receipts it writes carry no shop name and no printed total. Neither survives in the ledger, and
+// a made-up one would be worse than an empty field.
+func (l *UserDataCli) BackfillReceiptsFromTransactionTime(c *core.CliContext, username string, dryRun bool) (int, int, error) {
+	if username == "" {
+		log.CliErrorf(c, "[user_data.BackfillReceiptsFromTransactionTime] user name is empty")
+		return 0, 0, errs.ErrUsernameIsEmpty
+	}
+
+	uid, err := l.getUserIdByUsername(c, username)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.BackfillReceiptsFromTransactionTime] error occurs when getting user id by user name")
+		return 0, 0, err
+	}
+
+	allTransactions, err := l.transactions.GetAllTransactions(c, uid, pageCountForGettingTransactions, false)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.BackfillReceiptsFromTransactionTime] failed to get all transactions for user \"%s\", because %s", username, err.Error())
+		return 0, 0, err
+	}
+
+	// keyed by the second and the account, so that two shops paid in the same second from two accounts
+	// are not read as one trip
+	type backfillKey struct {
+		unixTime  int64
+		accountId int64
+	}
+
+	groupKeys := make([]backfillKey, 0, len(allTransactions))
+	groupedTransactions := make(map[backfillKey][]*models.Transaction, len(allTransactions))
+
+	for _, transaction := range allTransactions {
+		if transaction.Type != models.TRANSACTION_DB_TYPE_EXPENSE || transaction.ReceiptId != 0 {
+			continue
+		}
+
+		if !isInBackfillReceiptMonth(transaction) || isBackfillReceiptMidnight(transaction) {
+			continue
+		}
+
+		key := backfillKey{
+			unixTime:  utils.GetUnixTimeFromTransactionTime(transaction.TransactionTime),
+			accountId: transaction.AccountId,
+		}
+
+		if _, exists := groupedTransactions[key]; !exists {
+			groupKeys = append(groupKeys, key)
+		}
+
+		groupedTransactions[key] = append(groupedTransactions[key], transaction)
+	}
+
+	groups := make([]*models.TransactionReceiptBackfillGroup, 0, len(groupKeys))
+	transactionCount := 0
+
+	for _, key := range groupKeys {
+		transactions := groupedTransactions[key]
+
+		if len(transactions) < 2 {
+			continue
+		}
+
+		// the transactions of one second arrive in no particular order, and the receipt is booked at
+		// the second itself rather than at whichever of them happened to be read first
+		sort.SliceStable(transactions, func(i, j int) bool {
+			return transactions[i].TransactionTime < transactions[j].TransactionTime
+		})
+
+		transactionIds := make([]int64, 0, len(transactions))
+		transactionTimeZone := time.FixedZone("Transaction Timezone", int(transactions[0].TimezoneUtcOffset)*60)
+
+		for _, transaction := range transactions {
+			transactionIds = append(transactionIds, transaction.TransactionId)
+		}
+
+		log.CliInfof(c, "[user_data.BackfillReceiptsFromTransactionTime] %s: %d transactions would be one receipt", utils.FormatUnixTimeToLongDateTime(key.unixTime, transactionTimeZone), len(transactionIds))
+
+		groups = append(groups, &models.TransactionReceiptBackfillGroup{
+			TransactionTime: utils.GetMinTransactionTimeFromUnixTime(key.unixTime),
+			TransactionIds:  transactionIds,
+		})
+
+		transactionCount += len(transactionIds)
+	}
+
+	if len(groups) < 1 {
+		log.CliInfof(c, "[user_data.BackfillReceiptsFromTransactionTime] found no transactions to group into receipts for user \"%s\"", username)
+		return 0, 0, nil
+	}
+
+	if dryRun {
+		return len(groups), transactionCount, nil
+	}
+
+	stampedCount, err := l.transactions.CreateReceiptsForExistingTransactions(c, uid, groups)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.BackfillReceiptsFromTransactionTime] failed to write receipts for user \"%s\", because %s", username, err.Error())
+		return 0, 0, err
+	}
+
+	return len(groups), stampedCount, nil
+}
+
+// isBackfillReceiptMidnight reports whether a transaction was booked at exactly midnight in its own
+// timezone.
+//
+// A receipt is booked at the time printed on it, and a till does not print 00:00:00. Transactions
+// sitting on midnight are ones entered by hand for a day rather than a moment, and several of them on
+// the same day therefore share a second without having anything to do with each other. Grouping those
+// would invent a shopping trip out of a cigarette purchase and a bag of crisps.
+//
+// This does cost the odd real receipt whose time could not be read off the image. That is the cheaper
+// mistake: a receipt left ungrouped still lists exactly as it does today, while a receipt invented
+// around unrelated transactions puts a wrong total on the screen.
+func isBackfillReceiptMidnight(transaction *models.Transaction) bool {
+	localTime := getBackfillTransactionLocalTime(transaction)
+	return localTime.Hour() == 0 && localTime.Minute() == 0 && localTime.Second() == 0
+}
+
+// getBackfillTransactionLocalTime returns the wall clock a transaction was booked at, in its own
+// timezone, which is the clock it is listed under
+func getBackfillTransactionLocalTime(transaction *models.Transaction) time.Time {
+	unixTime := utils.GetUnixTimeFromTransactionTime(transaction.TransactionTime)
+	transactionTimeZone := time.FixedZone("Transaction Timezone", int(transaction.TimezoneUtcOffset)*60)
+
+	return time.Unix(unixTime, 0).In(transactionTimeZone)
+}
+
+// isInBackfillReceiptMonth reports whether a transaction falls in the month this backfill is limited
+// to, judged in the transaction's own timezone.
+//
+// The transaction's own offset is used rather than the server's, because the month a transaction
+// belongs to is the one it is listed under, and the list shows every transaction on the date it was
+// booked where it happened.
+func isInBackfillReceiptMonth(transaction *models.Transaction) bool {
+	localTime := getBackfillTransactionLocalTime(transaction)
+
+	return localTime.Year() == backfillReceiptYear && localTime.Month() == backfillReceiptMonth
+}
+
 // parseReceiptTransactionComment splits the comment a receipt import wrote back into the article names
 // it was joined from, or returns nothing when the comment does not look like such a list.
 //

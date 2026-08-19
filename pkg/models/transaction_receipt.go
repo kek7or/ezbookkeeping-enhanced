@@ -62,6 +62,17 @@ func (r *TransactionReceipt) ToTransactionReceiptInfoResponse() *TransactionRece
 	}
 }
 
+// TransactionReceiptBackfillGroup is a set of transactions already in the ledger that are to be given
+// a receipt they were never imported with.
+//
+// It carries no merchant name and no printed total, because neither can be recovered after the fact -
+// the image is gone and the receipt row is being reconstructed from the transactions alone. What can
+// be recovered is that they belong together.
+type TransactionReceiptBackfillGroup struct {
+	TransactionTime int64
+	TransactionIds  []int64
+}
+
 // TransactionReceiptBatch is the receipts a batch of imported transactions was read from, and which
 // of them each transaction belongs to.
 //

@@ -964,6 +964,98 @@ func (s *TransactionService) buildBatchReceipts(uid int64, now int64, transactio
 	return usedReceipts, nil
 }
 
+// CreateReceiptsForExistingTransactions writes one receipt per group and stamps the transactions of
+// that group with it, for transactions that were imported before receipts existed.
+//
+// Every group is written inside one database transaction, so a run that fails half way leaves no
+// half-grouped shopping. A transaction that already belongs to a receipt is left alone rather than
+// re-stamped, which is what makes running this twice harmless: the second run finds nothing to do.
+func (s *TransactionService) CreateReceiptsForExistingTransactions(c core.Context, uid int64, groups []*models.TransactionReceiptBackfillGroup) (int, error) {
+	if uid <= 0 {
+		return 0, errs.ErrUserIdInvalid
+	}
+
+	if len(groups) < 1 {
+		return 0, nil
+	}
+
+	if len(groups) > 65535 {
+		return 0, errs.ErrOperationFailed
+	}
+
+	now := time.Now().Unix()
+	receiptUuids := s.GenerateUuids(uuid.UUID_TYPE_DEFAULT, uint16(len(groups)))
+
+	if len(receiptUuids) < len(groups) {
+		return 0, errs.ErrSystemIsBusy
+	}
+
+	stampedCount := 0
+
+	err := s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		stampedCount = 0
+
+		for i := 0; i < len(groups); i++ {
+			group := groups[i]
+
+			if len(group.TransactionIds) < 1 {
+				continue
+			}
+
+			receipt := &models.TransactionReceipt{
+				ReceiptId: receiptUuids[i],
+				Uid:       uid,
+				Deleted:   false,
+				// nothing is known about the shop or the printed total, and inventing either would be
+				// worse than leaving the receipt to say only what it can stand behind
+				MerchantName:    "",
+				PrintedTotal:    0,
+				HasPrintedTotal: false,
+				TransactionTime: group.TransactionTime,
+				CreatedUnixTime: now,
+				UpdatedUnixTime: now,
+			}
+
+			if _, err := sess.Insert(receipt); err != nil {
+				log.Errorf(c, "[transactions.CreateReceiptsForExistingTransactions] failed to add receipt for user \"uid:%d\", because %s", uid, err.Error())
+				return err
+			}
+
+			updateModel := &models.Transaction{
+				ReceiptId:       receipt.ReceiptId,
+				UpdatedUnixTime: now,
+			}
+
+			updatedRows, err := sess.Cols("receipt_id", "updated_unix_time").
+				Where("uid=? AND deleted=? AND receipt_id=?", uid, false, 0).
+				In("transaction_id", group.TransactionIds).
+				Update(updateModel)
+
+			if err != nil {
+				log.Errorf(c, "[transactions.CreateReceiptsForExistingTransactions] failed to stamp transactions with receipt \"id:%d\" for user \"uid:%d\", because %s", receipt.ReceiptId, uid, err.Error())
+				return err
+			}
+
+			// a group whose transactions were taken by another receipt between reading and writing
+			// would leave a receipt with nothing under it, which is the one state the list cannot show
+			if updatedRows < int64(len(group.TransactionIds)) {
+				log.Errorf(c, "[transactions.CreateReceiptsForExistingTransactions] receipt \"id:%d\" of user \"uid:%d\" matched %d of %d transactions, rolling back", receipt.ReceiptId, uid, updatedRows, len(group.TransactionIds))
+				return errs.ErrOperationFailed
+			}
+
+			stampedCount += int(updatedRows)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return stampedCount, nil
+}
+
 // CreateScheduledTransactions saves all scheduled transactions that should be created now
 func (s *TransactionService) CreateScheduledTransactions(c core.Context, currentUnixTime int64, interval time.Duration) error {
 	var allTemplates []*models.TransactionTemplate
