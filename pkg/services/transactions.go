@@ -534,6 +534,36 @@ func (s *TransactionService) GetReceiptLineItemsByTransactionId(c core.Context, 
 	return lineItems, nil
 }
 
+// GetReceiptLineItemsByLineItemIds returns receipt line items according to line item ids, keyed by
+// line item id.
+//
+// It is what a list of things somebody owes is named from: the entries point at positions, and a
+// position that says only an amount is one nobody can recognise.
+func (s *TransactionService) GetReceiptLineItemsByLineItemIds(c core.Context, uid int64, lineItemIds []int64) (map[int64]*models.TransactionReceiptLineItem, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if len(lineItemIds) < 1 {
+		return make(map[int64]*models.TransactionReceiptLineItem), nil
+	}
+
+	var lineItems []*models.TransactionReceiptLineItem
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).In("line_item_id", lineItemIds).Find(&lineItems)
+
+	if err != nil {
+		return nil, err
+	}
+
+	lineItemMap := make(map[int64]*models.TransactionReceiptLineItem, len(lineItems))
+
+	for i := 0; i < len(lineItems); i++ {
+		lineItemMap[lineItems[i].LineItemId] = lineItems[i]
+	}
+
+	return lineItemMap, nil
+}
+
 // maximumReceiptIdsPerQuery is how many receipt ids are asked for in one statement, kept well under
 // the parameter limit of every supported database
 const maximumReceiptIdsPerQuery = 500
@@ -2332,6 +2362,17 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 		DeletedUnixTime: now,
 	}
 
+	debtEntryUpdateModel := &models.DebtEntry{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
+	debtEntryReopenModel := &models.DebtEntry{
+		SettlementTransactionId: 0,
+		SettledUnixTime:         0,
+		UpdatedUnixTime:         now,
+	}
+
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		// Get and verify current transaction
 		oldTransaction := &models.Transaction{}
@@ -2393,6 +2434,22 @@ func (s *TransactionService) DeleteTransaction(c core.Context, uid int64, transa
 
 		// Update transaction receipt line items
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND transaction_id=?", uid, false, oldTransaction.TransactionId).Update(lineItemUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// What somebody owed of this transaction goes with it. The debt was a claim on this
+		// spending, and with the spending gone there is nothing left to owe.
+		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND transaction_id=?", uid, false, oldTransaction.TransactionId).Update(debtEntryUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// A repayment being deleted, on the other hand, does not cancel the debts it paid: it says
+		// the payment never happened, so what it settled goes back on the bill.
+		_, err = sess.Cols("settlement_transaction_id", "settled_unix_time", "updated_unix_time").Where("uid=? AND deleted=? AND settlement_transaction_id=?", uid, false, oldTransaction.TransactionId).Update(debtEntryReopenModel)
 
 		if err != nil {
 			return err
@@ -2519,6 +2576,11 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 		DeletedUnixTime: now,
 	}
 
+	debtEntryUpdateModel := &models.DebtEntry{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
 	accountUpdateModel := &models.Account{
 		Balance:         0,
 		Deleted:         deleteAccount,
@@ -2556,6 +2618,14 @@ func (s *TransactionService) DeleteAllTransactions(c core.Context, uid int64, de
 
 		// Update all receipts to deleted
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(receiptUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		// Update all debt entries to deleted - every transaction anybody owed for is gone, and the
+		// people themselves are kept, so that a cleared ledger still knows who it deals with
+		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(debtEntryUpdateModel)
 
 		if err != nil {
 			return err

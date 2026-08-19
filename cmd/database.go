@@ -221,5 +221,21 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] transaction receipt table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.DebtPerson))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] debt person table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.DebtEntry))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] debt entry table maintained successfully")
+
 	return nil
 }

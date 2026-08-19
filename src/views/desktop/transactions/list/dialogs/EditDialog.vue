@@ -90,6 +90,9 @@
                         <v-tab value="lineItems" :disabled="!transactionLineItems.length" v-if="type === TransactionEditPageType.Transaction">
                             <span>{{ tt('Positions') }}</span>
                         </v-tab>
+                        <v-tab value="owedBy" v-if="type === TransactionEditPageType.Transaction && !!editId">
+                            <span>{{ tt('Owed By') }}</span>
+                        </v-tab>
                     </v-tabs>
                 </div>
 
@@ -444,6 +447,15 @@
                             </div>
                         </div>
                     </v-window-item>
+                    <v-window-item value="owedBy">
+                        <owed-by-panel :transaction-id="editId ?? ''"
+                                       :amount="transaction.sourceAmount"
+                                       :currency="sourceAccountCurrency"
+                                       :line-items="transactionLineItems"
+                                       @error="(error) => snackbar?.showError(error)"
+                                       @message="(message) => snackbar?.showMessage(message)"
+                                       v-if="activeTab === 'owedBy' && !!editId"/>
+                    </v-window-item>
                 </v-window>
             </v-card-text>
             <v-card-text>
@@ -540,6 +552,7 @@
 </template>
 
 <script setup lang="ts">
+import OwedByPanel from './OwedByPanel.vue';
 import MapView from '@/components/common/MapView.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
@@ -627,6 +640,9 @@ export interface TransactionEditOptions extends SetTransactionOptions {
 
 interface TransactionEditResponse {
     message: string;
+    // transactionId is the transaction that was just added, so that a caller which asked for a
+    // transaction to be created - a repayment being recorded, say - can say what it was created for
+    transactionId?: string;
 }
 
 type MapViewType = InstanceType<typeof MapView>;
@@ -719,6 +735,10 @@ const pastedText = ref<string>('');
 
 const initOptions = ref<TransactionEditOptions | undefined>(undefined);
 
+// the transaction the last save wrote, kept so that closing the dialog can still say which
+// transaction was added even when the caller only hears about it on close
+const lastSavedTransactionId = ref<string | null>(null);
+
 let resolveFunc: ((response?: TransactionEditResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
@@ -773,6 +793,7 @@ function getDisplayLineItemAmount(amount: number): string {
 }
 
 function open(options: TransactionEditOptions): Promise<TransactionEditResponse | undefined> {
+    lastSavedTransactionId.value = null;
     addByTemplateId.value = null;
     duplicateFromId.value = null;
     showState.value = true;
@@ -946,9 +967,10 @@ function save(afterAction: AfterSaveAction): void {
                 defaultCurrency: defaultCurrency.value,
                 isEdit: mode.value === TransactionEditPageMode.Edit,
                 clientSessionId: clientSessionId.value
-            }).then(() => {
+            }).then(savedTransaction => {
                 submitting.value = false;
                 submitted.value = true;
+                lastSavedTransactionId.value = savedTransaction.id;
 
                 if (mode.value === TransactionEditPageMode.Add && !noTransactionDraft.value && !addByTemplateId.value && !duplicateFromId.value) {
                     transactionsStore.clearTransactionDraft();
@@ -962,7 +984,8 @@ function save(afterAction: AfterSaveAction): void {
                     if (resolveFunc) {
                         if (mode.value === TransactionEditPageMode.Add) {
                             resolveFunc({
-                                message: 'You have added a new transaction'
+                                message: 'You have added a new transaction',
+                                transactionId: lastSavedTransactionId.value ?? undefined
                             });
                         } else if (mode.value === TransactionEditPageMode.Edit) {
                             resolveFunc({
@@ -1153,7 +1176,8 @@ function cancel(): void {
     const doClose = function () {
         if (props.type === TransactionEditPageType.Transaction && mode.value === TransactionEditPageMode.Add && submitted.value && resolveFunc) {
             resolveFunc({
-                message: 'You have added a new transaction'
+                message: 'You have added a new transaction',
+                transactionId: lastSavedTransactionId.value ?? undefined
             });
         } else if (rejectFunc) {
             rejectFunc();

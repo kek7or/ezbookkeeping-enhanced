@@ -456,6 +456,20 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/transaction/tags/move.json", bindApi(api.TransactionTags.TagMoveHandler, config))
 			apiV1Route.POST("/transaction/tags/delete.json", bindApi(api.TransactionTags.TagDeleteHandler, config))
 
+			// Debts
+			apiV1Route.GET("/debts/people/list.json", bindApi(api.Debts.PersonListHandler, config))
+			apiV1Route.POST("/debts/people/add.json", bindApi(api.Debts.PersonCreateHandler, config))
+			apiV1Route.POST("/debts/people/modify.json", bindApi(api.Debts.PersonModifyHandler, config))
+			apiV1Route.POST("/debts/people/delete.json", bindApi(api.Debts.PersonDeleteHandler, config))
+			apiV1Route.GET("/debts/entries/list.json", bindApi(api.Debts.EntryListHandler, config))
+			apiV1Route.GET("/debts/entries/list_by_transaction.json", bindApi(api.Debts.EntryListByTransactionHandler, config))
+			apiV1Route.POST("/debts/entries/add_batch.json", bindApi(api.Debts.EntryCreateBatchHandler, config))
+			apiV1Route.POST("/debts/entries/add_manual.json", bindApi(api.Debts.EntryCreateManualHandler, config))
+			apiV1Route.POST("/debts/entries/modify.json", bindApi(api.Debts.EntryModifyHandler, config))
+			apiV1Route.POST("/debts/entries/delete.json", bindApi(api.Debts.EntryDeleteHandler, config))
+			apiV1Route.POST("/debts/entries/settle.json", bindApi(api.Debts.EntrySettleHandler, config))
+			apiV1Route.POST("/debts/entries/reopen.json", bindApi(api.Debts.EntryReopenHandler, config))
+
 			// Transaction Templates
 			apiV1Route.GET("/transaction/templates/list.json", bindApi(api.TransactionTemplates.TemplateListHandler, config))
 			apiV1Route.GET("/transaction/templates/get.json", bindApi(api.TransactionTemplates.TemplateGetHandler, config))

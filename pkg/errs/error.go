@@ -46,6 +46,7 @@ const (
 	NormalSubcategoryInsightsExplorer       = 18
 	NormalSubcategoryTagGroup               = 19
 	NormalSubcategoryCryptoAsset            = 20
+	NormalSubcategoryDebt                   = 21
 )
 
 // Error represents the specific error returned to user

@@ -30,6 +30,9 @@ type TransactionReceiptLineItemRequest struct {
 
 // TransactionReceiptLineItemResponse represents a view-object of one receipt line of a transaction
 type TransactionReceiptLineItemResponse struct {
+	// Id is what lets a single position be pointed at from elsewhere - it is how one article of a
+	// shopping trip can be said to be owed by somebody
+	Id     int64  `json:"id,string"`
 	Name   string `json:"name"`
 	Amount int64  `json:"amount"`
 }
@@ -37,6 +40,7 @@ type TransactionReceiptLineItemResponse struct {
 // ToTransactionReceiptLineItemResponse returns a view-object according to this receipt line
 func (l *TransactionReceiptLineItem) ToTransactionReceiptLineItemResponse() *TransactionReceiptLineItemResponse {
 	return &TransactionReceiptLineItemResponse{
+		Id:     l.LineItemId,
 		Name:   l.Name,
 		Amount: l.Amount,
 	}

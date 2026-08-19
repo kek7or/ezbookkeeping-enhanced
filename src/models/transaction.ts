@@ -547,6 +547,10 @@ export interface TransactionGeoLocationRequest {
 // bought and what it cost. Sent once, when an imported transaction is created, and read back with the
 // transaction so that its amount can be shown as the sum it actually is.
 export interface TransactionReceiptLineItem {
+    // id is only present on a position read back from the server - a position being submitted with
+    // an import does not have one yet. It is what lets a single article be pointed at from
+    // elsewhere, which is how one of them can be said to be owed by somebody.
+    readonly id?: string;
     readonly name: string;
     readonly amount: number;
 }

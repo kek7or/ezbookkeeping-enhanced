@@ -49,6 +49,19 @@ import type {
     CryptoPortfolioResponse
 } from '@/models/crypto_asset.ts';
 import type {
+    DebtPersonInfoResponse,
+    DebtPersonCreateRequest,
+    DebtPersonModifyRequest,
+    DebtPersonDeleteRequest,
+    DebtEntryInfoResponse,
+    DebtEntryCreateBatchRequest,
+    DebtEntryCreateManualRequest,
+    DebtEntryModifyRequest,
+    DebtEntryDeleteRequest,
+    DebtEntrySettleRequest,
+    DebtEntryReopenRequest
+} from '@/models/debt.ts';
+import type {
     ExportTransactionDataRequest,
     ClearDataRequest,
     ClearAccountTransactionsRequest,
@@ -890,6 +903,42 @@ export default {
     },
     deleteUserCustomExchangeRate: (req: UserCustomExchangeRateDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/exchange_rates/user_custom/delete.json', req);
+    },
+    getAllDebtPeople: (): ApiResponsePromise<DebtPersonInfoResponse[]> => {
+        return axios.get<ApiResponse<DebtPersonInfoResponse[]>>('v1/debts/people/list.json');
+    },
+    addDebtPerson: (req: DebtPersonCreateRequest): ApiResponsePromise<DebtPersonInfoResponse> => {
+        return axios.post<ApiResponse<DebtPersonInfoResponse>>('v1/debts/people/add.json', req);
+    },
+    modifyDebtPerson: (req: DebtPersonModifyRequest): ApiResponsePromise<DebtPersonInfoResponse> => {
+        return axios.post<ApiResponse<DebtPersonInfoResponse>>('v1/debts/people/modify.json', req);
+    },
+    deleteDebtPerson: (req: DebtPersonDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/people/delete.json', req);
+    },
+    getDebtEntries: ({ personId, includeSettled }: { personId: string, includeSettled: boolean }): ApiResponsePromise<DebtEntryInfoResponse[]> => {
+        return axios.get<ApiResponse<DebtEntryInfoResponse[]>>('v1/debts/entries/list.json?personId=' + personId + '&includeSettled=' + !!includeSettled);
+    },
+    getDebtEntriesByTransaction: ({ transactionId }: { transactionId: string }): ApiResponsePromise<DebtEntryInfoResponse[]> => {
+        return axios.get<ApiResponse<DebtEntryInfoResponse[]>>('v1/debts/entries/list_by_transaction.json?transactionId=' + transactionId);
+    },
+    addDebtEntries: (req: DebtEntryCreateBatchRequest): ApiResponsePromise<DebtEntryInfoResponse[]> => {
+        return axios.post<ApiResponse<DebtEntryInfoResponse[]>>('v1/debts/entries/add_batch.json', req);
+    },
+    addManualDebtEntry: (req: DebtEntryCreateManualRequest): ApiResponsePromise<DebtEntryInfoResponse> => {
+        return axios.post<ApiResponse<DebtEntryInfoResponse>>('v1/debts/entries/add_manual.json', req);
+    },
+    modifyDebtEntry: (req: DebtEntryModifyRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/entries/modify.json', req);
+    },
+    deleteDebtEntries: (req: DebtEntryDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/entries/delete.json', req);
+    },
+    settleDebtEntries: (req: DebtEntrySettleRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/entries/settle.json', req);
+    },
+    reopenDebtEntries: (req: DebtEntryReopenRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/entries/reopen.json', req);
     },
     getCryptoPortfolio: (): ApiResponsePromise<CryptoPortfolioResponse> => {
         return axios.get<ApiResponse<CryptoPortfolioResponse>>('v1/crypto/portfolio.json', {
