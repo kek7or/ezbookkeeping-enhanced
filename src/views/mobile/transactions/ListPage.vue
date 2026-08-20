@@ -77,6 +77,7 @@
                                   :min-date="transactionCalendarMinDate"
                                   :max-date="transactionCalendarMaxDate"
                                   :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
+                                  :hide-amount="hideTotalAmounts"
                                   v-model="currentCalendarDate"></transaction-calendar>
         </f7-block>
 
@@ -731,6 +732,7 @@ const {
     fiscalYearStart,
     selectedAccountDefaultCurrency,
     showTotalAmountInTransactionListPage,
+    hideTotalAmounts,
     showTagInTransactionListPage,
     allDateRanges,
     allAccounts,

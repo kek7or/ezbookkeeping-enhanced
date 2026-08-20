@@ -26,8 +26,15 @@ export function useAccountListPageBase() {
     const displayOrderModified = ref<boolean>(false);
 
     const showAccountBalance = computed<boolean>({
-        get: () => settingsStore.appSettings.showAccountBalance,
-        set: (value) => settingsStore.setShowAccountBalance(value)
+        get: () => settingsStore.showAccountBalance,
+        set: (value) => {
+            settingsStore.setShowAccountBalance(value);
+
+            // amounts are hidden everywhere by the master hide-amount toggle, showing balances here needs to turn it off too
+            if (value && !settingsStore.appSettings.showAmountInHomePage) {
+                settingsStore.setShowAmountInHomePage(true);
+            }
+        }
     });
 
     const customAccountCategoryOrder = computed<string>(() => settingsStore.appSettings.accountCategoryOrders);

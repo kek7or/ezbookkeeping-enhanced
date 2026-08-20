@@ -273,7 +273,7 @@ const transactionTagsStore = useTransactionTagsStore();
 // scrolls on its own - the whole board then fits on one screen and every column stays a drop target
 const compactView = ref<boolean>(false);
 
-const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
+const showAccountBalance = computed<boolean>(() => settingsStore.showAccountBalance);
 const customAccountCategoryOrder = computed<string>(() => settingsStore.appSettings.accountCategoryOrders);
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);

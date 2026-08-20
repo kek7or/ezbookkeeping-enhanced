@@ -20,6 +20,7 @@ import type { BigDecimal } from '@/core/numeral.ts';
 import type { ColorValue, ColorStyleValue } from '@/core/color.ts';
 import { ThemeType } from '@/core/theme.ts';
 import { type AxisChartSourceDataItem, ChartValueType } from '@/core/chart.ts';
+import { DISPLAY_HIDDEN_AMOUNT } from '@/consts/numeral.ts';
 
 import type { SortableTransactionStatisticDataItem } from '@/models/transaction.ts';
 
@@ -92,6 +93,7 @@ const {
     getCurrentLanguageTextDirection,
     formatAmountToWesternArabicNumeralsWithoutDigitGrouping,
     formatBigDecimalToWesternArabicNumeralsWithoutDigitGrouping,
+    formatAmountToLocalizedNumeralsWithCurrency,
     formatChartValueToLocalizedNumerals
 } = useI18n();
 
@@ -445,6 +447,7 @@ const chartOptions = computed<object>(() => {
                 min: props.oneHundredPercentStacked ? 0 : undefined,
                 max: props.oneHundredPercentStacked ? 100 : undefined,
                 axisLabel: {
+                    show: props.showValue !== false,
                     color: isDarkMode.value ? '#888' : '#666',
                     formatter: (value: number) => {
                         return getDisplayValue(parseBigDecimal(value));
@@ -473,6 +476,10 @@ function getItemName(name: string): string {
 }
 
 function getDisplayValue(value: BigDecimal): string {
+    if (props.showValue === false) {
+        return formatAmountToLocalizedNumeralsWithCurrency(DISPLAY_HIDDEN_AMOUNT, props.defaultCurrency);
+    }
+
     if (props.oneHundredPercentStacked) {
         return formatChartValueToLocalizedNumerals(value, ChartValueType.Percent, props.defaultCurrency);
     } else {

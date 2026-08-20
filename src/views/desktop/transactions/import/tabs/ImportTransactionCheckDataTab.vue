@@ -574,7 +574,7 @@ const currentAmountFilterValue1 = ref<number>(0);
 const currentAmountFilterValue2 = ref<number>(0);
 const currentDescriptionFilterValue = ref<string | null>(null);
 
-const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
+const showAccountBalance = computed<boolean>(() => settingsStore.showAccountBalance);
 const customAccountCategoryOrder = computed<string>(() => settingsStore.appSettings.accountCategoryOrders);
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);

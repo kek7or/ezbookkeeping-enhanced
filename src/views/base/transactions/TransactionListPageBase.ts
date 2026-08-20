@@ -112,6 +112,7 @@ export function useTransactionListPageBase() {
     const userDefaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
     const selectedAccountDefaultCurrency = computed<string>(() => getUnifiedSelectedAccountsCurrencyOrDefaultCurrency(allAccountsMap.value, queryAllFilterAccountIds.value, userStore.currentUserDefaultCurrency));
     const showTotalAmountInTransactionListPage = computed<boolean>(() => settingsStore.appSettings.showTotalAmountInTransactionListPage);
+    const hideTotalAmounts = computed<boolean>(() => !settingsStore.showAmount);
     const showTagInTransactionListPage = computed<boolean>(() => settingsStore.appSettings.showTagInTransactionListPage);
 
     const allDateRanges = computed<LocalizedDateRange[]>(() => getAllDateRanges(DateRangeScene.Normal, {
@@ -456,6 +457,10 @@ export function useTransactionListPageBase() {
     }
 
     function getDisplayMonthTotalAmount(amount: BigDecimal, currency: string, symbol: string, incomplete: boolean, inDefaultCurrency?: boolean): string {
+        if (hideTotalAmounts.value) {
+            return symbol + formatAmount(amount, true, currency, inDefaultCurrency);
+        }
+
         const displayAmount = formatAmount(amount, false, currency, inDefaultCurrency);
         return symbol + displayAmount + (incomplete ? INCOMPLETE_AMOUNT_SUFFIX : '');
     }
@@ -492,6 +497,7 @@ export function useTransactionListPageBase() {
         userDefaultCurrency,
         selectedAccountDefaultCurrency,
         showTotalAmountInTransactionListPage,
+        hideTotalAmounts,
         showTagInTransactionListPage,
         allDateRanges,
         allAccounts,

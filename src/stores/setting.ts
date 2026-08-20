@@ -47,6 +47,12 @@ export const useSettingsStore = defineStore('settings', () => {
 
     const enableApplicationCloudSync = computed<boolean>(() => getObjectOwnFieldCount(syncedAppSettings.value) > 0);
 
+    // whether amounts can be shown at all, the master hide-amount toggle (the eye button in the overview page)
+    const showAmount = computed<boolean>(() => appSettings.value.showAmountInHomePage);
+
+    // whether account balances can be shown, both the account balance setting and the master hide-amount toggle need to be enabled
+    const showAccountBalance = computed<boolean>(() => appSettings.value.showAccountBalance && showAmount.value);
+
     const chartColorList = computed<ColorValue[]>(() => {
         const chartColors = appSettings.value.chartColors;
 
@@ -583,6 +589,8 @@ export const useSettingsStore = defineStore('settings', () => {
         localeDefaultSettings,
         // computed states
         enableApplicationCloudSync,
+        showAmount,
+        showAccountBalance,
         accountCategoryDisplayOrders,
         chartColorList,
         // functions

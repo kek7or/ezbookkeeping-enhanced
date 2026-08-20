@@ -190,6 +190,7 @@
                                                               :min-date="transactionCalendarMinDate"
                                                               :max-date="transactionCalendarMaxDate"
                                                               :dailyTotalAmounts="currentMonthTransactionData?.dailyTotalAmounts"
+                                                              :hide-amount="hideTotalAmounts"
                                                               v-model="currentCalendarDate"></transaction-calendar>
                                     </v-card-text>
 
@@ -931,6 +932,7 @@ const {
     userDefaultCurrency,
     selectedAccountDefaultCurrency,
     showTotalAmountInTransactionListPage,
+    hideTotalAmounts,
     showTagInTransactionListPage,
     allDateRanges,
     allAccounts,

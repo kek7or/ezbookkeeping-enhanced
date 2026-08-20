@@ -36,7 +36,7 @@ import type { TransactionTotalAmount } from '@/stores/transaction.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
 import type { CalendarAlternateDate, TextualYearMonthDay, WeekDayValue } from '@/core/datetime.ts';
-import { INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
+import { DISPLAY_HIDDEN_AMOUNT, INCOMPLETE_AMOUNT_SUFFIX } from '@/consts/numeral.ts';
 
 import { arrangeArrayWithNewStartIndex } from '@/lib/common.ts';
 import { getYearMonthDayDateTime } from '@/lib/datetime.ts';
@@ -49,6 +49,7 @@ const props = defineProps<{
     maxDate: Date;
     weekDayNameType?: 'long' | 'short';
     dailyTotalAmounts?: Record<string, TransactionTotalAmount>;
+    hideAmount?: boolean;
     readonly?: boolean;
     calendarClass?: string;
     dayHasTransactionClass?: string;
@@ -103,6 +104,10 @@ function noTransactionInMonthDay(date: Date): boolean {
 }
 
 function getDisplayMonthTotalAmount(amount: BigDecimal, currency: string | false, symbol: string, incomplete: boolean): string {
+    if (props.hideAmount) {
+        return symbol + formatAmountToLocalizedNumeralsWithCurrency(DISPLAY_HIDDEN_AMOUNT, currency);
+    }
+
     const displayAmount = formatAmountToLocalizedNumeralsWithCurrency(amount, currency);
     return symbol + displayAmount + (incomplete ? INCOMPLETE_AMOUNT_SUFFIX : '');
 }

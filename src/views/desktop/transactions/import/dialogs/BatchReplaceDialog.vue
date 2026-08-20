@@ -303,7 +303,7 @@ const removeTag = ref<boolean>(false);
 let resolveFunc: ((response: BatchReplaceDialogResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
-const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
+const showAccountBalance = computed<boolean>(() => settingsStore.showAccountBalance);
 const customAccountCategoryOrder = computed<string>(() => settingsStore.appSettings.accountCategoryOrders);
 const allAccounts = computed<Account[]>(() => accountsStore.allPlainAccounts);
 const allVisibleAccounts = computed<Account[]>(() => accountsStore.allVisiblePlainAccounts);

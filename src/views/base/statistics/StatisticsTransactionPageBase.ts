@@ -57,7 +57,8 @@ export function useStatisticsTransactionPageBase() {
     const trendDateAggregationType = ref<number>(ChartDateAggregationType.Default.type);
     const assetTrendsDateAggregationType = ref<number>(ChartDateAggregationType.Default.type);
 
-    const showAccountBalance = computed<boolean>(() => settingsStore.appSettings.showAccountBalance);
+    const showAccountBalance = computed<boolean>(() => settingsStore.showAccountBalance);
+    const hideAmount = computed<boolean>(() => !settingsStore.showAmount);
     const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
     const firstDayOfWeek = computed<WeekDayValue>(() => userStore.currentUserFirstDayOfWeek);
     const fiscalYearStart = computed<number>(() => userStore.currentUserFiscalYearStart);
@@ -235,6 +236,10 @@ export function useStatisticsTransactionPageBase() {
     });
 
     const showAmountInChart = computed<boolean>(() => {
+        if (hideAmount.value) {
+            return false;
+        }
+
         if (!showAccountBalance.value) {
             if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis
                 && (query.value.chartDataType === ChartDataType.AccountTotalAssets.type || query.value.chartDataType === ChartDataType.AccountTotalLiabilities.type)) {
@@ -328,6 +333,10 @@ export function useStatisticsTransactionPageBase() {
     }
 
     function getDisplayAmount(amount: BigDecimal, currency: string, textLimit?: number): string {
+        if (hideAmount.value) {
+            return formatAmountToLocalizedNumeralsWithCurrency(DISPLAY_HIDDEN_AMOUNT, currency);
+        }
+
         const finalAmount = formatAmountToLocalizedNumeralsWithCurrency(amount, currency);
 
         if (!showAccountBalance.value) {

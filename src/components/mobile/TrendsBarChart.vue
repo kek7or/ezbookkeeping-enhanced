@@ -89,7 +89,7 @@
             </template>
 
             <template #after>
-                <span v-if="stacked || item.items.length <= 1">{{ formatAmountToLocalizedNumeralsWithCurrency(item.totalAmount, defaultCurrency) }}</span>
+                <span v-if="stacked || item.items.length <= 1">{{ formatAmountToLocalizedNumeralsWithCurrency(showValue === false ? DISPLAY_HIDDEN_AMOUNT : item.totalAmount, defaultCurrency) }}</span>
             </template>
 
             <template #inner-end>
@@ -137,6 +137,7 @@ import {
     ChartDataAggregationType,
     ChartDateAggregationType
 } from '@/core/statistics.ts';
+import { DISPLAY_HIDDEN_AMOUNT } from '@/consts/numeral.ts';
 
 import type { SortableTransactionStatisticDataItem } from '@/models/transaction.ts';
 
@@ -192,6 +193,7 @@ interface TrendsBarChartData {
 
 interface MobileTrendsChartProps<T extends TrendsChartDateType> extends CommonTrendsChartProps<T> {
     loading?: boolean;
+    showValue?: boolean;
 }
 
 const props = defineProps<MobileTrendsChartProps<TrendsChartDateType>>();
