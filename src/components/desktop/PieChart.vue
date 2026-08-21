@@ -123,14 +123,18 @@ const chartOptions = computed<object>(() => {
                     percent = params.percent + '%';
                 }
 
+                const showValue = !!props.showValue;
+                const showPercent = !!props.showPercent && dataItem.value > 0;
+
+                if (dataItem.subItems && dataItem.subItems.length) {
+                    return getBreakdownTooltip(dataItem, params.color as string, percent, showValue, showPercent);
+                }
+
                 let tooltip = `<div><span class="chart-pointer" style="background-color: ${params.color}"></span>`;
 
                 if (dataItem.displayName) {
                     tooltip += `<div class="d-inline-flex">${dataItem.displayName}</div><br/>`;
                 }
-
-                const showValue = props.showValue;
-                const showPercent = props.showPercent && dataItem.value > 0;
 
                 if (showValue && showPercent) {
                     tooltip += `<div class="d-inline-flex"><span>${dataItem.displayValue}</span><span class="ms-1">(${percent})</span></div>`;
@@ -201,6 +205,33 @@ const chartOptions = computed<object>(() => {
         ]
     };
 });
+
+function getTooltipRow(color: string, name: string, value: string | null, percent: string | null): string {
+    let row = `<tr><td><span class="chart-pointer" style="background-color: ${color}"></span><span>${name}</span></td>`;
+
+    if (value !== null) {
+        row += `<td><span class="ms-5" style="float: inline-end">${value}</span></td>`;
+    }
+
+    if (percent !== null) {
+        row += `<td><span class="ms-5" style="float: inline-end">${percent}</span></td>`;
+    }
+
+    return row + '</tr>';
+}
+
+function getBreakdownTooltip(dataItem: DesktopPieChartDataItem, color: string, percent: string, showValue: boolean, showPercent: boolean): string {
+    const columnCount = 1 + (showValue ? 1 : 0) + (showPercent ? 1 : 0);
+
+    let tooltip = getTooltipRow(color, dataItem.displayName, showValue ? dataItem.displayValue : null, showPercent ? percent : null);
+    tooltip += `<tr><td colspan="${columnCount}" style="border-bottom: ${isDarkMode.value ? '#eee' : '#333'} dashed 1px"></td></tr>`;
+
+    for (const subItem of dataItem.subItems) {
+        tooltip += getTooltipRow(subItem.color, subItem.displayName, showValue ? subItem.displayValue : null, showPercent ? subItem.displayPercent : null);
+    }
+
+    return `<table class="chart-tooltip-table"><tbody>${tooltip}</tbody></table>`;
+}
 
 function clickItem(e: ECElementEvent): void {
     if (!props.enableClickItem || e.componentType !== 'series' || e.seriesType !=='pie') {

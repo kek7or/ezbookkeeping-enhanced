@@ -14,6 +14,7 @@ export interface CategoricalChartSourceDataItem {
     percent?: number;
     hidden?: boolean;
     color?: ColorValue;
+    subItems?: CategoricalChartSourceDataItem[];
 }
 
 export interface AxisChartSourceDataItem {

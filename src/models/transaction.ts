@@ -1105,6 +1105,7 @@ export interface TransactionCategoricalAnalysisData {
 
 export interface TransactionCategoricalAnalysisDataItem extends Record<string, unknown>, TransactionStatisticDataItemBase {
     readonly percent: number;
+    readonly subItems?: TransactionStatisticDataItemBase[];
 }
 
 export interface TransactionTrendsAnalysisData {

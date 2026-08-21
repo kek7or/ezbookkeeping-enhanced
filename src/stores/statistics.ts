@@ -90,6 +90,7 @@ interface WritableTransactionCategoricalAnalysisData {
     value: BigDecimal;
     totalNonNegativeAmount: BigDecimal;
     items: Record<string, WritableTransactionCategoricalAnalysisDataItem>;
+    subItems?: Record<string, Record<string, WritableTransactionCategoricalAnalysisDataItem>>;
 }
 
 interface WritableTransactionCategoricalAnalysisDataItem extends Record<string, unknown>, CategoricalChartSourceDataItem {
@@ -657,6 +658,28 @@ export const useStatisticsStore = defineStore('statistics', () => {
                     }
                 }
 
+                const subDataItems = combinedData.subItems?.[dataItem.id];
+                let subItems: TransactionStatisticDataItemBase[] | undefined = undefined;
+
+                if (subDataItems) {
+                    subItems = [];
+
+                    for (const subDataItem of values(subDataItems)) {
+                        subItems.push({
+                            name: subDataItem.name,
+                            type: subDataItem.type,
+                            id: subDataItem.id,
+                            icon: subDataItem.icon,
+                            color: subDataItem.color,
+                            hidden: subDataItem.hidden,
+                            displayOrders: subDataItem.displayOrders,
+                            value: subDataItem.value
+                        });
+                    }
+
+                    sortCategoryTotalAmountItems(subItems, transactionStatisticsFilter.value);
+                }
+
                 const statisticDataItem: TransactionCategoricalAnalysisDataItem = {
                     name: dataItem.name,
                     type: dataItem.type,
@@ -666,7 +689,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
                     hidden: dataItem.hidden,
                     displayOrders: dataItem.displayOrders,
                     value: dataItem.value,
-                    percent: percent
+                    percent: percent,
+                    subItems: subItems
                 };
 
                 allStatisticsItems.push(statisticDataItem);
@@ -1082,6 +1106,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
     function getCategoryTotalAmountItems(items: TransactionStatisticResponseItemWithInfo[], transactionStatisticsFilter: TransactionStatisticsFilter): WritableTransactionCategoricalAnalysisData {
         const allDataItems: Record<string, WritableTransactionCategoricalAnalysisDataItem> = {};
+        const allSubDataItems: Record<string, Record<string, WritableTransactionCategoricalAnalysisDataItem>> = {};
         let totalAmount = BIG_DECIMAL_ZERO;
         let totalNonNegativeAmount = BIG_DECIMAL_ZERO;
 
@@ -1204,6 +1229,32 @@ export const useStatisticsStore = defineStore('statistics', () => {
                         };
                     }
 
+                    let subDataItems = allSubDataItems[item.primaryCategory.id];
+
+                    if (!subDataItems) {
+                        subDataItems = {};
+                        allSubDataItems[item.primaryCategory.id] = subDataItems;
+                    }
+
+                    let subData = subDataItems[item.category.id];
+
+                    if (subData) {
+                        subData.value = subData.value.add(item.amountInDefaultCurrency);
+                    } else {
+                        subData = {
+                            name: item.category.name,
+                            type: 'category',
+                            id: item.category.id,
+                            icon: item.category.icon || DEFAULT_CATEGORY_ICON.icon,
+                            color: item.category.color || DEFAULT_CATEGORY_COLOR,
+                            hidden: item.primaryCategory.hidden || item.category.hidden,
+                            displayOrders: [item.primaryCategory.type, item.primaryCategory.displayOrder, item.category.displayOrder],
+                            value: item.amountInDefaultCurrency
+                        };
+                    }
+
+                    subDataItems[item.category.id] = subData;
+
                     totalAmount = totalAmount.add(item.amountInDefaultCurrency);
 
                     if (item.amountInDefaultCurrency.isPositive()) {
@@ -1315,7 +1366,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
         return {
             value: totalAmount,
             totalNonNegativeAmount: totalNonNegativeAmount,
-            items: allDataItems
+            items: allDataItems,
+            subItems: allSubDataItems
         };
     }
 

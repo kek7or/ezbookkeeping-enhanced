@@ -12,6 +12,14 @@ import { isNumber } from '@/lib/common.ts';
 import { BIG_DECIMAL_ZERO, isBigDecimal } from '@/lib/numeral.ts';
 import { getDisplayColor } from '@/lib/color.ts';
 
+export interface CommonPieChartSubDataItem {
+    id: string;
+    displayName: string;
+    displayValue: string;
+    displayPercent: string;
+    color: ColorStyleValue;
+}
+
 export interface CommonPieChartDataItem {
     id: string;
     name: string;
@@ -23,6 +31,7 @@ export interface CommonPieChartDataItem {
     paintPercent: number;
     displayPercent: string;
     color: ColorStyleValue;
+    subItems: CommonPieChartSubDataItem[];
     sourceItem: CategoricalChartSourceDataItem;
 }
 
@@ -73,6 +82,24 @@ export function usePieChartBase(props: CommonPieChartProps) {
                     }
                 }
 
+                const subItems: CommonPieChartSubDataItem[] = [];
+
+                for (const subItem of (item.subItems ?? [])) {
+                    let subPercent: number = 0;
+
+                    if (item.value.isPositive() && subItem.value.isPositive()) {
+                        subPercent = subItem.value.divide(item.value).multiply(100).toDoubleNumber();
+                    }
+
+                    subItems.push({
+                        id: subItem.id ?? subItem.name,
+                        displayName: subItem.name,
+                        displayValue: formatChartValueToLocalizedNumerals(subItem.value, props.valueType, props.defaultCurrency),
+                        displayPercent: formatPercentToLocalizedNumerals(subPercent, 2, '<0.01'),
+                        color: getDisplayColor(props.useCustomColor && subItem.color ? subItem.color : chartColors.value[subItems.length % chartColors.value.length])
+                    });
+                }
+
                 const finalItem: CommonPieChartDataItem = {
                     id: item.id ?? item.name,
                     name: item.id ?? item.name,
@@ -84,6 +111,7 @@ export function usePieChartBase(props: CommonPieChartProps) {
                     paintPercent: item.value.isPositive() ? item.value.divide(totalValidValue).toDoubleNumber() : 0,
                     displayPercent: formatPercentToLocalizedNumerals(percent, 2, '<0.01'),
                     color: getDisplayColor(props.useCustomColor && item.color ? item.color : chartColors.value[validItems.length % chartColors.value.length]),
+                    subItems: subItems,
                     sourceItem: item
                 };
 
