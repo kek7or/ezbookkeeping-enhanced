@@ -305,6 +305,15 @@
                                 <li :key="lineIndex" v-for="(missingLine, lineIndex) in warning.missingLines">{{ missingLine }}</li>
                             </ul>
                         </v-alert>
+                        <v-alert type="warning" variant="tonal" class="mb-4"
+                                 :title="tt('This Receipt Was Not Itemized')"
+                                 v-for="(warning, warningIndex) in receiptNotItemizedWarnings" :key="`notItemizedAtAll-${warningIndex}`">
+                            {{ tt(warning.lineItemCount
+                                ? 'format.misc.receiptNotItemizedWithLines'
+                                : 'format.misc.receiptNotItemized', {
+                                count: formatNumberToLocalizedNumerals(warning.lineItemCount || 0)
+                            }) }}
+                        </v-alert>
                         <import-transaction-assign-line-items-tab
                             ref="importTransactionAssignLineItemsTab"
                             :receipts="importReceipts"
@@ -564,6 +573,10 @@ const hasEditableReceipts = computed<boolean>(() => importReceipts.value.length 
 const isReceiptLineItemEditorActive = computed<boolean>(() => currentStep.value === 'checkData' && hasEditableReceipts.value);
 const receiptTotalMismatchWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptTotalMismatch'));
 const receiptLinesNotItemizedWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptLinesNotItemized'));
+// a receipt the model summarized into one transaction instead of listing. There is nothing to
+// review in that case, which is exactly why it is said out loud: an unremarked row summing a whole
+// receipt looks the same as one that was checked.
+const receiptNotItemizedWarnings = computed<ImportTransactionWarningResponse[]>(() => importWarnings.value.filter(warning => warning.type === 'receiptNotItemized'));
 
 const allSteps = computed<StepBarItem[]>(() => {
     const steps: StepBarItem[] = [

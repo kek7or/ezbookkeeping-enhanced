@@ -137,7 +137,38 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
 
+	p.checkReceiptWasItemized(c, user, result, additionalOptions.GetWarningCollector())
+
 	return result.Transactions, nil
+}
+
+// checkReceiptWasItemized reports an image the model read as a receipt and then answered with a
+// single transaction instead of with the articles printed on it.
+//
+// Nothing can be recovered when that happens: the price of each article was never returned, so
+// there is no itemization to correct and no distribution of categories to review. What the warning
+// is for is that the user must not be left believing there was one - an unremarked transaction
+// summing a whole receipt looks exactly like a transaction that was checked.
+//
+// It is raised only when the answer still carries receipt-level facts: the shop, the printed total,
+// or the transcript of the item block. An image that genuinely is not a receipt - a voucher, a
+// transfer confirmation - carries none of those and is answered with transactions quite correctly,
+// so this stays silent for it rather than crying wolf.
+func (p *aiTransactionDataParser) checkReceiptWasItemized(c core.Context, user *models.User, result *aiTransactionDataParsedResult, warningCollector *converter.ImportWarningCollector) {
+	if warningCollector == nil {
+		return
+	}
+
+	if strings.TrimSpace(result.Merchant) == "" && strings.TrimSpace(result.ReceiptTotal) == "" && len(result.RawLines) < 1 {
+		return
+	}
+
+	log.Warnf(c, "[ai_recognized_transaction_data_parser.checkReceiptWasItemized] model answered a receipt with %d transactions instead of its line items for user \"uid:%d\", %d lines had been transcribed", len(result.Transactions), user.Uid, len(result.RawLines))
+
+	warningCollector.Add(&models.ImportTransactionWarningResponse{
+		Type:          models.IMPORT_TRANSACTION_WARNING_RECEIPT_NOT_ITEMIZED,
+		LineItemCount: len(result.RawLines),
+	})
 }
 
 // buildRecognitionSystemPrompt returns the system prompt for AI recognition based on the provided template and user data

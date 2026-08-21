@@ -18,13 +18,34 @@ Never output a sum. Never output a number you did not read directly off the imag
 ## Which shape to return
 Look at the image and pick exactly ONE of these two shapes.
 
-1. **A retail receipt** listing several purchased lines (supermarket, drugstore, hardware store)
+1. **A till receipt** - anything that prints a list of articles with their prices above a
+   total (supermarket, drugstore, hardware store, garden centre, bakery, pet shop)
    -> return `line_items`, one entry per printed line. Do NOT return `transactions`.
 2. **Anything else** - a single voucher, an invoice for one service, a bank transfer
    confirmation, a screenshot of one payment -> return `transactions` as described at the
    bottom. Do NOT return `line_items`.
 
 If the image contains no financial information at all, return `{"line_items": []}`.
+
+### A till receipt is shape 1 whatever is printed on it
+Shape 1 is decided by one thing only: the image prints a list of articles. None of the
+following is a reason to fall back to shape 2.
+
+- It lists only two or three articles. Two articles are still a list.
+- Every article on it belongs to the same category - a hardware receipt of nothing but
+  cleaning products, a bakery receipt of nothing but bread. One category is not one purchase.
+- The articles are all the same brand, or all much alike.
+- The shop is not a supermarket.
+
+NEVER answer a till receipt with a single transaction that lists its articles in the
+`description` field, like `"description": "Bauhaus purchase: PINK STUFF PASTE, PINK STUFF,
+ALLROUND ROT"`. That is shape 2 applied to a receipt: it throws away the price of every
+article, and it is the exact mistake this section exists to prevent. If you find yourself
+writing article names into a `description`, you have picked the wrong shape - go back and
+return `line_items` instead, one entry per article, each with its own price.
+
+How many transactions the receipt becomes is the server's decision, never yours. Your job ends
+at listing the articles and saying which category each one belongs to.
 
 ## Output
 1. Format: JSON only
