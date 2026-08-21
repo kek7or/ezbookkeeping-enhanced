@@ -105,95 +105,163 @@ export interface DebtEntryReopenRequest {
     readonly ids: string[];
 }
 
-// DebtEntryReceiptGroup is everything owed off one shopping trip, shown as a single row that opens
-// to reveal what it is made of
-export interface DebtEntryReceiptGroup {
-    readonly receiptId: string;
+// DebtEntryGroupKind says what the things owed in a group have in common: the shopping trip they
+// were bought on, or the transaction whose positions they are
+export type DebtEntryGroupKind = 'receipt' | 'transaction';
+
+// DebtEntryGroup is several things owed that belong together, shown as a single row that opens to
+// reveal what it is made of.
+//
+// The two kinds nest, because that is how the things themselves nest: a shopping trip opens to the
+// categories it was split into, and a category several of whose articles are owed opens to those
+// articles. Somebody who is to pay for two of the vegetables and none of the meat is then read as
+// one trip, not as a run of unrelated rows.
+export interface DebtEntryGroup {
+    readonly kind: DebtEntryGroupKind;
+    // id is the receipt or the transaction this is the group of
+    readonly id: string;
+    // merchantName is the shop the trip was to, and is empty for a group of positions
     readonly merchantName: string;
+    // rows are what the group opens to, one level down, which for a trip may itself be groups of
+    // positions
+    readonly rows: DebtEntryRow[];
+    // entries is every thing owed under the group, however deep. It is what the group totals and
+    // what ticking the group ticks, so that a trip is paid back whole however it is nested.
     readonly entries: DebtEntryInfoResponse[];
     readonly totalAmount: number;
     readonly currency: string;
     readonly openEntryIds: string[];
 }
 
-// DebtEntryRow is one row of the debts list: either a single thing owed, or a shopping trip several
-// things were owed off
+// DebtEntryRow is one row of the debts list: either a single thing owed, or a group of things owed
 export interface DebtEntryRow {
     readonly key: string;
+    // entry is the thing owed, or for a group the first thing owed in it, which is what the row is
+    // dated by
     readonly entry: DebtEntryInfoResponse;
-    readonly receiptGroup?: DebtEntryReceiptGroup;
+    readonly group?: DebtEntryGroup;
 }
 
-// groupDebtEntriesByReceipt turns what somebody owes into the rows the debts list shows, collapsing
-// everything owed off one shopping trip into a single row.
-//
-// The order the entries came in is kept exactly: a trip takes the place of the first thing owed off
-// it, and everything else stays where it was, so the list stays in the order of time it was sorted
-// into. A receipt only one thing is owed off is left as an ordinary row - there is nothing to
-// collapse and a group of one only adds a click.
-export function groupDebtEntriesByReceipt(entries: DebtEntryInfoResponse[]): DebtEntryRow[] {
-    const entriesByReceiptId: Record<string, DebtEntryInfoResponse[]> = {};
+// collectEntries returns every thing owed under the given rows, in the order it is shown in
+function collectEntries(rows: readonly DebtEntryRow[]): DebtEntryInfoResponse[] {
+    const entries: DebtEntryInfoResponse[] = [];
 
-    for (const entry of entries) {
-        if (!entry.receiptId) {
-            continue;
+    for (const row of rows) {
+        if (row.group) {
+            entries.push(...row.group.entries);
+        } else {
+            entries.push(row.entry);
         }
-
-        const receiptEntries: DebtEntryInfoResponse[] = entriesByReceiptId[entry.receiptId] ?? [];
-        receiptEntries.push(entry);
-        entriesByReceiptId[entry.receiptId] = receiptEntries;
     }
 
-    const rows: DebtEntryRow[] = [];
-    const emittedReceiptIds: Record<string, boolean> = {};
+    return entries;
+}
 
-    for (const entry of entries) {
-        const receiptId = entry.receiptId;
+// groupRowsBy collapses the rows answering to the same key into one row each and leaves the rest
+// exactly where they were.
+//
+// A group stands where the first of its members stood, so the order of time the list was sorted
+// into survives grouping. A key only one row answers to is left as that row: there is nothing to
+// collapse, and a group of one only adds a click.
+function groupRowsBy(rows: readonly DebtEntryRow[], getKey: (row: DebtEntryRow) => string | undefined, buildGroup: (key: string, groupRows: DebtEntryRow[]) => DebtEntryGroup): DebtEntryRow[] {
+    const rowsByKey: Record<string, DebtEntryRow[]> = {};
 
-        if (!receiptId) {
-            rows.push({ key: entry.id, entry: entry });
+    for (const row of rows) {
+        const key = getKey(row);
+
+        if (!key) {
             continue;
         }
 
-        const receiptEntries = entriesByReceiptId[receiptId] as DebtEntryInfoResponse[];
+        const keyRows: DebtEntryRow[] = rowsByKey[key] ?? [];
+        keyRows.push(row);
+        rowsByKey[key] = keyRows;
+    }
 
-        if (receiptEntries.length < 2) {
-            rows.push({ key: entry.id, entry: entry });
+    const groupedRows: DebtEntryRow[] = [];
+    const emittedKeys: Record<string, boolean> = {};
+
+    for (const row of rows) {
+        const key = getKey(row);
+
+        if (!key) {
+            groupedRows.push(row);
             continue;
         }
 
-        if (emittedReceiptIds[receiptId]) {
+        const keyRows = rowsByKey[key] as DebtEntryRow[];
+
+        if (keyRows.length < 2) {
+            groupedRows.push(row);
             continue;
         }
 
-        emittedReceiptIds[receiptId] = true;
-
-        let totalAmount = 0;
-        const openEntryIds: string[] = [];
-
-        for (const receiptEntry of receiptEntries) {
-            totalAmount += receiptEntry.amount;
-
-            if (!receiptEntry.settled) {
-                openEntryIds.push(receiptEntry.id);
-            }
+        if (emittedKeys[key]) {
+            continue;
         }
 
-        rows.push({
-            key: `receipt_${receiptId}`,
-            entry: receiptEntries[0] as DebtEntryInfoResponse,
-            receiptGroup: {
-                receiptId: receiptId,
-                merchantName: entry.merchantName ?? '',
-                entries: receiptEntries,
-                totalAmount: totalAmount,
-                currency: entry.currency,
-                openEntryIds: openEntryIds
-            }
+        emittedKeys[key] = true;
+
+        const group = buildGroup(key, keyRows);
+
+        groupedRows.push({
+            key: `${group.kind}_${key}`,
+            entry: (keyRows[0] as DebtEntryRow).entry,
+            group: group
         });
     }
 
-    return rows;
+    return groupedRows;
+}
+
+// makeGroup gathers what a group of rows comes to. Only what is still open is tickable: a settled
+// row is shown for the record and there is nothing left to do to it.
+function makeGroup(kind: DebtEntryGroupKind, id: string, merchantName: string, rows: DebtEntryRow[]): DebtEntryGroup {
+    const entries = collectEntries(rows);
+    let totalAmount = 0;
+    const openEntryIds: string[] = [];
+
+    for (const entry of entries) {
+        totalAmount += entry.amount;
+
+        if (!entry.settled) {
+            openEntryIds.push(entry.id);
+        }
+    }
+
+    return {
+        kind: kind,
+        id: id,
+        merchantName: merchantName,
+        rows: rows,
+        entries: entries,
+        totalAmount: totalAmount,
+        currency: (entries[0] as DebtEntryInfoResponse).currency,
+        openEntryIds: openEntryIds
+    };
+}
+
+// groupDebtEntries turns what somebody owes into the rows the debts list shows, gathering the
+// positions owed of one transaction under that transaction, and everything owed off one shopping
+// trip under that trip.
+//
+// Positions are gathered first, because a transaction belongs to exactly one trip and so a group of
+// its positions never straddles two of them. What is owed whole is never gathered: a transaction
+// nobody picked positions out of is one thing owed and stays one row.
+export function groupDebtEntries(entries: readonly DebtEntryInfoResponse[]): DebtEntryRow[] {
+    const rows: DebtEntryRow[] = entries.map(entry => ({ key: entry.id, entry: entry }));
+
+    const rowsByTransaction = groupRowsBy(
+        rows,
+        row => row.entry.lineItemId ? row.entry.transactionId : undefined,
+        (transactionId, transactionRows) => makeGroup('transaction', transactionId, '', transactionRows)
+    );
+
+    return groupRowsBy(
+        rowsByTransaction,
+        row => row.entry.receiptId,
+        (receiptId, receiptRows) => makeGroup('receipt', receiptId, (receiptRows[0] as DebtEntryRow).entry.merchantName ?? '', receiptRows)
+    );
 }
 
 // splitAmountEvenly divides an amount into the given number of shares, in minor units.

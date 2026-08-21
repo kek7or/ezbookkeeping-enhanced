@@ -154,6 +154,7 @@
             "receiptTotalMismatch": "The {count} recognized items add up to {calculated}, but the total printed on the receipt is {stated}, a difference of {difference}. Some prices were probably misread, please check the amounts before importing.",
             "receiptLinesNotItemized": "{count} lines were read off the receipt but did not become transactions, so what they cost is missing from this import. Please add them manually after importing.",
             "receiptLineItemCount": "{count} items",
+            "debtPositionCount": "{count} positions",
             "debtSelectedAmount": "{amount} selected",
             "debtYourShare": "your share {amount}",
             "debtSelectedCountAndAmount": "{count} selected, {amount}",

@@ -126,54 +126,54 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <template :key="row.key" v-for="row in entryRows">
-                            <tr class="debt-entry-receipt-row cursor-pointer"
-                                v-if="row.receiptGroup"
-                                @click="toggleReceipt(row.receiptGroup)">
+                            <template :key="row.key" v-for="row in visibleRows">
+                            <tr class="debt-entry-group-row cursor-pointer"
+                                :class="`debt-entry-depth-${row.depth}`"
+                                v-if="row.group"
+                                @click="toggleGroup(row.group)">
                                 <td class="debt-entry-select">
                                     <v-checkbox density="compact" hide-details
-                                                :disabled="updating || !row.receiptGroup.openEntryIds.length"
-                                                :indeterminate="isReceiptPartlySelected(row.receiptGroup)"
-                                                :model-value="isReceiptSelected(row.receiptGroup)"
+                                                :disabled="updating || !row.group.openEntryIds.length"
+                                                :indeterminate="isGroupPartlySelected(row.group)"
+                                                :model-value="isGroupSelected(row.group)"
                                                 @click.stop
-                                                @update:model-value="(selected: boolean | null) => selectReceipt(row.receiptGroup!, !!selected)"></v-checkbox>
+                                                @update:model-value="(selected: boolean | null) => selectGroup(row.group!, !!selected)"></v-checkbox>
                                 </td>
                                 <td>
                                     <div class="d-flex align-center">
-                                        <v-icon size="20" :icon="isReceiptExpanded(row.receiptGroup) ? mdiChevronDown : mdiChevronRight"></v-icon>
-                                        <v-icon class="ms-1" size="20" :icon="mdiReceiptTextOutline"></v-icon>
+                                        <v-icon size="20" :icon="isGroupExpanded(row.group) ? mdiChevronDown : mdiChevronRight"></v-icon>
+                                        <v-icon class="ms-1" size="20" :icon="row.group.kind === 'receipt' ? mdiReceiptTextOutline : mdiFormatListBulletedSquare"></v-icon>
                                         <span class="ms-2 font-weight-medium"
-                                              :class="{ 'text-medium-emphasis': !row.receiptGroup.merchantName }">
-                                            {{ row.receiptGroup.merchantName || tt('Receipt') }}
+                                              :class="{ 'text-medium-emphasis': !isGroupNamed(row) }">
+                                            {{ getGroupTitle(row) }}
                                         </span>
-                                        <v-chip class="ms-2" size="x-small" label>
-                                            {{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(row.receiptGroup.entries.length) }) }}
-                                        </v-chip>
+                                        <v-chip class="ms-2" size="x-small" label>{{ getGroupCount(row) }}</v-chip>
                                     </div>
+                                    <div class="text-caption text-medium-emphasis" v-if="getGroupContext(row)">{{ getGroupContext(row) }}</div>
                                 </td>
                                 <td class="text-no-wrap">{{ getDisplayTime(row.entry.time) }}</td>
-                                <td class="text-end text-no-wrap font-weight-medium">{{ getDisplayAmount(row.receiptGroup.totalAmount, row.receiptGroup.currency) }}</td>
+                                <td class="text-end text-no-wrap font-weight-medium">{{ getDisplayAmount(row.group.totalAmount, row.group.currency) }}</td>
                                 <td></td>
                             </tr>
-                            <tr :key="entry.id" v-for="entry in getRowEntries(row)"
-                                :class="{ 'text-medium-emphasis': entry.settled, 'debt-entry-in-receipt': !!row.receiptGroup }">
+                            <tr :class="[`debt-entry-depth-${row.depth}`, { 'text-medium-emphasis': row.entry.settled }]"
+                                v-else-if="!row.group">
                                 <td class="debt-entry-select">
                                     <v-checkbox density="compact" hide-details
                                                 :disabled="updating"
-                                                :value="entry.id"
+                                                :value="row.entry.id"
                                                 v-model="selectedEntryIds"></v-checkbox>
                                 </td>
                                 <td>
                                     <div class="d-flex align-center">
-                                        <span :class="{ 'cursor-pointer': !entry.manual }" @click="showTransaction(entry)">{{ getEntryDescription(entry) }}</span>
-                                        <v-chip class="ms-2" size="x-small" label v-if="entry.manual">{{ tt('By Hand') }}</v-chip>
-                                        <v-chip class="ms-2" size="x-small" label v-if="entry.settled">{{ tt('Settled') }}</v-chip>
-                                        <v-chip class="ms-2" size="x-small" label color="warning" v-if="entry.missing">{{ tt('Transaction Deleted') }}</v-chip>
+                                        <span :class="{ 'cursor-pointer': !row.entry.manual }" @click="showTransaction(row.entry)">{{ getEntryDescription(row.entry) }}</span>
+                                        <v-chip class="ms-2" size="x-small" label v-if="row.entry.manual">{{ tt('By Hand') }}</v-chip>
+                                        <v-chip class="ms-2" size="x-small" label v-if="row.entry.settled">{{ tt('Settled') }}</v-chip>
+                                        <v-chip class="ms-2" size="x-small" label color="warning" v-if="row.entry.missing">{{ tt('Transaction Deleted') }}</v-chip>
                                     </div>
-                                    <div class="text-caption text-medium-emphasis" v-if="getEntryContext(entry)">{{ getEntryContext(entry) }}</div>
+                                    <div class="text-caption text-medium-emphasis" v-if="getEntryContext(row)">{{ getEntryContext(row) }}</div>
                                 </td>
-                                <td class="text-no-wrap">{{ getDisplayTime(entry.time) }}</td>
-                                <td class="text-end text-no-wrap">{{ getDisplayAmount(entry.amount, entry.currency) }}</td>
+                                <td class="text-no-wrap">{{ getDisplayTime(row.entry.time) }}</td>
+                                <td class="text-end text-no-wrap">{{ getDisplayAmount(row.entry.amount, row.entry.currency) }}</td>
                                 <td class="text-end">
                                     <v-btn density="comfortable" color="default" variant="text" :icon="true"
                                            :disabled="updating">
@@ -182,19 +182,19 @@
                                             <v-list>
                                                 <v-list-item :prepend-icon="mdiPencilOutline"
                                                              :title="tt('Change Amount Owed')"
-                                                             v-if="!entry.settled"
-                                                             @click="changeAmount(entry)"></v-list-item>
+                                                             v-if="!row.entry.settled"
+                                                             @click="changeAmount(row.entry)"></v-list-item>
                                                 <v-list-item :prepend-icon="mdiRenameOutline"
                                                              :title="tt('Rename')"
-                                                             v-if="entry.manual && !entry.settled"
-                                                             @click="renameEntry(entry)"></v-list-item>
+                                                             v-if="row.entry.manual && !row.entry.settled"
+                                                             @click="renameEntry(row.entry)"></v-list-item>
                                                 <v-list-item :prepend-icon="mdiUndoVariant"
                                                              :title="tt('Put Back on the Bill')"
-                                                             v-if="entry.settled"
-                                                             @click="reopen(entry)"></v-list-item>
+                                                             v-if="row.entry.settled"
+                                                             @click="reopen(row.entry)"></v-list-item>
                                                 <v-list-item class="text-error" :prepend-icon="mdiDeleteOutline"
                                                              :title="tt('Detach')"
-                                                             @click="detach(entry)"></v-list-item>
+                                                             @click="detach(row.entry)"></v-list-item>
                                             </v-list>
                                         </v-menu>
                                     </v-btn>
@@ -267,8 +267,8 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
-import type { DebtAmount, DebtEntryInfoResponse, DebtEntryReceiptGroup, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
-import { sumDebtAmountsByCurrency, groupDebtEntriesByReceipt } from '@/models/debt.ts';
+import type { DebtAmount, DebtEntryGroup, DebtEntryGroupKind, DebtEntryInfoResponse, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
+import { sumDebtAmountsByCurrency, groupDebtEntries } from '@/models/debt.ts';
 
 import { KnownFileType } from '@/core/file.ts';
 
@@ -291,6 +291,7 @@ import {
     mdiChevronDown,
     mdiChevronRight,
     mdiReceiptTextOutline,
+    mdiFormatListBulletedSquare,
     mdiFileExcelOutline
 } from '@mdi/js';
 
@@ -300,6 +301,14 @@ type RenameDialogType = InstanceType<typeof RenameDialog>;
 type AmountInputDialogType = InstanceType<typeof AmountInputDialog>;
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
+
+// DebtEntryVisibleRow is one row as the table draws it: a row of the grouped list, told how deep
+// it sits so that it can be indented, and what it sits under so that it does not repeat what the
+// row above already says
+interface DebtEntryVisibleRow extends DebtEntryRow {
+    readonly depth: number;
+    readonly parentKind?: DebtEntryGroupKind;
+}
 
 const { tt, formatNumberToLocalizedNumerals, formatAmountToLocalizedNumeralsWithCurrency, formatDateTimeToLongDateTime } = useI18n();
 
@@ -363,49 +372,64 @@ const allSelected = computed<boolean>({
 
 const someSelected = computed<boolean>(() => selectedOpenEntries.value.length > 0 && !allSelected.value);
 
-// what somebody owes off one shopping trip is one row until it is opened, so a receipt of a dozen
-// articles reads as the one trip it was rather than filling the page
-const entryRows = computed<DebtEntryRow[]>(() => groupDebtEntriesByReceipt(visibleEntries.value));
+// what somebody owes is read the way it was bought: the positions picked out of one transaction
+// stand under that transaction, and everything owed off one shopping trip stands under that trip,
+// so a receipt of a dozen articles is one row until it is opened rather than filling the page
+const entryRows = computed<DebtEntryRow[]>(() => groupDebtEntries(visibleEntries.value));
 
-const expandedReceiptIds = ref<Record<string, boolean>>({});
+// the rows actually on screen, a group contributing what it opens to only while it is open. The
+// flattening is done here rather than in the template because the groups nest and a table does not.
+const visibleRows = computed<DebtEntryVisibleRow[]>(() => flattenRows(entryRows.value, 0, undefined));
 
-function isReceiptExpanded(receiptGroup: DebtEntryReceiptGroup): boolean {
-    return !!expandedReceiptIds.value[receiptGroup.receiptId];
-}
+const expandedGroupKeys = ref<Record<string, boolean>>({});
 
-function toggleReceipt(receiptGroup: DebtEntryReceiptGroup): void {
-    expandedReceiptIds.value[receiptGroup.receiptId] = !expandedReceiptIds.value[receiptGroup.receiptId];
-}
+function flattenRows(rows: DebtEntryRow[], depth: number, parentKind: DebtEntryGroupKind | undefined): DebtEntryVisibleRow[] {
+    const rowsOnScreen: DebtEntryVisibleRow[] = [];
 
-// a collapsed trip shows nothing of itself but its own row, and an ungrouped row is simply itself
-function getRowEntries(row: DebtEntryRow): DebtEntryInfoResponse[] {
-    if (!row.receiptGroup) {
-        return [row.entry];
+    for (const row of rows) {
+        rowsOnScreen.push({ ...row, depth: depth, parentKind: parentKind });
+
+        if (row.group && isGroupExpanded(row.group)) {
+            rowsOnScreen.push(...flattenRows(row.group.rows, depth + 1, row.group.kind));
+        }
     }
 
-    return isReceiptExpanded(row.receiptGroup) ? row.receiptGroup.entries : [];
+    return rowsOnScreen;
 }
 
-function isReceiptSelected(receiptGroup: DebtEntryReceiptGroup): boolean {
-    if (!receiptGroup.openEntryIds.length) {
+function getGroupKey(group: DebtEntryGroup): string {
+    return `${group.kind}_${group.id}`;
+}
+
+function isGroupExpanded(group: DebtEntryGroup): boolean {
+    return !!expandedGroupKeys.value[getGroupKey(group)];
+}
+
+function toggleGroup(group: DebtEntryGroup): void {
+    const key = getGroupKey(group);
+    expandedGroupKeys.value[key] = !expandedGroupKeys.value[key];
+}
+
+function isGroupSelected(group: DebtEntryGroup): boolean {
+    if (!group.openEntryIds.length) {
         return false;
     }
 
-    return receiptGroup.openEntryIds.every(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
+    return group.openEntryIds.every(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
 }
 
-function isReceiptPartlySelected(receiptGroup: DebtEntryReceiptGroup): boolean {
-    return !isReceiptSelected(receiptGroup) && receiptGroup.openEntryIds.some(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
+function isGroupPartlySelected(group: DebtEntryGroup): boolean {
+    return !isGroupSelected(group) && group.openEntryIds.some(entryId => selectedEntryIds.value.indexOf(entryId) >= 0);
 }
 
-// ticking a trip ticks everything still open on it, which is what somebody paying a shopping trip
-// back pays back
-function selectReceipt(receiptGroup: DebtEntryReceiptGroup, selected: boolean): void {
+// ticking a group ticks everything still open under it, however deeply - a trip is paid back as the
+// trip it was, and a transaction as all of the articles of it somebody is to pay for
+function selectGroup(group: DebtEntryGroup, selected: boolean): void {
     if (selected) {
-        const missingIds = receiptGroup.openEntryIds.filter(entryId => selectedEntryIds.value.indexOf(entryId) < 0);
+        const missingIds = group.openEntryIds.filter(entryId => selectedEntryIds.value.indexOf(entryId) < 0);
         selectedEntryIds.value = selectedEntryIds.value.concat(missingIds);
     } else {
-        selectedEntryIds.value = selectedEntryIds.value.filter(entryId => receiptGroup.openEntryIds.indexOf(entryId) < 0);
+        selectedEntryIds.value = selectedEntryIds.value.filter(entryId => group.openEntryIds.indexOf(entryId) < 0);
     }
 }
 const selectedTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(selectedOpenEntries.value));
@@ -427,15 +451,11 @@ function getDisplayTime(unixTime: number): string {
     return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(unixTime));
 }
 
-// a position is named by what the receipt called it, and a whole transaction by its category - the
-// same two names they are shown under everywhere else
-function getEntryDescription(entry: DebtEntryInfoResponse): string {
-    if (entry.name) {
-        return entry.name;
-    }
-
-    if (entry.categoryId) {
-        const category = transactionCategoriesStore.allTransactionCategoriesMap[entry.categoryId];
+// a whole transaction is named by its category, which is what it is called everywhere else, and a
+// transaction whose category has left the ledger by what it is
+function getCategoryName(categoryId: string | undefined): string {
+    if (categoryId) {
+        const category = transactionCategoriesStore.allTransactionCategoriesMap[categoryId];
 
         if (category) {
             return category.name;
@@ -445,18 +465,88 @@ function getEntryDescription(entry: DebtEntryInfoResponse): string {
     return tt('Transaction');
 }
 
-function getEntryContext(entry: DebtEntryInfoResponse): string {
-    const context: string[] = [];
-
-    if (entry.merchantName) {
-        context.push(entry.merchantName);
+// a position is named by what the receipt called it, and a whole transaction by its category - the
+// same two names they are shown under everywhere else
+function getEntryDescription(entry: DebtEntryInfoResponse): string {
+    if (entry.name) {
+        return entry.name;
     }
 
-    if (entry.comment) {
-        context.push(entry.comment);
+    return getCategoryName(entry.categoryId);
+}
+
+// a thing owed says where it was bought and what the transaction was for, unless the row it stands
+// under has just said so - the positions of one transaction must not each repeat its article list
+function getEntryContext(row: DebtEntryVisibleRow): string {
+    if (row.parentKind === 'transaction') {
+        return '';
+    }
+
+    const context: string[] = [];
+
+    if (row.entry.merchantName) {
+        context.push(row.entry.merchantName);
+    }
+
+    if (row.entry.comment) {
+        context.push(row.entry.comment);
     }
 
     return context.join(' · ');
+}
+
+// a trip is called after the shop it was to, and the positions of one transaction after the
+// category they were summed into
+function getGroupTitle(row: DebtEntryVisibleRow): string {
+    if (!row.group) {
+        return '';
+    }
+
+    if (row.group.kind === 'receipt') {
+        return row.group.merchantName || tt('Receipt');
+    }
+
+    return getCategoryName(row.entry.categoryId);
+}
+
+// a group that has nothing of its own to be called by is shown faintly, so that the word standing
+// in for the name does not read as one
+function isGroupNamed(row: DebtEntryVisibleRow): boolean {
+    if (!row.group) {
+        return false;
+    }
+
+    if (row.group.kind === 'receipt') {
+        return !!row.group.merchantName;
+    }
+
+    return !!row.entry.categoryId;
+}
+
+// the chip counts the things owed under the group, however deeply they are nested, because that is
+// what the group's total is the sum of
+function getGroupCount(row: DebtEntryVisibleRow): string {
+    if (!row.group) {
+        return '';
+    }
+
+    const count = formatNumberToLocalizedNumerals(row.group.entries.length);
+
+    if (row.group.kind === 'receipt') {
+        return tt('format.misc.receiptLineItemCount', { count: count });
+    }
+
+    return tt('format.misc.debtPositionCount', { count: count });
+}
+
+// a group of positions standing on its own says where it was bought, because there is no trip above
+// it to say so. Inside a trip that would only repeat the row above.
+function getGroupContext(row: DebtEntryVisibleRow): string {
+    if (!row.group || row.group.kind !== 'transaction' || row.parentKind) {
+        return '';
+    }
+
+    return row.entry.merchantName ?? '';
 }
 
 // makeReceipt downloads what this person still owes as a spreadsheet, so that they can be handed a
@@ -791,7 +881,11 @@ onMounted(() => {
     min-height: unset;
 }
 
-.v-table .debt-entry-in-receipt > td:nth-child(2) {
+.v-table .debt-entry-depth-1 > td:nth-child(2) {
     padding-inline-start: 32px;
+}
+
+.v-table .debt-entry-depth-2 > td:nth-child(2) {
+    padding-inline-start: 64px;
 }
 </style>
