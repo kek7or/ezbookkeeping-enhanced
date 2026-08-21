@@ -543,13 +543,31 @@ export interface TransactionGeoLocationRequest {
     readonly longitude: number;
 }
 
-// TransactionReceiptLineItem is one line of the receipt a transaction was summed from: what was
-// bought and what it cost. Sent once, when an imported transaction is created, and read back with the
-// transaction so that its amount can be shown as the sum it actually is.
+// TransactionReceiptLineItem is one position of a transaction: what was bought and what it cost.
+// Read off a receipt when the transaction was imported, or written by hand afterwards, and read back
+// with the transaction so that its amount can be shown as the sum it actually is.
 export interface TransactionReceiptLineItem {
     // id is only present on a position read back from the server - a position being submitted with
     // an import does not have one yet. It is what lets a single article be pointed at from
     // elsewhere, which is how one of them can be said to be owed by somebody.
+    readonly id?: string;
+    readonly name: string;
+    readonly amount: number;
+}
+
+// TransactionReceiptLineItemModifyRequest itemizes a transaction that is already in the ledger.
+//
+// It carries the whole itemization rather than one change to it, because the order of the positions
+// is part of what they say: a position struck out is one this list no longer names. A position that
+// keeps its id keeps what is owed of it, so correcting an article's price does not detach it.
+export interface TransactionReceiptLineItemModifyRequest {
+    readonly transactionId: string;
+    readonly lineItems: TransactionReceiptLineItemModifyItem[];
+}
+
+// TransactionReceiptLineItemModifyItem is one position as the user has just written it: an existing
+// one when it carries an id, and one being added when it does not
+export interface TransactionReceiptLineItemModifyItem {
     readonly id?: string;
     readonly name: string;
     readonly amount: number;

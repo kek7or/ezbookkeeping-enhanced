@@ -92,6 +92,8 @@ import type {
     TransactionDeleteRequest,
     TransactionBatchDeleteRequest,
     TransactionReceiptModifyRequest,
+    TransactionReceiptLineItemModifyRequest,
+    TransactionReceiptLineItem,
     TransactionImportRequest,
     TransactionListByMaxTimeRequest,
     TransactionListInMonthByPageRequest,
@@ -681,6 +683,9 @@ export default {
     },
     modifyTransactionReceipt: (req: TransactionReceiptModifyRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transactions/receipt/modify.json', req);
+    },
+    modifyTransactionLineItems: (req: TransactionReceiptLineItemModifyRequest): ApiResponsePromise<TransactionReceiptLineItem[]> => {
+        return axios.post<ApiResponse<TransactionReceiptLineItem[]>>('v1/transactions/line_items/modify.json', req);
     },
     batchDeleteTransaction: (req: TransactionBatchDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transactions/batch_delete.json', req, {

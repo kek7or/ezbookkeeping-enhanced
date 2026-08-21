@@ -2727,6 +2727,49 @@ func (a *TransactionsApi) TransactionReceiptModifyHandler(c *core.WebContext) (a
 	return true, nil
 }
 
+// TransactionReceiptLineItemModifyHandler itemizes the specified transaction into positions for the
+// current user, and answers with the itemization as it now stands.
+//
+// It answers with the positions rather than with a bare success, because a position that has just
+// been written cannot be pointed at until it has an id, and pointing at one is what the caller does
+// next: a position is what somebody is said to owe.
+func (a *TransactionsApi) TransactionReceiptLineItemModifyHandler(c *core.WebContext) (any, *errs.Error) {
+	var lineItemModifyReq models.TransactionReceiptLineItemModifyRequest
+	err := c.ShouldBindJSON(&lineItemModifyReq)
+
+	if err != nil {
+		log.Warnf(c, "[transactions.TransactionReceiptLineItemModifyHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	for i := 0; i < len(lineItemModifyReq.LineItems); i++ {
+		lineItemModifyReq.LineItems[i].Name = strings.TrimSpace(lineItemModifyReq.LineItems[i].Name)
+
+		if lineItemModifyReq.LineItems[i].Name == "" {
+			return nil, errs.ErrIncompleteOrIncorrectSubmission
+		}
+	}
+
+	lineItems, err := a.transactions.ModifyReceiptLineItems(c, uid, lineItemModifyReq.TransactionId, lineItemModifyReq.LineItems)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.TransactionReceiptLineItemModifyHandler] failed to itemize transaction \"id:%d\" for user \"uid:%d\", because %s", lineItemModifyReq.TransactionId, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	lineItemResps := make([]*models.TransactionReceiptLineItemResponse, len(lineItems))
+
+	for i := 0; i < len(lineItems); i++ {
+		lineItemResps[i] = lineItems[i].ToTransactionReceiptLineItemResponse()
+	}
+
+	log.Infof(c, "[transactions.TransactionReceiptLineItemModifyHandler] user \"uid:%d\" has itemized transaction \"id:%d\" into %d positions", uid, lineItemModifyReq.TransactionId, len(lineItems))
+
+	return lineItemResps, nil
+}
+
 // TransactionImportHandler imports transactions by request parameters for current user
 func (a *TransactionsApi) TransactionImportHandler(c *core.WebContext) (any, *errs.Error) {
 	var transactionImportReq models.TransactionImportRequest

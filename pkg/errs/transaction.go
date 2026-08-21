@@ -48,4 +48,6 @@ var (
 	ErrCannotAddTagsToTooManyTransactionsOneTime                   = NewNormalError(NormalSubcategoryTransaction, 41, http.StatusBadRequest, "cannot add tags to too many transactions one time")
 	ErrTransactionReceiptIdInvalid                                 = NewNormalError(NormalSubcategoryTransaction, 42, http.StatusBadRequest, "transaction receipt id is invalid")
 	ErrTransactionReceiptNotFound                                  = NewNormalError(NormalSubcategoryTransaction, 43, http.StatusBadRequest, "transaction receipt not found")
+	ErrTransactionLineItemNotFound                                 = NewNormalError(NormalSubcategoryTransaction, 44, http.StatusBadRequest, "transaction position not found")
+	ErrTransactionLineItemOwed                                     = NewNormalError(NormalSubcategoryTransaction, 45, http.StatusBadRequest, "transaction position is owed by somebody")
 )

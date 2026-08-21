@@ -83,7 +83,7 @@
         </div>
 
         <div class="px-2 pt-2 text-caption text-medium-emphasis" v-if="!lineItems.length">
-            {{ tt('This transaction has no positions, so only the whole of it can be owed.') }}
+            {{ tt('This transaction has no positions yet. Itemize it on the Positions tab, and any one part of it can then be owed on its own.') }}
         </div>
 
         <rename-dialog ref="renameDialog" />

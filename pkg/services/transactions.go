@@ -1119,6 +1119,174 @@ func (s *TransactionService) ModifyReceiptMerchantName(c core.Context, uid int64
 	})
 }
 
+// ModifyReceiptLineItems rewrites what the specified transaction is itemized into and returns the
+// itemization as it now stands.
+//
+// The request carries the whole list rather than one change to it, because the order of positions is
+// part of what they say: a position the user has struck out is simply one the request no longer
+// names. A position that keeps its id keeps it in the database too, so that renaming an article or
+// correcting its price leaves untouched what somebody was told they owe for it.
+//
+// A position somebody owes cannot be struck out. Deleting it would leave the debt entry pointing at
+// nothing, and the debts page would then answer it as missing - which is what it says of a
+// transaction that has left the ledger and would not be true here. Whether that debt still stands is
+// the user's own decision, made by detaching it.
+//
+// The positions are not made to add up to the transaction. What they come to is shown beside the
+// total wherever they are read, and a difference is a thing to be seen rather than refused: an
+// itemization written by hand is written a line at a time, and is short of the total until the last
+// line is in.
+func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, transactionId int64, lineItems []*models.TransactionReceiptLineItemModifyItem) ([]*models.TransactionReceiptLineItem, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if transactionId <= 0 {
+		return nil, errs.ErrTransactionIdInvalid
+	}
+
+	now := time.Now().Unix()
+	newLineItemCount := 0
+
+	for i := 0; i < len(lineItems); i++ {
+		if lineItems[i].Id <= 0 {
+			newLineItemCount++
+		}
+	}
+
+	// the ids of the positions being added are drawn before anything is written, so that every row
+	// is fully built before the database is touched
+	var newLineItemIds []int64
+
+	if newLineItemCount > 0 {
+		newLineItemIds = s.GenerateUuids(uuid.UUID_TYPE_DEFAULT, uint16(newLineItemCount))
+
+		if len(newLineItemIds) < newLineItemCount {
+			return nil, errs.ErrSystemIsBusy
+		}
+	}
+
+	updatedLineItems := make([]*models.TransactionReceiptLineItem, len(lineItems))
+
+	err := s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		transaction := &models.Transaction{}
+		has, err := sess.ID(transactionId).Where("uid=? AND deleted=?", uid, false).Get(transaction)
+
+		if err != nil {
+			return err
+		} else if !has {
+			return errs.ErrTransactionNotFound
+		}
+
+		var existingLineItems []*models.TransactionReceiptLineItem
+		err = sess.Where("uid=? AND deleted=? AND transaction_id=?", uid, false, transactionId).Find(&existingLineItems)
+
+		if err != nil {
+			return err
+		}
+
+		existingLineItemIds := make(map[int64]bool, len(existingLineItems))
+
+		for i := 0; i < len(existingLineItems); i++ {
+			existingLineItemIds[existingLineItems[i].LineItemId] = true
+		}
+
+		// a position of another transaction, or one named twice in the same request, is a request
+		// that cannot be carried out as it reads rather than one to be made sense of
+		keptLineItemIds := make(map[int64]bool, len(lineItems))
+
+		for i := 0; i < len(lineItems); i++ {
+			lineItemId := lineItems[i].Id
+
+			if lineItemId <= 0 {
+				continue
+			}
+
+			if !existingLineItemIds[lineItemId] || keptLineItemIds[lineItemId] {
+				return errs.ErrTransactionLineItemNotFound
+			}
+
+			keptLineItemIds[lineItemId] = true
+		}
+
+		removedLineItemIds := make([]int64, 0, len(existingLineItems))
+
+		for i := 0; i < len(existingLineItems); i++ {
+			if !keptLineItemIds[existingLineItems[i].LineItemId] {
+				removedLineItemIds = append(removedLineItemIds, existingLineItems[i].LineItemId)
+			}
+		}
+
+		if len(removedLineItemIds) > 0 {
+			owedCount, err := sess.Where("uid=? AND deleted=?", uid, false).In("line_item_id", removedLineItemIds).Count(&models.DebtEntry{})
+
+			if err != nil {
+				return err
+			}
+
+			if owedCount > 0 {
+				return errs.ErrTransactionLineItemOwed
+			}
+
+			deletedModel := &models.TransactionReceiptLineItem{
+				Deleted:         true,
+				DeletedUnixTime: now,
+			}
+
+			_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("line_item_id", removedLineItemIds).Update(deletedModel)
+
+			if err != nil {
+				return err
+			}
+		}
+
+		newLineItemIdIndex := 0
+
+		for i := 0; i < len(lineItems); i++ {
+			lineItem := &models.TransactionReceiptLineItem{
+				LineItemId:      lineItems[i].Id,
+				Uid:             uid,
+				Deleted:         false,
+				TransactionId:   transactionId,
+				DisplayOrder:    int32(i),
+				Name:            lineItems[i].Name,
+				Amount:          lineItems[i].Amount,
+				UpdatedUnixTime: now,
+			}
+
+			if lineItem.LineItemId > 0 {
+				// the columns are named explicitly so that a position corrected to cost nothing
+				// writes a zero rather than being skipped as an unset field
+				_, err = sess.ID(lineItem.LineItemId).Cols("name", "amount", "display_order", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(lineItem)
+
+				if err != nil {
+					return err
+				}
+			} else {
+				lineItem.LineItemId = newLineItemIds[newLineItemIdIndex]
+				lineItem.CreatedUnixTime = now
+				newLineItemIdIndex++
+
+				_, err = sess.Insert(lineItem)
+
+				if err != nil {
+					return err
+				}
+			}
+
+			updatedLineItems[i] = lineItem
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return updatedLineItems, nil
+}
+
 // CreateScheduledTransactions saves all scheduled transactions that should be created now
 func (s *TransactionService) CreateScheduledTransactions(c core.Context, currentUnixTime int64, interval time.Duration) error {
 	var allTemplates []*models.TransactionTemplate

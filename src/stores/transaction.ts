@@ -22,6 +22,8 @@ import {
     type TransactionDraft,
     type TransactionCreateRequest,
     type TransactionReceiptRequest,
+    type TransactionReceiptLineItem,
+    type TransactionReceiptLineItemModifyItem,
     type TransactionInfoResponse,
     type TransactionPageWrapper,
     type TransactionReconciliationStatementResponse,
@@ -1467,6 +1469,39 @@ export const useTransactionsStore = defineStore('transactions', () => {
         });
     }
 
+    // itemizing a transaction says what its amount is made of and changes nothing about the amount
+    // itself, so nothing built from amounts is stale. The list is marked so only because a
+    // transaction that has just been given positions is shown as the sum it now is.
+    function modifyTransactionLineItems({ transactionId, lineItems }: { transactionId: string, lineItems: TransactionReceiptLineItemModifyItem[] }): Promise<TransactionReceiptLineItem[]> {
+        return new Promise((resolve, reject) => {
+            services.modifyTransactionLineItems({
+                transactionId: transactionId,
+                lineItems: lineItems
+            }).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to save these positions' });
+                    return;
+                }
+
+                updateTransactionListInvalidState(true);
+
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('failed to save the positions of a transaction', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to save these positions' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function batchDeleteTransactions({ transactionIds, password }: { transactionIds: string[], password: string }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.batchDeleteTransaction({
@@ -1821,6 +1856,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         moveAllTransactionsBetweenAccounts,
         deleteTransaction,
         modifyTransactionReceipt,
+        modifyTransactionLineItems,
         batchDeleteTransactions,
         recognizeTransactionText,
         recognizeReceiptImage,

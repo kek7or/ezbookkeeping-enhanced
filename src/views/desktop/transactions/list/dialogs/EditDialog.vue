@@ -87,7 +87,7 @@
                         <v-tab value="pictures" :disabled="mode !== TransactionEditPageMode.Add && mode !== TransactionEditPageMode.Edit && (!transaction.pictures || !transaction.pictures.length)" v-if="type === TransactionEditPageType.Transaction && isTransactionPicturesEnabled()">
                             <span>{{ tt('Pictures') }}</span>
                         </v-tab>
-                        <v-tab value="lineItems" :disabled="!transactionLineItems.length" v-if="type === TransactionEditPageType.Transaction">
+                        <v-tab value="lineItems" :disabled="!editId && !transactionLineItems.length" v-if="type === TransactionEditPageType.Transaction">
                             <span>{{ tt('Positions') }}</span>
                         </v-tab>
                         <v-tab value="owedBy" v-if="type === TransactionEditPageType.Transaction && !!editId">
@@ -423,7 +423,15 @@
                         </v-row>
                     </v-window-item>
                     <v-window-item value="lineItems">
-                        <div class="transaction-line-items mt-2" v-if="transactionLineItems.length">
+                        <positions-panel :transaction-id="editId ?? ''"
+                                         :amount="transaction.sourceAmount"
+                                         :currency="sourceAccountCurrency"
+                                         :line-items="transactionLineItems"
+                                         @error="(error) => snackbar?.showError(error)"
+                                         @message="(message) => snackbar?.showMessage(message)"
+                                         @saved="(lineItems) => transaction.lineItems = lineItems"
+                                         v-if="activeTab === 'lineItems' && !!editId"/>
+                        <div class="transaction-line-items mt-2" v-else-if="!editId && transactionLineItems.length">
                             <div class="d-flex align-center px-2 pb-1 text-caption text-medium-emphasis">
                                 <span class="flex-grow-1">{{ tt('Positions') }}</span>
                                 <span class="ms-4 text-no-wrap">{{ tt('format.misc.receiptLineItemCount', { count: formatNumberToLocalizedNumerals(transactionLineItems.length) }) }}</span>
@@ -552,6 +560,7 @@
 </template>
 
 <script setup lang="ts">
+import PositionsPanel from './PositionsPanel.vue';
 import OwedByPanel from './OwedByPanel.vue';
 import MapView from '@/components/common/MapView.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
