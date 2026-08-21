@@ -8,8 +8,63 @@ import type {
     DebtEntryCreateManualRequest
 } from '@/models/debt.ts';
 
+import { KnownFileType } from '@/core/file.ts';
+
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
+
+// DebtReceiptFile is a receipt as it comes off the server: what is in it, and what the server called
+// it. The name is the server's to give, because the document is the server's to write.
+export interface DebtReceiptFile {
+    readonly content: Blob;
+    readonly fileName: string;
+}
+
+// getAttachmentFileName reads the name the server gave the file it is sending back.
+//
+// A response that names nothing, or names something with a path in it, is treated as having named
+// nothing at all - the caller then falls back to a name of its own, rather than letting a header
+// decide where on the disk a file is written.
+function getAttachmentFileName(contentDisposition: string): string {
+    const match = /filename=("?)([^";]+)\1/.exec(contentDisposition);
+    const fileName = (match?.[2] ?? '').trim();
+
+    if (!fileName || fileName.indexOf('/') >= 0 || fileName.indexOf('\\') >= 0 || fileName.indexOf('..') >= 0) {
+        return '';
+    }
+
+    return fileName;
+}
+
+// getResponseHeader reads a header off a response as the one string it is meant to be. Axios types a
+// header as anything a header could ever hold - one value, several, or none at all
+function getResponseHeader(header: unknown): string {
+    if (Array.isArray(header)) {
+        return (header[0] ?? '').toString();
+    }
+
+    if (header === null || header === undefined) {
+        return '';
+    }
+
+    return header.toString();
+}
+
+// readErrorBlob reads back the message of a refused request that was asked for as a blob.
+//
+// The blob is asked what it is rather than the headers being read again, because that is the one
+// answer that is certainly about this body. Anything that is not text yields nothing - the caller
+// then says only that it could not be done, which is still true and is better than showing the
+// reader a spreadsheet's worth of bytes.
+function readErrorBlob(error: { response?: { data?: unknown } }): Promise<string> {
+    const data = error.response?.data;
+
+    if (!(data instanceof Blob) || data.type.indexOf('text/') !== 0) {
+        return Promise.resolve('');
+    }
+
+    return data.text().then(text => text.trim()).catch(() => '');
+}
 
 export const useDebtsStore = defineStore('debts', () => {
     const allPeople = ref<DebtPersonInfoResponse[]>([]);
@@ -382,6 +437,47 @@ export const useDebtsStore = defineStore('debts', () => {
         });
     }
 
+    // exportReceipt fetches what a person still owes as a spreadsheet to be handed to them.
+    //
+    // The sheet is written by the server rather than here, because a receipt is a document and not a
+    // view: it has to be the same file whoever asks for it, and it has to hold dates and amounts a
+    // spreadsheet can still add up rather than the words this page happens to print them as.
+    function exportReceipt({ personId }: { personId: string }): Promise<DebtReceiptFile> {
+        return new Promise((resolve, reject) => {
+            services.exportDebtReceipt({ personId: personId }).then(response => {
+                if (!response || !response.data) {
+                    reject({ message: 'Unable to make a receipt for this person' });
+                    return;
+                }
+
+                const contentType = getResponseHeader(response.headers['content-type']);
+
+                if (!KnownFileType.XLSX.isSameType(contentType)) {
+                    reject({ message: 'Unable to make a receipt for this person' });
+                    return;
+                }
+
+                resolve({
+                    content: new Blob([response.data], { type: contentType }),
+                    fileName: getAttachmentFileName(getResponseHeader(response.headers['content-disposition']))
+                });
+            }).catch(error => {
+                logger.error('failed to export the receipt of a debt person', error);
+
+                if (error.processed) {
+                    reject(error);
+                    return;
+                }
+
+                // the request asked for a blob, so a refusal arrives as one too and has to be read
+                // back into the words it was written as before it can be shown
+                readErrorBlob(error).then(message => {
+                    reject(message ? { message: 'error.' + message } : { message: 'Unable to make a receipt for this person' });
+                });
+            });
+        });
+    }
+
     return {
         // states
         allPeople,
@@ -406,6 +502,7 @@ export const useDebtsStore = defineStore('debts', () => {
         modifyEntry,
         deleteEntries,
         settleEntries,
-        reopenEntries
+        reopenEntries,
+        exportReceipt
     };
 });

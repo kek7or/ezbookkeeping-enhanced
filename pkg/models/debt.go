@@ -104,6 +104,16 @@ type DebtEntryListByTransactionRequest struct {
 	TransactionId int64 `form:"transactionId,string" binding:"required,min=1"`
 }
 
+// DebtEntryExportRequest represents all parameters of a request for the receipt of what one person
+// still owes.
+//
+// It names only the person, because a receipt is always for everything still open. What has been
+// paid back is deliberately not offered: the sheet is handed to somebody as a bill, and a paid row
+// on a bill is an invitation to pay it twice.
+type DebtEntryExportRequest struct {
+	PersonId int64 `form:"personId,string" binding:"required,min=1"`
+}
+
 // DebtEntryCreateRequest represents one thing to be attached to a person
 type DebtEntryCreateRequest struct {
 	// PersonId is who owes this one. It is absent when the whole request is owed by the single

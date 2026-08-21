@@ -82,6 +82,16 @@
                                :disabled="loadingEntries" @click="toggleShowSettled">
                             {{ showSettled ? tt('Hide Settled') : tt('Show Settled') }}
                         </v-btn>
+                        <v-btn class="ms-2" density="comfortable" variant="text" color="default"
+                               :prepend-icon="mdiFileExcelOutline" :loading="exportingReceipt"
+                               :disabled="loadingEntries || updating || !openEntries.length"
+                               @click="makeReceipt">
+                            <template #loader>
+                                <v-progress-circular indeterminate size="20"/>
+                            </template>
+                            {{ tt('Make a Receipt') }}
+                            <v-tooltip activator="parent" open-delay="500">{{ tt('A spreadsheet of everything still owed, to hand to this person') }}</v-tooltip>
+                        </v-btn>
                         <v-btn class="ms-2" density="comfortable" :prepend-icon="mdiHandCoinOutline"
                                :disabled="loadingEntries || updating" @click="addLoan">
                             {{ tt('Record a Loan') }}
@@ -260,8 +270,11 @@ import { TransactionEditPageType } from '@/views/base/transactions/TransactionEd
 import type { DebtAmount, DebtEntryInfoResponse, DebtEntryReceiptGroup, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
 import { sumDebtAmountsByCurrency, groupDebtEntriesByReceipt } from '@/models/debt.ts';
 
+import { KnownFileType } from '@/core/file.ts';
+
 import { parseBigDecimal } from '@/lib/numeral.ts';
 import { parseDateTimeFromUnixTime } from '@/lib/datetime.ts';
+import { startDownloadFile } from '@/lib/ui/common.ts';
 
 import {
     mdiRefresh,
@@ -277,7 +290,8 @@ import {
     mdiEyeOffOutline,
     mdiChevronDown,
     mdiChevronRight,
-    mdiReceiptTextOutline
+    mdiReceiptTextOutline,
+    mdiFileExcelOutline
 } from '@mdi/js';
 
 type AddLoanDialogType = InstanceType<typeof AddLoanDialog>;
@@ -302,6 +316,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const loadingPeople = ref<boolean>(true);
 const loadingEntries = ref<boolean>(false);
 const updating = ref<boolean>(false);
+const exportingReceipt = ref<boolean>(false);
 const showSettled = ref<boolean>(false);
 const selectedPersonId = ref<string>('');
 const selectedEntryIds = ref<string[]>([]);
@@ -442,6 +457,33 @@ function getEntryContext(entry: DebtEntryInfoResponse): string {
     }
 
     return context.join(' · ');
+}
+
+// makeReceipt downloads what this person still owes as a spreadsheet, so that they can be handed a
+// bill that says what they are paying for and when it was bought.
+//
+// Only what is still open goes on it, whether or not the page is showing what has been settled - a
+// receipt is what is left to pay, and a paid row on one is an invitation to pay it twice.
+function makeReceipt(): void {
+    const person = selectedPerson.value;
+
+    if (!person || exportingReceipt.value) {
+        return;
+    }
+
+    exportingReceipt.value = true;
+
+    debtsStore.exportReceipt({ personId: person.id }).then(receipt => {
+        exportingReceipt.value = false;
+
+        startDownloadFile(receipt.fileName || KnownFileType.XLSX.formatFileName(tt('Receipt')), receipt.content);
+    }).catch(error => {
+        exportingReceipt.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
 }
 
 function reload(force: boolean): void {

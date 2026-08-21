@@ -1139,6 +1139,7 @@
         "user avatar file extension invalid": "User avatar file extension is invalid",
         "exceed the maximum size of user avatar file": "The uploaded user avatar exceeds the maximum allowed file size",
         "not permitted to perform this action": "You are not permitted to perform this action",
+        "this person owes nothing to make a receipt of": "This person owes you nothing, so there is nothing to make a receipt of",
         "cannot login by password": "You cannot login by password",
         "user name is invalid": "User name is invalid",
         "nick name is invalid": "User nickname is invalid",
@@ -2861,5 +2862,8 @@
     "Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.": "Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.",
     "These are no longer owed": "These are no longer owed",
     "Tick what has been paid back, or what is no longer owed": "Tick what has been paid back, or what is no longer owed",
+    "Make a Receipt": "Make a Receipt",
+    "A spreadsheet of everything still owed, to hand to this person": "A spreadsheet of everything still owed, to hand to this person",
+    "Unable to make a receipt for this person": "Unable to make a receipt for this person",
     "Click to close": "Click to close"
 }

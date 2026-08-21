@@ -1,8 +1,12 @@
 package api
 
 import (
+	"fmt"
 	"sort"
+	"strings"
+	"time"
 
+	debtexporter "github.com/mayswind/ezbookkeeping/pkg/converters/debt"
 	"github.com/mayswind/ezbookkeeping/pkg/core"
 	"github.com/mayswind/ezbookkeeping/pkg/errs"
 	"github.com/mayswind/ezbookkeeping/pkg/log"
@@ -11,11 +15,21 @@ import (
 	"github.com/mayswind/ezbookkeeping/pkg/utils"
 )
 
+// The words the receipt is written with. The debts feature speaks English wherever it has anything
+// of its own to say, and the sheet handed to somebody else is no different.
+const (
+	debtReceiptDefaultFileName         = "Receipt"
+	debtReceiptUnnamedReceiptTitle     = "Receipt"
+	debtReceiptUnnamedTransactionTitle = "Transaction"
+)
+
 // DebtsApi represents the api of what other people owe the user
 type DebtsApi struct {
 	debts        *services.DebtService
 	transactions *services.TransactionService
 	accounts     *services.AccountService
+	categories   *services.TransactionCategoryService
+	users        *services.UserService
 }
 
 // Initialize a debt api singleton instance
@@ -24,6 +38,8 @@ var (
 		debts:        services.Debts,
 		transactions: services.Transactions,
 		accounts:     services.Accounts,
+		categories:   services.TransactionCategories,
+		users:        services.Users,
 	}
 )
 
@@ -223,6 +239,131 @@ func (a *DebtsApi) EntryListByTransactionHandler(c *core.WebContext) (any, *errs
 	sort.Sort(entryResps)
 
 	return entryResps, nil
+}
+
+// EntryExportHandler returns what one person still owes as a spreadsheet, so that the person can be
+// handed a receipt for it.
+//
+// It is not gated by the data export setting, which governs handing out the ledger itself. This is
+// one person's own bill - the same rows the debts page already shows, addressed to the person who
+// has to pay them - and a user who may read it on screen may carry it out of the room.
+func (a *DebtsApi) EntryExportHandler(c *core.WebContext) ([]byte, string, *errs.Error) {
+	var exportReq models.DebtEntryExportRequest
+	err := c.ShouldBindQuery(&exportReq)
+
+	if err != nil {
+		log.Warnf(c, "[debts.EntryExportHandler] parse request failed, because %s", err.Error())
+		return nil, "", errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	clientTimezone, err := c.GetClientTimezone()
+
+	if err != nil {
+		log.Warnf(c, "[debts.EntryExportHandler] cannot get client timezone, because %s", err.Error())
+		clientTimezone = time.Local
+	}
+
+	uid := c.GetCurrentUid()
+	user, err := a.users.GetUserById(c, uid)
+
+	if err != nil {
+		if !errs.IsCustomError(err) {
+			log.Warnf(c, "[debts.EntryExportHandler] failed to get user for user \"uid:%d\", because %s", uid, err.Error())
+		}
+
+		return nil, "", errs.ErrUserNotFound
+	}
+
+	person, err := a.debts.GetPersonByPersonId(c, uid, exportReq.PersonId)
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryExportHandler] failed to get person \"id:%d\" for user \"uid:%d\", because %s", exportReq.PersonId, uid, err.Error())
+		return nil, "", errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	entries, err := a.debts.GetEntriesByPersonId(c, uid, exportReq.PersonId, false)
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryExportHandler] failed to get debt entries of person \"id:%d\" for user \"uid:%d\", because %s", exportReq.PersonId, uid, err.Error())
+		return nil, "", errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	if len(entries) < 1 {
+		return nil, "", errs.ErrDebtPersonOwesNothing
+	}
+
+	entryResps, err := a.getDescribedEntryResponses(c, uid, entries)
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryExportHandler] failed to describe debt entries of person \"id:%d\" for user \"uid:%d\", because %s", exportReq.PersonId, uid, err.Error())
+		return nil, "", errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	categoryNames, err := a.getCategoryNames(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryExportHandler] failed to get transaction categories for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, "", errs.ErrOperationFailed
+	}
+
+	content, err := debtexporter.WriteDebtReceiptXlsx(entryResps, &debtexporter.DebtReceiptContext{
+		PersonName:              person.Name,
+		UserName:                user.Nickname,
+		GeneratedTime:           time.Now(),
+		Timezone:                clientTimezone,
+		CategoryNames:           categoryNames,
+		UnnamedReceiptTitle:     debtReceiptUnnamedReceiptTitle,
+		UnnamedTransactionTitle: debtReceiptUnnamedTransactionTitle,
+	})
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryExportHandler] failed to write the receipt of person \"id:%d\" for user \"uid:%d\", because %s", exportReq.PersonId, uid, err.Error())
+		return nil, "", errs.ErrOperationFailed
+	}
+
+	return content, a.getReceiptFileName(person.Name, clientTimezone), nil
+}
+
+// getCategoryNames names every category of the user, so that a transaction owed whole can be called
+// what it is called everywhere else
+func (a *DebtsApi) getCategoryNames(c *core.WebContext, uid int64) (map[int64]string, error) {
+	categories, err := a.categories.GetAllCategoriesByUid(c, uid, 0, -1)
+
+	if err != nil {
+		return nil, err
+	}
+
+	categoryNames := make(map[int64]string, len(categories))
+
+	for i := 0; i < len(categories); i++ {
+		categoryNames[categories[i].CategoryId] = categories[i].Name
+	}
+
+	return categoryNames, nil
+}
+
+// getReceiptFileName names the downloaded file after the person and the day it was drawn up.
+//
+// The person's name is written by the user and the file name is written into a response header, so
+// everything that is not plainly a letter or a digit is dropped rather than escaped. A name of only
+// such characters leaves the file called what it is, which is a receipt.
+func (a *DebtsApi) getReceiptFileName(personName string, clientTimezone *time.Location) string {
+	safeName := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+
+		return -1
+	}, personName)
+
+	if safeName == "" {
+		safeName = debtReceiptDefaultFileName
+	}
+
+	currentTime := utils.FormatUnixTimeToLongDate(time.Now().Unix(), clientTimezone)
+	currentTime = strings.Replace(currentTime, "-", "_", -1)
+
+	return fmt.Sprintf("%s_%s_%s.xlsx", debtReceiptDefaultFileName, safeName, currentTime)
 }
 
 // EntryCreateBatchHandler attaches transactions and receipt positions to a person for current user

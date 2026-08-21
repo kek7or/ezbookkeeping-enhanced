@@ -10,6 +10,7 @@ export class KnownFileType {
     public static readonly MERMAID = new KnownFileType('mermaid', 'text/vnd.mermaid');
     public static readonly JS = new KnownFileType('js', 'application/javascript');
     public static readonly JPG = new KnownFileType('jpg', 'image/jpeg');
+    public static readonly XLSX = new KnownFileType('xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 
     public readonly extension: string;
     public readonly contentType: string;

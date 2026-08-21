@@ -463,6 +463,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/debts/people/delete.json", bindApi(api.Debts.PersonDeleteHandler, config))
 			apiV1Route.GET("/debts/entries/list.json", bindApi(api.Debts.EntryListHandler, config))
 			apiV1Route.GET("/debts/entries/list_by_transaction.json", bindApi(api.Debts.EntryListByTransactionHandler, config))
+			apiV1Route.GET("/debts/entries/export.xlsx", bindXlsx(api.Debts.EntryExportHandler, config))
 			apiV1Route.POST("/debts/entries/add_batch.json", bindApi(api.Debts.EntryCreateBatchHandler, config))
 			apiV1Route.POST("/debts/entries/add_manual.json", bindApi(api.Debts.EntryCreateManualHandler, config))
 			apiV1Route.POST("/debts/entries/modify.json", bindApi(api.Debts.EntryModifyHandler, config))
@@ -684,6 +685,19 @@ func bindTsv(fn core.DataHandlerFunc, config *settings.Config) gin.HandlerFunc {
 			utils.PrintDataErrorResult(c, "text/text", err)
 		} else {
 			utils.PrintDataSuccessResult(c, "text/tab-separated-values; charset=utf-8", fileName, result)
+		}
+	}
+}
+
+func bindXlsx(fn core.DataHandlerFunc, config *settings.Config) gin.HandlerFunc {
+	return func(ginCtx *gin.Context) {
+		c := core.WrapWebContext(ginCtx, config.TrustedProxyIPs)
+		result, fileName, err := fn(c)
+
+		if err != nil {
+			utils.PrintDataErrorResult(c, "text/text", err)
+		} else {
+			utils.PrintDataSuccessResult(c, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName, result)
 		}
 	}
 }

@@ -940,6 +940,15 @@ export default {
     reopenDebtEntries: (req: DebtEntryReopenRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/debts/entries/reopen.json', req);
     },
+    exportDebtReceipt: ({ personId }: { personId: string }): Promise<AxiosResponse<Blob>> => {
+        // the answer is a spreadsheet and not text, so it is asked for as a blob - read as a string
+        // it would arrive with every byte the encoding could not spell replaced, which is most of
+        // them. An error is a blob too then, and the caller is the one that reads it back.
+        return axios.get<Blob>('v1/debts/entries/export.xlsx?personId=' + personId, {
+            responseType: 'blob',
+            timeout: DEFAULT_EXPORT_API_TIMEOUT
+        } as ApiRequestConfig);
+    },
     getCryptoPortfolio: (): ApiResponsePromise<CryptoPortfolioResponse> => {
         return axios.get<ApiResponse<CryptoPortfolioResponse>>('v1/crypto/portfolio.json', {
             // the request refreshes the snapshot when it has expired, which waits on the crypto
