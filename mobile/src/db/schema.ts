@@ -15,7 +15,7 @@ import * as SQLite from 'expo-sqlite';
 const DATABASE_NAME = 'ezbookkeeping.db';
 
 /** Bump alongside a new entry in MIGRATIONS. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const MIGRATIONS: string[] = [
     // v1 — initial schema
@@ -91,6 +91,24 @@ const MIGRATIONS: string[] = [
         key   TEXT PRIMARY KEY NOT NULL,
         value TEXT NOT NULL
     );
+    `,
+    // v2 — the diagnostic log
+    //
+    // Logs live in SQLite rather than a file so that reading, filtering and
+    // pruning are one query each, and so a crash mid-write cannot leave a
+    // half-line behind. `detail` holds the long-form payload (stack, response
+    // body) that the list view keeps collapsed until it is asked for.
+    `
+    CREATE TABLE IF NOT EXISTS logs (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        at      INTEGER NOT NULL,
+        level   TEXT    NOT NULL,
+        scope   TEXT    NOT NULL,
+        message TEXT    NOT NULL,
+        detail  TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_logs_at ON logs (at);
     `
 ];
 
@@ -130,7 +148,12 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
     await db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 }
 
-/** Drops every local row. Used when signing out of a server. */
+/**
+ * Drops every local row. Used when signing out of a server.
+ *
+ * `logs` is deliberately spared: diagnosing a failed sign-in or a bad sync is
+ * exactly when the log matters, and it holds no data worth protecting.
+ */
 export async function resetDatabase(): Promise<void> {
     const db = await openDatabase();
 

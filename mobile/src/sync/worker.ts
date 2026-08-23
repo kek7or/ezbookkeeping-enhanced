@@ -1,5 +1,11 @@
 import { ApiError, NetworkError } from '../api/client';
-import { RECEIPT_JOB_STATUS_COMPLETED, RECEIPT_JOB_STATUS_FAILED } from '../api/types';
+import {
+    CATEGORY_TYPE_EXPENSE,
+    CATEGORY_TYPE_INCOME,
+    CATEGORY_TYPE_TRANSFER,
+    RECEIPT_JOB_STATUS_COMPLETED,
+    RECEIPT_JOB_STATUS_FAILED
+} from '../api/types';
 import {
     clearPhotoJobId,
     listPhotos,
@@ -11,9 +17,16 @@ import {
     setMeta
 } from '../db/repo';
 
+import { logger } from '../utils/logger';
+
 import type { ApiClient } from '../api/client';
 import type { LocalTransaction } from '../db/repo';
-import type { TransactionCreateRequest } from '../api/types';
+import type {
+    AccountInfoResponse,
+    TransactionCategoryInfoResponse,
+    TransactionCategoryType,
+    TransactionCreateRequest
+} from '../api/types';
 
 /**
  * The sync worker. This is the only component in the app that touches the
@@ -68,6 +81,16 @@ function newClientSessionId(): string {
     return `mobile-${Date.now().toString(16)}-${random}`;
 }
 
+/**
+ * Records a problem in both places it belongs: `result.errors`, which the user
+ * reads as a sentence when the run ends, and the log, which keeps the
+ * underlying error — stack and all — next to it for afterwards.
+ */
+function recordError(result: SyncResult, message: string, error?: unknown): void {
+    result.errors.push(message);
+    logger.error('sync', message, error);
+}
+
 function describeError(error: unknown): string {
     if (error instanceof ApiError || error instanceof NetworkError) {
         return error.message;
@@ -102,22 +125,19 @@ export async function runSync(client: ApiClient, onProgress: ProgressCallback): 
         errors: []
     };
 
+    logger.info('sync', 'Upload started');
+
     // 1. Refresh reference data first. Category and account ids are what the
     // queued transactions point at, so stale ones are the most likely cause of
     // a server-side rejection below.
     onProgress({ stage: 'pulling', message: 'Getting categories and accounts', fraction: null });
 
     try {
-        const [categories, accounts, tags] = await Promise.all([
-            client.listCategories(),
-            client.listAccounts(),
-            client.listTags()
-        ]);
-        await replaceReferenceData(categories, accounts, tags);
+        await pullReferenceData(client);
     } catch (error) {
         // A failed pull is not fatal: the queued rows already carry their ids,
         // so pushing can still succeed on a cached catalogue.
-        result.errors.push(`Could not refresh categories: ${describeError(error)}`);
+        recordError(result, `Could not refresh categories: ${describeError(error)}`, error);
 
         if (error instanceof ApiError && error.isAuthFailure) {
             throw error;
@@ -134,7 +154,66 @@ export async function runSync(client: ApiClient, onProgress: ProgressCallback): 
     await closeResolvedJobs(client, result);
 
     onProgress({ stage: 'done', message: 'Finished', fraction: 1 });
+
+    logger.info('sync', 'Upload finished', result);
     return result;
+}
+
+/** What a reference-data pull brought back, for reporting to the user. */
+export interface ReferenceDataResult {
+    incomeCategories: number;
+    expenseCategories: number;
+    transferCategories: number;
+    accounts: number;
+    tags: number;
+}
+
+/**
+ * Pulls the catalogue the transaction form is built from — categories,
+ * accounts and tags — and replaces the cached copy.
+ *
+ * Every sync does this first, but it is also worth doing on its own: adding a
+ * category on the server is otherwise invisible to the phone until the next
+ * upload, which is exactly when you did not want to discover it was missing.
+ */
+export async function pullReferenceData(client: ApiClient): Promise<ReferenceDataResult> {
+    logger.info('sync', 'Refreshing categories, accounts and tags');
+
+    const [categories, accounts, tags] = await Promise.all([
+        client.listCategories(),
+        client.listAccounts(),
+        client.listTags()
+    ]);
+
+    await replaceReferenceData(categories, accounts, tags);
+
+    // Counted over the flattened tree, so a sub-category counts as a category —
+    // which is what it is, as far as picking one for a transaction goes.
+    const flatCategories = flattenCategories(categories);
+    const countByType = (type: TransactionCategoryType): number =>
+        flatCategories.filter((category) => category.type === type).length;
+
+    const summary: ReferenceDataResult = {
+        incomeCategories: countByType(CATEGORY_TYPE_INCOME),
+        expenseCategories: countByType(CATEGORY_TYPE_EXPENSE),
+        transferCategories: countByType(CATEGORY_TYPE_TRANSFER),
+        accounts: flattenAccounts(accounts).length,
+        tags: tags.length
+    };
+
+    logger.info('sync', 'Reference data refreshed', summary);
+
+    return summary;
+}
+
+function flattenCategories(
+    categories: TransactionCategoryInfoResponse[]
+): TransactionCategoryInfoResponse[] {
+    return categories.flatMap((category) => [category, ...flattenCategories(category.subCategories ?? [])]);
+}
+
+function flattenAccounts(accounts: AccountInfoResponse[]): AccountInfoResponse[] {
+    return accounts.flatMap((account) => [account, ...flattenAccounts(account.subAccounts ?? [])]);
 }
 
 /**
@@ -187,9 +266,9 @@ async function recoverInFlightBatch(
         }
 
         // Still processing server-side. Leave it alone; next run will re-check.
-        result.errors.push('A previous upload is still being processed by the server.');
+        recordError(result, 'A previous upload is still being processed by the server.');
     } catch (error) {
-        result.errors.push(`Could not check the interrupted upload: ${describeError(error)}`);
+        recordError(result, `Could not check the interrupted upload: ${describeError(error)}`, error);
     }
 }
 
@@ -220,7 +299,7 @@ async function resolvePictureIds(
     } catch (error) {
         // Losing the attachment is much better than losing the transaction, so
         // this is reported but does not block the push.
-        result.errors.push(`Could not attach the receipt photo: ${describeError(error)}`);
+        recordError(result, `Could not attach the receipt photo: ${describeError(error)}`, error);
         return [];
     }
 }
@@ -273,13 +352,13 @@ async function pushTransactions(
         if (error instanceof NetworkError) {
             // Never arrived. Safe to re-queue wholesale.
             await markTransactionsState(ids, 'pending');
-            result.errors.push(`No connection: ${error.message}`);
+            recordError(result, `No connection: ${error.message}`, error);
             return;
         }
 
         if (error instanceof ApiError && error.isRetryable) {
             await markTransactionsState(ids, 'pending');
-            result.errors.push(`Server error, will retry: ${error.message}`);
+            recordError(result, `Server error, will retry: ${error.message}`, error);
             return;
         }
 
@@ -287,7 +366,7 @@ async function pushTransactions(
         // rejects all of it if any single row is bad, so one stale category id
         // would otherwise block every other transaction with one opaque error.
         // Fall back to sending them individually to isolate the offender.
-        result.errors.push(`The server rejected the batch, retrying one at a time: ${describeError(error)}`);
+        recordError(result, `The server rejected the batch, retrying one at a time: ${describeError(error)}`, error);
         await pushTransactionsIndividually(client, pending, result, onProgress);
     }
 }
@@ -329,6 +408,7 @@ async function pushTransactionsIndividually(
             const reason = describeError(error);
             await markTransactionsState([transaction.id], 'failed', { lastError: reason });
             result.rejected.push({ transactionId: transaction.id, reason });
+            logger.warn('sync', `Transaction ${transaction.id} was rejected: ${reason}`, error);
         }
     }
 }
@@ -378,7 +458,7 @@ async function submitPhotos(client: ApiClient, result: SyncResult, onProgress: P
                 await markPhotoState(photo.id, 'failed', { lastError: reason, incrementAttempts: true });
             }
 
-            result.errors.push(`Receipt ${i + 1}: ${reason}`);
+            recordError(result, `Receipt ${i + 1}: ${reason}`, error);
         }
     }
 }
@@ -408,7 +488,7 @@ async function collectFinishedJobs(
     try {
         jobs = await client.listReceiptJobs();
     } catch (error) {
-        result.errors.push(`Could not check the receipt queue: ${describeError(error)}`);
+        recordError(result, `Could not check the receipt queue: ${describeError(error)}`, error);
         return;
     }
 
@@ -473,7 +553,7 @@ async function closeResolvedJobs(client: ApiClient, result: SyncResult): Promise
 
             // Purely bookkeeping between app and server — not worth reporting to
             // the user, and it will be retried on the next sync.
-            result.errors.push(`Could not close a finished receipt: ${describeError(error)}`);
+            recordError(result, `Could not close a finished receipt: ${describeError(error)}`, error);
         }
     }
 }

@@ -1,3 +1,7 @@
+import { File } from 'expo-file-system';
+
+import { logger } from '../utils/logger';
+
 import type {
     AccountInfoResponse,
     ApiResponse,
@@ -74,6 +78,31 @@ function timezoneHeaders(): Record<string, string> {
     };
 }
 
+/**
+ * Builds a multipart file part for a JPEG on disk.
+ *
+ * Expo replaces the global `fetch` with its own implementation (expo/winter),
+ * which serialises multipart bodies in JavaScript instead of handing them to
+ * React Native's native networking stack. That serialiser does not understand
+ * React Native's proprietary `{uri, name, type}` file object and rejects it
+ * with "Unsupported FormDataPart implementation" — see
+ * `expo/src/winter/fetch/convertFormData.ts`. It accepts any part exposing
+ * `bytes()`, so the file is read through expo-file-system instead.
+ *
+ * `name` matters beyond cosmetics: the server validates receipt uploads by the
+ * extension of the multipart filename
+ * (`ReceiptRecognitionJobSubmitHandler` in pkg/api/receipt_recognition_jobs.go).
+ */
+function imagePart(fileUri: string, fileName: string): Blob {
+    const file = new File(fileUri);
+
+    return {
+        name: fileName,
+        type: 'image/jpeg',
+        bytes: () => file.bytes()
+    } as unknown as Blob;
+}
+
 export class ApiClient {
     private credentials: ApiCredentials;
 
@@ -112,7 +141,14 @@ export class ApiClient {
 
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+        const startedAt = Date.now();
         let response: Response;
+
+        // Only the shape of the request is logged. The Authorization header and
+        // every request body are withheld on purpose: bodies carry passwords on
+        // the login path, and a redaction rule that has to enumerate exceptions
+        // is a rule that eventually misses one.
+        logger.debug('api', `${method} ${path}`);
 
         try {
             response = await fetch(joinUrl(this.credentials.serverUrl, path), {
@@ -123,11 +159,17 @@ export class ApiClient {
             });
         } catch (e) {
             const reason = controller.signal.aborted ? 'request timed out' : (e as Error).message;
+            logger.error('api', `${method} ${path} did not reach the server: ${reason}`, {
+                serverUrl: this.credentials.serverUrl,
+                elapsedMs: Date.now() - startedAt,
+                cause: e instanceof Error ? e.stack : String(e)
+            });
             throw new NetworkError(reason);
         } finally {
             clearTimeout(timeout);
         }
 
+        const elapsedMs = Date.now() - startedAt;
         let payload: ApiResponse<T>;
 
         try {
@@ -135,6 +177,10 @@ export class ApiClient {
         } catch {
             // A non-JSON body means we are almost certainly not talking to an
             // ezbookkeeping server — a captive portal or a stray reverse proxy.
+            logger.error('api', `${method} ${path} returned ${response.status} with a non-JSON body`, {
+                elapsedMs,
+                contentType: response.headers.get('content-type')
+            });
             throw new ApiError(
                 `server returned ${response.status} with a non-JSON body`,
                 0,
@@ -143,8 +189,15 @@ export class ApiClient {
         }
 
         if (!payload.success) {
+            logger.error('api', `${method} ${path} was refused: ${payload.errorMessage}`, {
+                httpStatus: response.status,
+                errorCode: payload.errorCode,
+                elapsedMs
+            });
             throw new ApiError(payload.errorMessage, payload.errorCode, response.status);
         }
+
+        logger.debug('api', `${method} ${path} → ${response.status} in ${elapsedMs}ms`);
 
         return payload.result;
     }
@@ -170,8 +223,25 @@ export class ApiClient {
 
     // --- pull ---
 
-    public listCategories(): Promise<TransactionCategoryInfoResponse[]> {
-        return this.request<TransactionCategoryInfoResponse[]>('GET', '/api/v1/transaction/categories/list.json');
+    public async listCategories(): Promise<TransactionCategoryInfoResponse[]> {
+        // The server groups categories by type rather than returning a flat list:
+        // {"1": [...income...], "2": [...expense...], "3": [...transfer...]}
+        // (getTransactionCategoryListByTypeResponse in
+        // pkg/api/transaction_categories.go). Every category carries its own
+        // `type`, so flattening loses nothing.
+        const categoriesByType = await this.request<
+            Record<string, TransactionCategoryInfoResponse[] | null>
+        >('GET', '/api/v1/transaction/categories/list.json');
+
+        const categories: TransactionCategoryInfoResponse[] = [];
+
+        for (const group of Object.values(categoriesByType ?? {})) {
+            if (group) {
+                categories.push(...group);
+            }
+        }
+
+        return categories;
     }
 
     public listAccounts(): Promise<AccountInfoResponse[]> {
@@ -204,11 +274,7 @@ export class ApiClient {
 
     public uploadPicture(fileUri: string, fileName: string): Promise<TransactionPictureInfoResponse> {
         const form = new FormData();
-        form.append('picture', {
-            uri: fileUri,
-            name: fileName,
-            type: 'image/jpeg'
-        } as unknown as Blob);
+        form.append('picture', imagePart(fileUri, fileName));
 
         return this.request<TransactionPictureInfoResponse>('POST', '/api/v1/transaction/pictures/upload.json', {
             form,
@@ -223,11 +289,7 @@ export class ApiClient {
      */
     public submitReceiptJob(fileUri: string, fileName: string): Promise<ReceiptJobSubmitResponse> {
         const form = new FormData();
-        form.append('image', {
-            uri: fileUri,
-            name: fileName,
-            type: 'image/jpeg'
-        } as unknown as Blob);
+        form.append('image', imagePart(fileUri, fileName));
 
         return this.request<ReceiptJobSubmitResponse>('POST', '/api/v1/receipt/jobs/submit.json', {
             form,

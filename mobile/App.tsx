@@ -10,6 +10,7 @@ import { AppProvider, useApp } from './src/state/AppContext';
 import { CameraScreen } from './src/screens/CameraScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { LogsScreen } from './src/screens/LogsScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { colors } from './src/ui/theme';
 
@@ -55,6 +56,7 @@ function RootNavigator(): React.ReactElement {
             />
             <Stack.Screen name="Camera" component={CameraScreen} options={{ title: 'Receipt' }} />
             <Stack.Screen name="Review" component={ReviewScreen} options={{ title: 'Review receipts' }} />
+            <Stack.Screen name="Logs" component={LogsScreen} options={{ title: 'Logs' }} />
         </Stack.Navigator>
     );
 }

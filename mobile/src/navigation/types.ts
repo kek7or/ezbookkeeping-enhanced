@@ -10,6 +10,7 @@ export type RootStackParamList = {
     AddTransaction: { photoId?: number; transactionId?: number } | undefined;
     Camera: undefined;
     Review: undefined;
+    Logs: undefined;
 };
 
 export type ScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<RootStackParamList, T>;

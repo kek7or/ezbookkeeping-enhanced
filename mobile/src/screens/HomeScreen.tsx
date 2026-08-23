@@ -4,8 +4,9 @@ import { useFocusEffect } from '@react-navigation/native';
 
 import { ApiError } from '../api/client';
 import { formatMinorUnits } from '../utils/money';
-import { listPhotos, listTransactions, purgeSyncedTransactions } from '../db/repo';
-import { runSync } from '../sync/worker';
+import { getMeta, listPhotos, listTransactions, purgeSyncedTransactions } from '../db/repo';
+import { logger } from '../utils/logger';
+import { pullReferenceData, runSync } from '../sync/worker';
 import { useApp } from '../state/AppContext';
 import { colors, spacing, styles } from '../ui/theme';
 
@@ -18,15 +19,19 @@ export function HomeScreen({ navigation }: ScreenProps<'Home'>): React.ReactElem
     const [transactions, setTransactions] = useState<LocalTransaction[]>([]);
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [progress, setProgress] = useState<SyncProgress | null>(null);
+    const [pullingReferenceData, setPullingReferenceData] = useState(false);
+    const [lastPullAt, setLastPullAt] = useState<number | null>(null);
 
     const refresh = useCallback(async () => {
-        const [pendingTransactions, allPhotos] = await Promise.all([
+        const [pendingTransactions, allPhotos, pulledAt] = await Promise.all([
             listTransactions(['pending', 'syncing', 'failed']),
-            listPhotos(['pending', 'submitted', 'needs_review'])
+            listPhotos(['pending', 'submitted', 'needs_review']),
+            getMeta('last_pull_at')
         ]);
 
         setTransactions(pendingTransactions);
         setPhotos(allPhotos);
+        setLastPullAt(pulledAt ? Number(pulledAt) : null);
     }, []);
 
     useFocusEffect(
@@ -50,6 +55,49 @@ export function HomeScreen({ navigation }: ScreenProps<'Home'>): React.ReactElem
     // Submitted photos still justify a sync: it is how finished results come back.
     const nothingToUpload = !pendingTransactions.length && !pendingPhotos.length && !submittedPhotos.length;
     const syncing = progress !== null && progress.stage !== 'done';
+
+    async function handleSyncCategories(): Promise<void> {
+        if (!client) {
+            return;
+        }
+
+        setPullingReferenceData(true);
+        logger.info('ui', 'Category sync requested');
+
+        try {
+            const summary = await pullReferenceData(client);
+            await refresh();
+            // The transaction form reads categories and accounts straight from
+            // SQLite, so it has to be told they changed underneath it.
+            notifyDataChanged();
+
+            Alert.alert(
+                'Up to date',
+                [
+                    `${summary.expenseCategories} expense categor${summary.expenseCategories === 1 ? 'y' : 'ies'}`,
+                    `${summary.incomeCategories} income categor${summary.incomeCategories === 1 ? 'y' : 'ies'}`,
+                    `${summary.transferCategories} transfer categor${summary.transferCategories === 1 ? 'y' : 'ies'}`,
+                    `${summary.accounts} account${summary.accounts === 1 ? '' : 's'}`,
+                    `${summary.tags} tag${summary.tags === 1 ? '' : 's'}`
+                ].join('\n')
+            );
+        } catch (error) {
+            if (error instanceof ApiError && error.isAuthFailure) {
+                Alert.alert('Signed out', 'The server rejected your credentials. Please connect again.', [
+                    { text: 'OK', onPress: () => void signOut() }
+                ]);
+                return;
+            }
+
+            logger.error('ui', 'Category sync failed', error);
+            Alert.alert(
+                'Could not sync',
+                `${error instanceof Error ? error.message : String(error)}\n\nOpen Logs for the details.`
+            );
+        } finally {
+            setPullingReferenceData(false);
+        }
+    }
 
     async function handleUpload(): Promise<void> {
         if (!client) {
@@ -104,6 +152,7 @@ export function HomeScreen({ navigation }: ScreenProps<'Home'>): React.ReactElem
                 return;
             }
 
+            logger.error('ui', 'Upload failed', error);
             Alert.alert('Upload failed', error instanceof Error ? error.message : String(error));
         } finally {
             setProgress(null);
@@ -160,6 +209,36 @@ export function HomeScreen({ navigation }: ScreenProps<'Home'>): React.ReactElem
                 </TouchableOpacity>
             </View>
 
+            <View style={styles.card}>
+                <Text style={styles.label}>Categories and accounts</Text>
+                <Text style={styles.subtitle}>
+                    {lastPullAt
+                        ? `Last updated ${describeAge(lastPullAt)}.`
+                        : 'Never updated on this device.'}{' '}
+                    Add a category on the server, then sync to pick it here.
+                </Text>
+
+                {pullingReferenceData ? (
+                    <View style={[styles.row, { marginTop: spacing.xs }]}>
+                        <ActivityIndicator color={colors.primary} />
+                        <Text style={styles.subtitle}>Fetching from the server</Text>
+                    </View>
+                ) : (
+                    <TouchableOpacity
+                        style={[
+                            styles.button,
+                            styles.buttonSecondary,
+                            !client && styles.buttonDisabled,
+                            { marginTop: spacing.xs }
+                        ]}
+                        onPress={() => void handleSyncCategories()}
+                        disabled={!client}
+                    >
+                        <Text style={[styles.buttonText, styles.buttonSecondaryText]}>Sync categories</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
             {reviewPhotos.length ? (
                 <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Review')}>
                     <Text style={styles.title}>
@@ -198,11 +277,45 @@ export function HomeScreen({ navigation }: ScreenProps<'Home'>): React.ReactElem
                 </View>
             ) : null}
 
+            <TouchableOpacity
+                style={[styles.button, styles.buttonSecondary]}
+                onPress={() => navigation.navigate('Logs')}
+            >
+                <Text style={[styles.buttonText, styles.buttonSecondaryText]}>View logs</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity onPress={() => void signOut()} style={{ padding: spacing.md, alignItems: 'center' }}>
                 <Text style={styles.subtitle}>Signed in as {session?.username} — disconnect</Text>
             </TouchableOpacity>
         </ScrollView>
     );
+}
+
+/**
+ * "3 minutes ago" rather than a timestamp: what matters about the last pull is
+ * whether it was recent enough to trust, not exactly when it happened.
+ */
+function describeAge(at: number): string {
+    const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+
+    if (seconds < 60) {
+        return 'just now';
+    }
+
+    const minutes = Math.round(seconds / 60);
+
+    if (minutes < 60) {
+        return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    }
+
+    const hours = Math.round(minutes / 60);
+
+    if (hours < 24) {
+        return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    }
+
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
 function Counter({ value, caption, color }: { value: number; caption: string; color?: string }): React.ReactElement {
