@@ -106,16 +106,17 @@ export interface DebtEntryReopenRequest {
 }
 
 // DebtEntryGroupKind says what the things owed in a group have in common: the shopping trip they
-// were bought on, or the transaction whose positions they are
-export type DebtEntryGroupKind = 'receipt' | 'transaction';
+// were bought on, the transaction whose positions they are, or the repayment that paid for them
+export type DebtEntryGroupKind = 'receipt' | 'transaction' | 'repayment';
 
 // DebtEntryGroup is several things owed that belong together, shown as a single row that opens to
 // reveal what it is made of.
 //
-// The two kinds nest, because that is how the things themselves nest: a shopping trip opens to the
-// categories it was split into, and a category several of whose articles are owed opens to those
-// articles. Somebody who is to pay for two of the vegetables and none of the meat is then read as
-// one trip, not as a run of unrelated rows.
+// The kinds nest, because that is how the things themselves nest: a repayment opens to the trips and
+// transactions it paid for, a shopping trip opens to the categories it was split into, and a
+// category several of whose articles are owed opens to those articles. Somebody who is to pay for
+// two of the vegetables and none of the meat is then read as one trip, not as a run of unrelated
+// rows - and a month of those paid back at once is read as the one payment that cleared them.
 export interface DebtEntryGroup {
     readonly kind: DebtEntryGroupKind;
     // id is the receipt or the transaction this is the group of
@@ -241,13 +242,41 @@ function makeGroup(kind: DebtEntryGroupKind, id: string, merchantName: string, r
     };
 }
 
+// settlementTransactionIdOfRow returns the repayment that paid for everything under a row.
+//
+// It answers nothing for a row that is still owed, and nothing for one that two repayments paid for
+// between them: a trip half paid back is not something one payment can be said to have cleared, and
+// what is owed of it goes on being read thing by thing.
+function settlementTransactionIdOfRow(row: DebtEntryRow): string | undefined {
+    const entries = row.group ? row.group.entries : [row.entry];
+    const settlementTransactionId = entries[0]?.settlementTransactionId;
+
+    if (!settlementTransactionId) {
+        return undefined;
+    }
+
+    for (const entry of entries) {
+        if (entry.settlementTransactionId !== settlementTransactionId) {
+            return undefined;
+        }
+    }
+
+    return settlementTransactionId;
+}
+
 // groupDebtEntries turns what somebody owes into the rows the debts list shows, gathering the
-// positions owed of one transaction under that transaction, and everything owed off one shopping
-// trip under that trip.
+// positions owed of one transaction under that transaction, everything owed off one shopping trip
+// under that trip, and everything one repayment paid for under that repayment.
 //
 // Positions are gathered first, because a transaction belongs to exactly one trip and so a group of
 // its positions never straddles two of them. What is owed whole is never gathered: a transaction
 // nobody picked positions out of is one thing owed and stays one row.
+//
+// The repayment is gathered last, over the trips and transactions rather than under them, because
+// that is the order the two facts were established in - what was bought is what it is, and paying
+// for it later says something about all of it at once. It is also what keeps a page showing what has
+// been settled readable: a month of shopping that has been paid for is one row saying so, rather
+// than the forty it was owed in.
 export function groupDebtEntries(entries: readonly DebtEntryInfoResponse[]): DebtEntryRow[] {
     const rows: DebtEntryRow[] = entries.map(entry => ({ key: entry.id, entry: entry }));
 
@@ -257,10 +286,16 @@ export function groupDebtEntries(entries: readonly DebtEntryInfoResponse[]): Deb
         (transactionId, transactionRows) => makeGroup('transaction', transactionId, '', transactionRows)
     );
 
-    return groupRowsBy(
+    const rowsByReceipt = groupRowsBy(
         rowsByTransaction,
         row => row.entry.receiptId,
         (receiptId, receiptRows) => makeGroup('receipt', receiptId, (receiptRows[0] as DebtEntryRow).entry.merchantName ?? '', receiptRows)
+    );
+
+    return groupRowsBy(
+        rowsByReceipt,
+        settlementTransactionIdOfRow,
+        (settlementTransactionId, settledRows) => makeGroup('repayment', settlementTransactionId, '', settledRows)
     );
 }
 

@@ -41,6 +41,17 @@ function createWholeTransactionEntry(id: string, receiptId: string | undefined, 
     };
 }
 
+// a thing paid back says which payment it was paid back by, which is what gathers the things one
+// repayment cleared into one row
+function settledBy(entry: DebtEntryInfoResponse, settlementTransactionId: string): DebtEntryInfoResponse {
+    return {
+        ...entry,
+        settled: true,
+        settlementTransactionId: settlementTransactionId,
+        settledTime: 1755000000
+    };
+}
+
 // a position is owed through the transaction it was summed into, and says which article of it it is
 function createPositionEntry(id: string, receiptId: string | undefined, transactionId: string, amount: number, settled?: boolean): DebtEntryInfoResponse {
     return {
@@ -231,5 +242,77 @@ describe('groupDebtEntries', () => {
 
     test('groups nothing into nothing', () => {
         expect(groupDebtEntries([])).toEqual([]);
+    });
+
+    test('gathers everything one repayment paid for into one row', () => {
+        const rows = groupDebtEntries([
+            settledBy(createReceiptEntry('1', undefined, 40), 's1'),
+            settledBy(createReceiptEntry('2', undefined, 47), 's1'),
+            settledBy(createReceiptEntry('3', undefined, 30), 's1')
+        ]);
+
+        expect(rows.length).toEqual(1);
+        expect(rows[0]!.key).toEqual('repayment_s1');
+        expect(rows[0]!.group!.kind).toEqual('repayment');
+        expect(rows[0]!.group!.totalAmount).toEqual(117);
+        expect(rows[0]!.group!.entries.length).toEqual(3);
+        expect(rows[0]!.group!.openEntryIds).toEqual([]);
+    });
+
+    test('gathers the trips one repayment paid for rather than the things owed off them', () => {
+        const rows = groupDebtEntries([
+            settledBy(createReceiptEntry('1', 'r1', 40), 's1'),
+            settledBy(createReceiptEntry('2', 'r1', 47), 's1'),
+            settledBy(createReceiptEntry('3', 'r2', 30), 's1')
+        ]);
+
+        expect(rows.length).toEqual(1);
+        expect(rows[0]!.key).toEqual('repayment_s1');
+        expect(rows[0]!.group!.rows.map(row => row.key)).toEqual(['receipt_r1', '3']);
+        expect(rows[0]!.group!.entries.length).toEqual(3);
+    });
+
+    test('keeps what two repayments paid for apart', () => {
+        const rows = groupDebtEntries([
+            settledBy(createReceiptEntry('1', undefined, 40), 's1'),
+            settledBy(createReceiptEntry('2', undefined, 47), 's2'),
+            settledBy(createReceiptEntry('3', undefined, 30), 's1'),
+            settledBy(createReceiptEntry('4', undefined, 12), 's2')
+        ]);
+
+        expect(rows.map(row => row.key)).toEqual(['repayment_s1', 'repayment_s2']);
+        expect(rows[0]!.group!.totalAmount).toEqual(70);
+        expect(rows[1]!.group!.totalAmount).toEqual(59);
+    });
+
+    test('leaves a trip only half paid back to be read thing by thing', () => {
+        const rows = groupDebtEntries([
+            settledBy(createReceiptEntry('1', 'r1', 40), 's1'),
+            createReceiptEntry('2', 'r1', 47),
+            settledBy(createReceiptEntry('3', 'r1', 30), 's1')
+        ]);
+
+        expect(rows.length).toEqual(1);
+        expect(rows[0]!.key).toEqual('receipt_r1');
+        expect(rows[0]!.group!.kind).toEqual('receipt');
+    });
+
+    test('leaves a repayment that cleared one thing as that thing', () => {
+        const rows = groupDebtEntries([
+            settledBy(createReceiptEntry('1', undefined, 40), 's1'),
+            createReceiptEntry('2', undefined, 47)
+        ]);
+
+        expect(rows.map(row => row.key)).toEqual(['1', '2']);
+        expect(rows[0]!.group).toBeUndefined();
+    });
+
+    test('gathers nothing by a repayment when nothing has been paid back', () => {
+        const rows = groupDebtEntries([
+            createReceiptEntry('1', undefined, 40),
+            createReceiptEntry('2', undefined, 47)
+        ]);
+
+        expect(rows.map(row => row.key)).toEqual(['1', '2']);
     });
 });

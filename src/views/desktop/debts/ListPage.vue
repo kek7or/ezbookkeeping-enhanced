@@ -128,7 +128,7 @@
                         <tbody>
                             <template :key="row.key" v-for="row in visibleRows">
                             <tr class="debt-entry-group-row cursor-pointer"
-                                :class="`debt-entry-depth-${row.depth}`"
+                                :class="[`debt-entry-depth-${row.depth}`, { 'text-medium-emphasis': row.group.kind === 'repayment' }]"
                                 v-if="row.group"
                                 @click="toggleGroup(row.group)">
                                 <td class="debt-entry-select">
@@ -142,7 +142,7 @@
                                 <td>
                                     <div class="d-flex align-center">
                                         <v-icon size="20" :icon="isGroupExpanded(row.group) ? mdiChevronDown : mdiChevronRight"></v-icon>
-                                        <v-icon class="ms-1" size="20" :icon="row.group.kind === 'receipt' ? mdiReceiptTextOutline : mdiFormatListBulletedSquare"></v-icon>
+                                        <v-icon class="ms-1" size="20" :icon="getGroupIcon(row.group)"></v-icon>
                                         <span class="ms-2 font-weight-medium"
                                               :class="{ 'text-medium-emphasis': !isGroupNamed(row) }">
                                             {{ getGroupTitle(row) }}
@@ -151,9 +151,16 @@
                                     </div>
                                     <div class="text-caption text-medium-emphasis" v-if="getGroupContext(row)">{{ getGroupContext(row) }}</div>
                                 </td>
-                                <td class="text-no-wrap">{{ getDisplayTime(row.entry.time) }}</td>
+                                <td class="text-no-wrap">{{ getDisplayTime(getRowTime(row)) }}</td>
                                 <td class="text-end text-no-wrap font-weight-medium">{{ getDisplayAmount(row.group.totalAmount, row.group.currency) }}</td>
-                                <td></td>
+                                <td class="text-end">
+                                    <v-btn density="comfortable" color="default" variant="text" :icon="true"
+                                           v-if="row.group.kind === 'repayment'"
+                                           @click.stop="showRepayment(row.group)">
+                                        <v-icon :icon="mdiOpenInNew"/>
+                                        <v-tooltip activator="parent">{{ tt('Show the repayment this was paid by') }}</v-tooltip>
+                                    </v-btn>
+                                </td>
                             </tr>
                             <tr :class="[`debt-entry-depth-${row.depth}`, { 'text-medium-emphasis': row.entry.settled }]"
                                 v-else-if="!row.group">
@@ -292,6 +299,8 @@ import {
     mdiChevronRight,
     mdiReceiptTextOutline,
     mdiFormatListBulletedSquare,
+    mdiCashRefund,
+    mdiOpenInNew,
     mdiFileExcelOutline
 } from '@mdi/js';
 
@@ -451,6 +460,16 @@ function getDisplayTime(unixTime: number): string {
     return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(unixTime));
 }
 
+// a row is dated by when the money moved: a thing owed by when it was bought, and a repayment by
+// when it came back rather than by the oldest of the things it paid for
+function getRowTime(row: DebtEntryVisibleRow): number {
+    if (row.group && row.group.kind === 'repayment') {
+        return row.entry.settledTime ?? row.entry.time;
+    }
+
+    return row.entry.time;
+}
+
 // a whole transaction is named by its category, which is what it is called everywhere else, and a
 // transaction whose category has left the ledger by what it is
 function getCategoryName(categoryId: string | undefined): string {
@@ -496,10 +515,15 @@ function getEntryContext(row: DebtEntryVisibleRow): string {
 }
 
 // a trip is called after the shop it was to, and the positions of one transaction after the
-// category they were summed into
+// category they were summed into. A repayment is called what it is: there is no name to be had for
+// it here, only the payment itself, which the row opens to the ledger to show.
 function getGroupTitle(row: DebtEntryVisibleRow): string {
     if (!row.group) {
         return '';
+    }
+
+    if (row.group.kind === 'repayment') {
+        return tt('Paid Back');
     }
 
     if (row.group.kind === 'receipt') {
@@ -509,10 +533,26 @@ function getGroupTitle(row: DebtEntryVisibleRow): string {
     return getCategoryName(row.entry.categoryId);
 }
 
+function getGroupIcon(group: DebtEntryGroup): string {
+    if (group.kind === 'repayment') {
+        return mdiCashRefund;
+    }
+
+    if (group.kind === 'receipt') {
+        return mdiReceiptTextOutline;
+    }
+
+    return mdiFormatListBulletedSquare;
+}
+
 // a group that has nothing of its own to be called by is shown faintly, so that the word standing
 // in for the name does not read as one
 function isGroupNamed(row: DebtEntryVisibleRow): boolean {
     if (!row.group) {
+        return false;
+    }
+
+    if (row.group.kind === 'repayment') {
         return false;
     }
 
@@ -531,6 +571,10 @@ function getGroupCount(row: DebtEntryVisibleRow): string {
     }
 
     const count = formatNumberToLocalizedNumerals(row.group.entries.length);
+
+    if (row.group.kind === 'repayment') {
+        return tt('format.misc.debtSettledCount', { count: count });
+    }
 
     if (row.group.kind === 'receipt') {
         return tt('format.misc.receiptLineItemCount', { count: count });
@@ -807,6 +851,17 @@ function showTransaction(entry: DebtEntryInfoResponse): void {
 
     editDialog.value?.open({
         id: entry.transactionId
+    }).catch(() => {
+        // the dialog rejects when it is closed without saving, which is not an error here
+    });
+}
+
+// showRepayment opens the payment that cleared these things, which is the one thing the debts page
+// cannot say about them itself - what is owed is kept beside the transactions, and the money coming
+// back is a transaction of its own
+function showRepayment(group: DebtEntryGroup): void {
+    editDialog.value?.open({
+        id: group.id
     }).catch(() => {
         // the dialog rejects when it is closed without saving, which is not an error here
     });
