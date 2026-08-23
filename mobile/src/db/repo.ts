@@ -31,6 +31,13 @@ export interface Category {
     hidden: boolean;
 }
 
+/** A category plus how often it has been picked on this phone. */
+export interface CategoryWithUsage extends Category {
+    uses: number;
+    /** Unix milliseconds, or 0 if never used. */
+    lastUsedAt: number;
+}
+
 export interface Account {
     id: string;
     name: string;
@@ -294,6 +301,58 @@ export async function listCategories(type?: number): Promise<Category[]> {
     }));
 }
 
+/**
+ * Every visible category with its local usage tally attached.
+ *
+ * Both types come back in one query and the caller filters: the form toggles
+ * between expense and income constantly, and a round trip to SQLite on every
+ * toggle would be felt.
+ */
+export async function listCategoriesWithUsage(): Promise<CategoryWithUsage[]> {
+    const db = await openDatabase();
+    const rows = await db.getAllAsync<CategoryRow & { uses: number; last_used_at: number }>(
+        `SELECT c.*,
+                COALESCE(u.uses, 0)         AS uses,
+                COALESCE(u.last_used_at, 0) AS last_used_at
+           FROM categories c
+           LEFT JOIN category_usage u ON u.category_id = c.id
+          WHERE c.hidden = 0
+          ORDER BY c.display_order, c.name`
+    );
+
+    return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        parentId: row.parent_id,
+        displayOrder: row.display_order,
+        hidden: row.hidden !== 0,
+        uses: row.uses,
+        lastUsedAt: row.last_used_at
+    }));
+}
+
+/**
+ * Counts one use of a category.
+ *
+ * Survives the category being deleted and recreated server-side only by id, so
+ * a renamed category keeps its tally and a genuinely new one starts at zero —
+ * which is the behaviour you want either way round.
+ */
+export async function recordCategoryUse(categoryId: string, at: number = Date.now()): Promise<void> {
+    const db = await openDatabase();
+
+    await db.runAsync(
+        `INSERT INTO category_usage (category_id, uses, last_used_at)
+         VALUES (?, 1, ?)
+         ON CONFLICT(category_id) DO UPDATE SET
+             uses         = uses + 1,
+             last_used_at = excluded.last_used_at`,
+        categoryId,
+        at
+    );
+}
+
 export async function listAccounts(): Promise<Account[]> {
     const db = await openDatabase();
     const rows = await db.getAllAsync<AccountRow>(
@@ -345,6 +404,12 @@ export async function insertTransaction(transaction: NewLocalTransaction): Promi
         transaction.photoId,
         Date.now()
     );
+
+    // Counted here rather than on upload so the picker learns from what you
+    // actually entered, whether or not it ever reaches the server.
+    if (transaction.categoryId && transaction.categoryId !== '0') {
+        await recordCategoryUse(transaction.categoryId, transaction.time);
+    }
 
     return result.lastInsertRowId;
 }

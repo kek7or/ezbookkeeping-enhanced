@@ -15,7 +15,7 @@ import * as SQLite from 'expo-sqlite';
 const DATABASE_NAME = 'ezbookkeeping.db';
 
 /** Bump alongside a new entry in MIGRATIONS. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const MIGRATIONS: string[] = [
     // v1 — initial schema
@@ -109,6 +109,18 @@ const MIGRATIONS: string[] = [
     );
 
     CREATE INDEX IF NOT EXISTS idx_logs_at ON logs (at);
+    `,
+    // v3 — how often each category actually gets used
+    //
+    // Kept apart from local_transactions on purpose: those rows are purged once
+    // they reach the server, and a tally that resets every time you upload is
+    // no use for ordering the picker. This table is the long memory.
+    `
+    CREATE TABLE IF NOT EXISTS category_usage (
+        category_id  TEXT    PRIMARY KEY NOT NULL,
+        uses         INTEGER NOT NULL DEFAULT 0,
+        last_used_at INTEGER NOT NULL DEFAULT 0
+    );
     `
 ];
 
@@ -164,6 +176,7 @@ export async function resetDatabase(): Promise<void> {
             DELETE FROM categories;
             DELETE FROM accounts;
             DELETE FROM tags;
+            DELETE FROM category_usage;
             DELETE FROM meta;
         `);
     });

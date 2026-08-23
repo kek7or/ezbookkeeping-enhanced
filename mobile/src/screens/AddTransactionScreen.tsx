@@ -7,12 +7,20 @@ import {
     TRANSACTION_TYPE_EXPENSE,
     TRANSACTION_TYPE_INCOME
 } from '../api/types';
-import { deleteTransaction, getPhoto, insertTransaction, listAccounts, listCategories, markPhotoState } from '../db/repo';
+import {
+    deleteTransaction,
+    getPhoto,
+    insertTransaction,
+    listAccounts,
+    listCategoriesWithUsage,
+    markPhotoState
+} from '../db/repo';
 import { formatMinorUnits, parseAmountToMinorUnits } from '../utils/money';
+import { groupCategories } from '../utils/categories';
 import { useApp } from '../state/AppContext';
 import { colors, spacing, styles } from '../ui/theme';
 
-import type { Account, Category } from '../db/repo';
+import type { Account, CategoryWithUsage } from '../db/repo';
 import type { ScreenProps } from '../navigation/types';
 import type { TransactionType } from '../api/types';
 
@@ -21,7 +29,7 @@ export function AddTransactionScreen({ navigation, route }: ScreenProps<'AddTran
     const photoId = route.params?.photoId;
     const retryTransactionId = route.params?.transactionId;
 
-    const [categories, setCategories] = useState<Category[]>([]);
+    const [categories, setCategories] = useState<CategoryWithUsage[]>([]);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [type, setType] = useState<TransactionType>(TRANSACTION_TYPE_EXPENSE);
     const [amountText, setAmountText] = useState('');
@@ -36,7 +44,10 @@ export function AddTransactionScreen({ navigation, route }: ScreenProps<'AddTran
         let cancelled = false;
 
         (async () => {
-            const [loadedCategories, loadedAccounts] = await Promise.all([listCategories(), listAccounts()]);
+            const [loadedCategories, loadedAccounts] = await Promise.all([
+                listCategoriesWithUsage(),
+                listAccounts()
+            ]);
 
             if (cancelled) {
                 return;
@@ -99,10 +110,14 @@ export function AddTransactionScreen({ navigation, route }: ScreenProps<'AddTran
         };
     }, [photoId, session?.defaultAccountId]);
 
-    const visibleCategories = useMemo(() => {
+    // Regrouped rather than refetched when the type toggles: both types are
+    // already in memory, and a round trip here would be felt on every tap.
+    const categoryGroups = useMemo(() => {
         const wanted = type === TRANSACTION_TYPE_INCOME ? CATEGORY_TYPE_INCOME : CATEGORY_TYPE_EXPENSE;
-        return categories.filter((category) => category.type === wanted);
+        return groupCategories(categories, wanted);
     }, [categories, type]);
+
+    const hasCategories = categoryGroups.some((group) => group.categories.length);
 
     const amount = parseAmountToMinorUnits(amountText);
     const canSave = amount !== null && amount !== 0 && categoryId && accountId && !loading;
@@ -200,22 +215,38 @@ export function AddTransactionScreen({ navigation, route }: ScreenProps<'AddTran
 
                 <View style={styles.card}>
                     <Text style={styles.label}>Category</Text>
-                    <View style={[styles.row, { flexWrap: 'wrap' }]}>
-                        {visibleCategories.length ? (
-                            visibleCategories.map((category) => (
-                                <Chip
-                                    key={category.id}
-                                    label={category.name}
-                                    selected={categoryId === category.id}
-                                    onPress={() => setCategoryId(category.id)}
-                                />
-                            ))
-                        ) : (
-                            <Text style={styles.subtitle}>
-                                No categories yet — press Upload on the home screen to fetch them.
-                            </Text>
-                        )}
-                    </View>
+                    {hasCategories ? (
+                        categoryGroups.map((group) => (
+                            <View key={group.parentId ?? '__loose'} style={{ gap: spacing.xs }}>
+                                {group.name ? (
+                                    <Text
+                                        style={{
+                                            fontSize: 13,
+                                            fontWeight: '600',
+                                            color: colors.textMuted,
+                                            marginTop: spacing.sm
+                                        }}
+                                    >
+                                        {group.name}
+                                    </Text>
+                                ) : null}
+                                <View style={[styles.row, { flexWrap: 'wrap' }]}>
+                                    {group.categories.map((category) => (
+                                        <Chip
+                                            key={category.id}
+                                            label={category.name}
+                                            selected={categoryId === category.id}
+                                            onPress={() => setCategoryId(category.id)}
+                                        />
+                                    ))}
+                                </View>
+                            </View>
+                        ))
+                    ) : (
+                        <Text style={styles.subtitle}>
+                            No categories yet — press Sync categories on the home screen to fetch them.
+                        </Text>
+                    )}
                 </View>
 
                 <View style={styles.card}>
