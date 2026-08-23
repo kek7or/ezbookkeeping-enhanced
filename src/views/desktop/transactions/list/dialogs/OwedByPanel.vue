@@ -366,11 +366,34 @@ function attach(): void {
 }
 
 function detach(entry: DebtEntryInfoResponse): void {
+    // taking somebody off a thing that was shared leaves one head fewer to divide it by, so whoever
+    // is still on it owes a different share of it now. What that share is, is the server's word and
+    // not this panel's, so the entries are read back rather than guessed at - and what they came
+    // back as is also the only honest way to say whether anything was divided again at all.
+    const previousAmounts: Record<string, number> = {};
+
+    for (const existedEntry of entries.value) {
+        previousAmounts[existedEntry.id] = existedEntry.amount;
+    }
+
     submitting.value = true;
 
     debtsStore.deleteEntries({ ids: [entry.id] }).then(() => {
-        submitting.value = false;
         entries.value = entries.value.filter(existedEntry => existedEntry.id !== entry.id);
+
+        return debtsStore.loadEntriesOfTransaction({ transactionId: props.transactionId });
+    }).then(transactionEntries => {
+        submitting.value = false;
+        entries.value = transactionEntries;
+
+        const wasResplit = transactionEntries.some(transactionEntry => {
+            const previousAmount = previousAmounts[transactionEntry.id];
+            return previousAmount !== undefined && previousAmount !== transactionEntry.amount;
+        });
+
+        if (wasResplit) {
+            emit('message', 'The rest of this has been shared out again');
+        }
     }).catch(error => {
         submitting.value = false;
 

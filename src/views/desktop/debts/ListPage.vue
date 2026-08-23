@@ -749,7 +749,7 @@ function detachSelected(): void {
 
     const entryIds = selectedEntries.value.map(entry => entry.id);
 
-    confirmDialog.value?.open('Are you sure you want to detach the ticked things? They will no longer be owed, and the transactions themselves stay as they are.').then(() => {
+    confirmDialog.value?.open('Are you sure you want to detach the ticked things? They will no longer be owed, anything shared with somebody else will be divided again over whoever is left on it, and the transactions themselves stay as they are.').then(() => {
         updating.value = true;
 
         debtsStore.deleteEntries({ ids: entryIds }).then(() => {

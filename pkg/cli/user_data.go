@@ -32,6 +32,7 @@ type UserDataCli struct {
 	tokens                    *services.TokenService
 	forgetPasswords           *services.ForgetPasswordService
 	receiptLineItemCategories *services.ReceiptLineItemCategoryService
+	debts                     *services.DebtService
 }
 
 // Initialize a user data cli singleton instance
@@ -49,6 +50,7 @@ var (
 		tokens:                    services.Tokens,
 		forgetPasswords:           services.ForgetPasswords,
 		receiptLineItemCategories: services.ReceiptLineItemCategories,
+		debts:                     services.Debts,
 	}
 )
 
@@ -1224,6 +1226,70 @@ func parseReceiptTransactionComment(comment string) []string {
 	}
 
 	return lineItemNames
+}
+
+// ResplitDetachedDebts divides again every shared thing this user once took somebody off.
+//
+// Detaching now leaves one head fewer to divide a thing by and divides it again over the heads that
+// are left. Anything detached before it did that was left where it stood: the people still on the
+// thing kept the share they were handed when there were more of them, and what the one who left was
+// to pay quietly became nobody's.
+//
+// The struck-out rows are what makes this answerable afterwards - they still say what each thing was
+// once divided into - so this is the same division a detach makes today, run over every thing that
+// has ever had a share taken off it.
+//
+// Nothing is touched but the shares that move, and things whose shares were never an even division
+// of them are left alone. It can be run as often as you like: the second run finds nothing to move.
+func (l *UserDataCli) ResplitDetachedDebts(c *core.CliContext, username string, dryRun bool) (int, error) {
+	if username == "" {
+		log.CliErrorf(c, "[user_data.ResplitDetachedDebts] user name is empty")
+		return 0, errs.ErrUsernameIsEmpty
+	}
+
+	uid, err := l.getUserIdByUsername(c, username)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.ResplitDetachedDebts] error occurs when getting user id by user name")
+		return 0, err
+	}
+
+	persons, err := l.debts.GetAllPersonsByUid(c, uid)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.ResplitDetachedDebts] failed to get the people who owe user \"%s\", because %s", username, err.Error())
+		return 0, err
+	}
+
+	personNames := make(map[int64]string, len(persons))
+
+	for i := 0; i < len(persons); i++ {
+		personNames[persons[i].PersonId] = persons[i].Name
+	}
+
+	resplits, err := l.debts.ResplitSharedThingsOfUser(c, uid, dryRun)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.ResplitDetachedDebts] failed to divide the shared things of user \"%s\" again, because %s", username, err.Error())
+		return 0, err
+	}
+
+	for i := 0; i < len(resplits); i++ {
+		resplit := resplits[i]
+		personName := personNames[resplit.PersonId]
+
+		if personName == "" {
+			personName = "somebody"
+		}
+
+		if resplit.LineItemId > 0 {
+			log.CliInfof(c, "[user_data.ResplitDetachedDebts] %s owes %s %s rather than %s of position \"id:%d\" of transaction \"id:%d\"", personName, resplit.Currency, utils.FormatAmount(resplit.NewAmount), utils.FormatAmount(resplit.OldAmount), resplit.LineItemId, resplit.TransactionId)
+		} else {
+			log.CliInfof(c, "[user_data.ResplitDetachedDebts] %s owes %s %s rather than %s of transaction \"id:%d\"", personName, resplit.Currency, utils.FormatAmount(resplit.NewAmount), utils.FormatAmount(resplit.OldAmount), resplit.TransactionId)
+		}
+	}
+
+	return len(resplits), nil
 }
 
 func (l *UserDataCli) getUserIdByUsername(c *core.CliContext, username string) (int64, error) {

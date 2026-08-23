@@ -1,6 +1,8 @@
 package models
 
 import (
+	"sort"
+
 	"github.com/mayswind/ezbookkeeping/pkg/utils"
 )
 
@@ -309,4 +311,120 @@ func (s DebtEntryInfoResponseSlice) Less(i, j int) bool {
 	}
 
 	return s[i].Id < s[j].Id
+}
+
+// DebtEntryResplit is one share that a thing being divided again has moved, and what it moved from
+// and to. It is what lets the division be reported before it is written, because a share nobody can
+// see moving is a number that changed behind the user's back.
+type DebtEntryResplit struct {
+	EntryId       int64
+	PersonId      int64
+	TransactionId int64
+	LineItemId    int64
+	Currency      string
+	OldAmount     int64
+	NewAmount     int64
+}
+
+// SplitAmountEvenly divides an amount into the given number of shares, in minor units.
+//
+// The shares add up to exactly what was divided. Three people cannot each pay a third of 10,00, so
+// the cents that do not divide are handed out one apiece from the front, and the caller decides who
+// stands at the front - the one who paid, so that a rounding cent is absorbed rather than charged to
+// a friend. It is the same division the client makes when a thing is first shared out, and it has to
+// stay the same one, or a thing shared out and then re-shared would move a cent for no reason.
+func SplitAmountEvenly(amount int64, shareCount int) []int64 {
+	if shareCount < 1 {
+		return []int64{}
+	}
+
+	baseShare := amount / int64(shareCount)
+	remainder := amount - baseShare*int64(shareCount)
+	shares := make([]int64, shareCount)
+
+	for i := 0; i < shareCount; i++ {
+		if remainder > 0 {
+			shares[i] = baseShare + 1
+			remainder--
+		} else {
+			shares[i] = baseShare
+		}
+	}
+
+	return shares
+}
+
+// ResplitEvenly says what the shares of an evenly shared thing come to once some of them are gone.
+//
+// The thing still costs what it cost. Taking somebody off it does not make their share everybody
+// else's problem and does not make it disappear either - it means one fewer head to divide by, and
+// the whole amount is divided again over the heads that are left.
+//
+// oldShares is what was owed of this thing before, in any order, and remainingCount how many of
+// those are still on it. Whether the one who paid ate some of it too is not written down anywhere,
+// so it is read back out of the numbers: shares that add up to the whole thing were owed by the
+// people alone, and shares that leave exactly one share over were divided with the payer standing at
+// the front.
+//
+// It answers false when the old shares are not an even division of the total. Somebody who set an
+// amount by hand meant that amount, and re-dividing a thing that was never divided evenly would
+// invent a number nobody asked for.
+func ResplitEvenly(totalAmount int64, oldShares []int64, remainingCount int) ([]int64, bool) {
+	if totalAmount <= 0 || remainingCount < 1 || remainingCount >= len(oldShares) {
+		return nil, false
+	}
+
+	payerShares, isEvenSplit := payerSharesOfEvenSplit(totalAmount, oldShares)
+
+	if !isEvenSplit {
+		return nil, false
+	}
+
+	newShares := SplitAmountEvenly(totalAmount, remainingCount+payerShares)
+
+	return newShares[payerShares:], true
+}
+
+// payerSharesOfEvenSplit reports whether the given shares are an even division of the total, and
+// whether the one who paid was counted as one of the heads it was divided by
+func payerSharesOfEvenSplit(totalAmount int64, shares []int64) (int, bool) {
+	// nobody but the payer can have kept more than one share of a thing shared out this way, so
+	// there are only the two divisions to try: the people alone, and the people with the payer
+	for payerShares := 0; payerShares <= 1; payerShares++ {
+		expectedShares := SplitAmountEvenly(totalAmount, len(shares)+payerShares)
+
+		if sameShares(expectedShares[payerShares:], shares) {
+			return payerShares, true
+		}
+	}
+
+	return 0, false
+}
+
+// sameShares reports whether two sets of shares are the same amounts, whoever holds which. Who owes
+// which of two shares that differ by a cent is not something the order of rows in a table can say.
+func sameShares(expectedShares []int64, shares []int64) bool {
+	if len(expectedShares) != len(shares) {
+		return false
+	}
+
+	sortedShares := sortedCopyOfShares(shares)
+	sortedExpectedShares := sortedCopyOfShares(expectedShares)
+
+	for i := 0; i < len(sortedShares); i++ {
+		if sortedShares[i] != sortedExpectedShares[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// sortedCopyOfShares returns the given shares in order, leaving the ones it was given as they were
+func sortedCopyOfShares(shares []int64) []int64 {
+	sortedShares := make([]int64, len(shares))
+	copy(sortedShares, shares)
+	sort.Slice(sortedShares, func(i, j int) bool { return sortedShares[i] < sortedShares[j] })
+
+	return sortedShares
 }

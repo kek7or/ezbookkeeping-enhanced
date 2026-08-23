@@ -174,6 +174,9 @@ func (s *DebtService) ModifyPerson(c core.Context, person *models.DebtPerson) er
 // The entries go with the person because they are nothing without one - an entry says who owes for
 // a transaction, and with the person gone there is nobody left for it to say that about. The
 // transactions themselves are untouched: the money was spent either way.
+//
+// Anything this person was sharing with somebody else is divided again over whoever is left on it,
+// exactly as it is when a single share is detached.
 func (s *DebtService) DeletePerson(c core.Context, uid int64, personId int64) error {
 	if uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -200,7 +203,22 @@ func (s *DebtService) DeletePerson(c core.Context, uid int64, personId int64) er
 			return errs.ErrDebtPersonNotFound
 		}
 
+		// what this person owed has to be read before it is gone, because it is what says which
+		// shared things have a share missing from them now
+		var removedEntries []*models.DebtEntry
+		err = sess.Where("uid=? AND deleted=? AND person_id=?", uid, false, personId).Find(&removedEntries)
+
+		if err != nil {
+			return err
+		}
+
 		_, err = sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=? AND person_id=?", uid, false, personId).Update(entryUpdateModel)
+
+		if err != nil {
+			return err
+		}
+
+		_, err = s.resplitSharedThings(sess, uid, removedEntries, false)
 
 		return err
 	})
@@ -427,7 +445,8 @@ func (s *DebtService) ModifyEntry(c core.Context, uid int64, entryId int64, amou
 	})
 }
 
-// DeleteEntries detaches things from whoever they were attached to
+// DeleteEntries detaches things from whoever they were attached to, and divides what is left of
+// anything that was shared out again over whoever is still on it
 func (s *DebtService) DeleteEntries(c core.Context, uid int64, entryIds []int64) error {
 	if uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -443,6 +462,15 @@ func (s *DebtService) DeleteEntries(c core.Context, uid int64, entryIds []int64)
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		// what is being detached has to be read before it is gone, because it is what says which
+		// shared things have a share missing from them now
+		var removedEntries []*models.DebtEntry
+		err := sess.Where("uid=? AND deleted=?", uid, false).In("entry_id", entryIds).Find(&removedEntries)
+
+		if err != nil {
+			return err
+		}
+
 		deletedRows, err := sess.Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).In("entry_id", entryIds).Update(updateModel)
 
 		if err != nil {
@@ -451,8 +479,234 @@ func (s *DebtService) DeleteEntries(c core.Context, uid int64, entryIds []int64)
 			return errs.ErrDebtEntryNotFound
 		}
 
-		return nil
+		_, err = s.resplitSharedThings(sess, uid, removedEntries, false)
+
+		return err
 	})
+}
+
+// ResplitSharedThingsOfUser divides again every shared thing that had a share taken off it before
+// detaching started doing that by itself.
+//
+// A detached share is not thrown away, only struck out, and the struck-out rows are still there to
+// say what each thing was once divided into. Reading them back and handing them to the same routine
+// that runs on a detach replays every detach this user ever made, and leaves the shares where they
+// would have been had they always been divided again.
+//
+// It is safe to run twice. A thing already divided over the heads left on it is one where nothing
+// moves the second time, and a thing whose shares were never an even division of it is left alone
+// however often it is looked at.
+func (s *DebtService) ResplitSharedThingsOfUser(c core.Context, uid int64, dryRun bool) ([]*models.DebtEntryResplit, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var resplits []*models.DebtEntryResplit
+
+	err := s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		var detachedEntries []*models.DebtEntry
+		err := sess.Where("uid=? AND deleted=?", uid, true).OrderBy("entry_id asc").Find(&detachedEntries)
+
+		if err != nil {
+			return err
+		}
+
+		resplits, err = s.resplitSharedThings(sess, uid, detachedEntries, dryRun)
+
+		return err
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return resplits, nil
+}
+
+// sharedThing is one thing shares can be owed of: a whole transaction, or one position of one
+type sharedThing struct {
+	transactionId int64
+	lineItemId    int64
+}
+
+// resplitSharedThings divides again what is left of the things the given entries were shares of.
+//
+// A thing taken off somebody's bill still costs what it cost. Their share does not become everybody
+// else's problem and does not vanish either - there is simply one head fewer to divide by, so the
+// whole thing is divided again over the heads that are left, the one who paid among them if they
+// were counted in to begin with.
+//
+// Three kinds of thing are left exactly as they are. A debt entered by hand is a share of nothing,
+// as there is no transaction behind it to divide. Anything already paid back is history, and
+// dividing around a settled share would either restate a payment or charge somebody for one that
+// has already been made. And shares that are not an even division of the thing were put there by
+// hand, where the numbers say what the user meant them to say and nothing here may overrule them.
+func (s *DebtService) resplitSharedThings(sess *xorm.Session, uid int64, removedEntries []*models.DebtEntry, dryRun bool) ([]*models.DebtEntryResplit, error) {
+	things := make([]sharedThing, 0, len(removedEntries))
+	removedShares := make(map[sharedThing][]int64)
+	settledThings := make(map[sharedThing]bool)
+
+	for i := 0; i < len(removedEntries); i++ {
+		entry := removedEntries[i]
+
+		if entry.TransactionId <= 0 {
+			continue
+		}
+
+		thing := sharedThing{transactionId: entry.TransactionId, lineItemId: entry.LineItemId}
+
+		if _, exists := removedShares[thing]; !exists {
+			things = append(things, thing)
+		}
+
+		removedShares[thing] = append(removedShares[thing], entry.Amount)
+
+		if entry.SettlementTransactionId > 0 {
+			settledThings[thing] = true
+		}
+	}
+
+	resplits := make([]*models.DebtEntryResplit, 0, len(things))
+
+	for i := 0; i < len(things); i++ {
+		thing := things[i]
+
+		if settledThings[thing] {
+			continue
+		}
+
+		thingResplits, err := s.resplitSharedThing(sess, uid, thing, removedShares[thing], dryRun)
+
+		if err != nil {
+			return nil, err
+		}
+
+		resplits = append(resplits, thingResplits...)
+	}
+
+	return resplits, nil
+}
+
+// resplitSharedThing divides one thing again over the shares of it that are left, and writes them
+// only where the division actually moves them. It answers which of them moved, whether or not it was
+// the one to move them.
+func (s *DebtService) resplitSharedThing(sess *xorm.Session, uid int64, thing sharedThing, removedShares []int64, dryRun bool) ([]*models.DebtEntryResplit, error) {
+	var remainingEntries []*models.DebtEntry
+
+	// in the order they were attached in, which is the order the shares were handed out in, so that
+	// a cent that does not divide stays with whoever was handed it
+	err := sess.Where("uid=? AND deleted=? AND transaction_id=? AND line_item_id=?", uid, false, thing.transactionId, thing.lineItemId).OrderBy("entry_id asc").Find(&remainingEntries)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(remainingEntries) < 1 {
+		return nil, nil
+	}
+
+	oldShares := make([]int64, 0, len(removedShares)+len(remainingEntries))
+	oldShares = append(oldShares, removedShares...)
+
+	for i := 0; i < len(remainingEntries); i++ {
+		if remainingEntries[i].SettlementTransactionId > 0 {
+			return nil, nil
+		}
+
+		oldShares = append(oldShares, remainingEntries[i].Amount)
+	}
+
+	totalAmount, err := s.getSharedThingAmount(sess, uid, thing)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// the thing itself is no longer in the ledger, and there is nothing left to divide
+	if totalAmount <= 0 {
+		return nil, nil
+	}
+
+	newShares, isEvenSplit := models.ResplitEvenly(totalAmount, oldShares, len(remainingEntries))
+
+	if !isEvenSplit {
+		return nil, nil
+	}
+
+	now := time.Now().Unix()
+	resplits := make([]*models.DebtEntryResplit, 0, len(remainingEntries))
+
+	for i := 0; i < len(remainingEntries); i++ {
+		entry := remainingEntries[i]
+
+		if entry.Amount == newShares[i] {
+			continue
+		}
+
+		resplits = append(resplits, &models.DebtEntryResplit{
+			EntryId:       entry.EntryId,
+			PersonId:      entry.PersonId,
+			TransactionId: entry.TransactionId,
+			LineItemId:    entry.LineItemId,
+			Currency:      entry.Currency,
+			OldAmount:     entry.Amount,
+			NewAmount:     newShares[i],
+		})
+
+		if dryRun {
+			continue
+		}
+
+		updateModel := &models.DebtEntry{
+			Amount:          newShares[i],
+			UpdatedUnixTime: now,
+		}
+
+		_, err := sess.ID(entry.EntryId).Cols("amount", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(updateModel)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return resplits, nil
+}
+
+// getSharedThingAmount returns what the thing the shares are owed of came to, as the positive number
+// a debt is always stated in. It is zero when the thing is no longer there to be divided.
+func (s *DebtService) getSharedThingAmount(sess *xorm.Session, uid int64, thing sharedThing) (int64, error) {
+	if thing.lineItemId > 0 {
+		lineItem := &models.TransactionReceiptLineItem{}
+		has, err := sess.ID(thing.lineItemId).Where("uid=? AND deleted=?", uid, false).Get(lineItem)
+
+		if err != nil {
+			return 0, err
+		} else if !has || lineItem.TransactionId != thing.transactionId {
+			return 0, nil
+		}
+
+		return positiveAmount(lineItem.Amount), nil
+	}
+
+	transaction := &models.Transaction{}
+	has, err := sess.ID(thing.transactionId).Where("uid=? AND deleted=?", uid, false).Get(transaction)
+
+	if err != nil {
+		return 0, err
+	} else if !has {
+		return 0, nil
+	}
+
+	return positiveAmount(transaction.Amount), nil
+}
+
+// positiveAmount returns an amount the way a debt states it, which is never as a negative number
+func positiveAmount(amount int64) int64 {
+	if amount < 0 {
+		return -amount
+	}
+
+	return amount
 }
 
 // SettleEntries marks entries as paid back by one transaction.

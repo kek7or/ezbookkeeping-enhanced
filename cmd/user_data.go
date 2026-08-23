@@ -383,6 +383,24 @@ var UserData = &cli.Command{
 			},
 		},
 		{
+			Name:   "debt-resplit",
+			Usage:  "Divide the shared things somebody was detached from again, for detaches made before detaching did that by itself",
+			Action: bindAction(resplitDetachedDebts),
+			Flags: []cli.Flag{
+				&cli.StringFlag{
+					Name:     "username",
+					Aliases:  []string{"n"},
+					Required: true,
+					Usage:    "Specific user name",
+				},
+				&cli.BoolFlag{
+					Name:    "dry-run",
+					Aliases: []string{"d"},
+					Usage:   "Report which shares would move without changing anything",
+				},
+			},
+		},
+		{
 			Name:   "transaction-import",
 			Usage:  "Import transactions to specified user",
 			Action: bindAction(importUserTransaction),
@@ -929,6 +947,34 @@ func backfillReceiptsFromTransactionTime(c *core.CliContext) error {
 		log.CliInfof(c, "[user_data.backfillReceiptsFromTransactionTime] %d receipts over %d transactions would be created, nothing was changed", receiptCount, transactionCount)
 	} else {
 		log.CliInfof(c, "[user_data.backfillReceiptsFromTransactionTime] %d receipts over %d transactions have been created for user \"%s\"", receiptCount, transactionCount, username)
+	}
+
+	return nil
+}
+
+func resplitDetachedDebts(c *core.CliContext) error {
+	_, err := initializeSystem(c)
+
+	if err != nil {
+		return err
+	}
+
+	username := c.String("username")
+	dryRun := c.Bool("dry-run")
+
+	log.CliInfof(c, "[user_data.resplitDetachedDebts] starting dividing the shared things of user \"%s\" again", username)
+
+	resplitCount, err := clis.UserData.ResplitDetachedDebts(c, username, dryRun)
+
+	if err != nil {
+		log.CliErrorf(c, "[user_data.resplitDetachedDebts] error occurs when dividing the shared things of user \"%s\" again", username)
+		return err
+	}
+
+	if dryRun {
+		log.CliInfof(c, "[user_data.resplitDetachedDebts] %d shares would move, nothing was changed", resplitCount)
+	} else {
+		log.CliInfof(c, "[user_data.resplitDetachedDebts] %d shares have moved for user \"%s\"", resplitCount, username)
 	}
 
 	return nil
