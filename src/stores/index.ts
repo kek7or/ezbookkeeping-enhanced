@@ -14,6 +14,7 @@ import { useExplorersStore } from './explorer.ts';
 import { useExchangeRatesStore } from './exchangeRates.ts';
 import { useCryptoAssetsStore } from './cryptoAsset.ts';
 import { useDebtsStore } from './debt.ts';
+import { useUtilityMetersStore } from './utilityMeter.ts';
 
 import type { AuthResponse, RegisterResponse } from '@/models/auth_response.ts';
 import type {
@@ -56,6 +57,7 @@ export const useRootStore = defineStore('root', () => {
     const exchangeRatesStore = useExchangeRatesStore();
     const cryptoAssetsStore = useCryptoAssetsStore();
     const debtsStore = useDebtsStore();
+    const utilityMetersStore = useUtilityMetersStore();
 
     const currentNotification = ref<string | null>(null);
 
@@ -66,6 +68,7 @@ export const useRootStore = defineStore('root', () => {
 
         setNotificationContent(null);
 
+        utilityMetersStore.resetStore();
         debtsStore.resetDebts();
         cryptoAssetsStore.resetCryptoAssets();
         explorersStore.resetTransactionExplorers();

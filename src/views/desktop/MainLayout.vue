@@ -103,6 +103,12 @@
                     </router-link>
                 </li>
                 <li class="nav-link">
+                    <router-link to="/utilities">
+                        <v-icon class="nav-item-icon" :icon="mdiGaugeFull"/>
+                        <span class="nav-item-title">{{ tt('Utility Meters') }}</span>
+                    </router-link>
+                </li>
+                <li class="nav-link">
                     <router-link to="/exchange_rates">
                         <v-icon class="nav-item-icon" :icon="mdiSwapHorizontal"/>
                         <span class="nav-item-title">{{ tt('Exchange Rates Data') }}</span>
@@ -252,6 +258,7 @@ import {
     mdiCompassOutline,
     mdiAccountCashOutline,
     mdiCurrencyBtc,
+    mdiGaugeFull,
     mdiSwapHorizontal,
     mdiCogOutline,
     mdiCellphone,

@@ -33,6 +33,7 @@ import AppSettingsPage from '@/views/desktop/app/AppSettingsPage.vue';
 
 import DebtListPage from '@/views/desktop/debts/ListPage.vue';
 import CryptoAssetListPage from '@/views/desktop/crypto/ListPage.vue';
+import UtilityMeterListPage from '@/views/desktop/utilities/ListPage.vue';
 import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
 import AboutPage from '@/views/desktop/AboutPage.vue';
 
@@ -193,6 +194,11 @@ const router = createRouter({
                 {
                     path: '/crypto',
                     component: CryptoAssetListPage,
+                    beforeEnter: checkLogin
+                },
+                {
+                    path: '/utilities',
+                    component: UtilityMeterListPage,
                     beforeEnter: checkLogin
                 },
                 {

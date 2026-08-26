@@ -473,6 +473,18 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/debts/entries/forgive.json", bindApi(api.Debts.EntryForgiveHandler, config))
 			apiV1Route.POST("/debts/entries/reopen.json", bindApi(api.Debts.EntryReopenHandler, config))
 
+			// Utility Meters
+			apiV1Route.GET("/utilities/meters/list.json", bindApi(api.UtilityMeters.MeterListHandler, config))
+			apiV1Route.POST("/utilities/meters/add.json", bindApi(api.UtilityMeters.MeterCreateHandler, config))
+			apiV1Route.POST("/utilities/meters/modify.json", bindApi(api.UtilityMeters.MeterModifyHandler, config))
+			apiV1Route.POST("/utilities/meters/delete.json", bindApi(api.UtilityMeters.MeterDeleteHandler, config))
+			apiV1Route.POST("/utilities/tariffs/add.json", bindApi(api.UtilityMeters.TariffCreateHandler, config))
+			apiV1Route.POST("/utilities/tariffs/modify.json", bindApi(api.UtilityMeters.TariffModifyHandler, config))
+			apiV1Route.POST("/utilities/tariffs/delete.json", bindApi(api.UtilityMeters.TariffDeleteHandler, config))
+			apiV1Route.POST("/utilities/readings/add.json", bindApi(api.UtilityMeters.ReadingCreateHandler, config))
+			apiV1Route.POST("/utilities/readings/modify.json", bindApi(api.UtilityMeters.ReadingModifyHandler, config))
+			apiV1Route.POST("/utilities/readings/delete.json", bindApi(api.UtilityMeters.ReadingDeleteHandler, config))
+
 			// Transaction Templates
 			apiV1Route.GET("/transaction/templates/list.json", bindApi(api.TransactionTemplates.TemplateListHandler, config))
 			apiV1Route.GET("/transaction/templates/get.json", bindApi(api.TransactionTemplates.TemplateGetHandler, config))

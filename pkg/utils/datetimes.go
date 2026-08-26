@@ -426,6 +426,40 @@ func GetStartOfDay(t time.Time) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, t.Location())
 }
 
+// ParseFromNumericYearMonthDay returns the calendar date a YYYYMMDD number names.
+//
+// The date is built in UTC and is a date and nothing more - a meter reading, a tariff start or a
+// billing year boundary is a day on a bill, not an instant, and the day it falls on must not change
+// with the timezone the reader happens to be in.
+func ParseFromNumericYearMonthDay(value int32) (time.Time, error) {
+	if value < 10000101 || value > 99991231 {
+		return time.Time{}, errs.ErrParameterInvalid
+	}
+
+	year := int(value / 10000)
+	month := int((value % 10000) / 100)
+	day := int(value % 100)
+
+	if month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, errs.ErrParameterInvalid
+	}
+
+	date := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+
+	// a date that comes back as another one was never a date - time.Date rolls February 30th
+	// forward into March rather than refusing it
+	if date.Year() != year || int(date.Month()) != month || date.Day() != day {
+		return time.Time{}, errs.ErrParameterInvalid
+	}
+
+	return date, nil
+}
+
+// FormatDateToNumericYearMonthDay returns the YYYYMMDD number of a calendar date
+func FormatDateToNumericYearMonthDay(date time.Time) int32 {
+	return int32(date.Year()*10000 + int(date.Month())*100 + date.Day())
+}
+
 // parseFromUnixTime parses a unix time and returns a golang time struct
 func parseFromUnixTime(unixTime int64) time.Time {
 	return time.Unix(unixTime, 0)

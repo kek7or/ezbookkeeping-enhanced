@@ -49,6 +49,18 @@ import type {
     CryptoPortfolioResponse
 } from '@/models/crypto_asset.ts';
 import type {
+    UtilityMeterInfoResponse,
+    UtilityMeterCreateRequest,
+    UtilityMeterModifyRequest,
+    UtilityTariffInfoResponse,
+    UtilityTariffCreateRequest,
+    UtilityTariffModifyRequest,
+    UtilityReadingInfoResponse,
+    UtilityReadingCreateRequest,
+    UtilityReadingModifyRequest,
+    UtilityIdRequest
+} from '@/models/utility_meter.ts';
+import type {
     DebtPersonInfoResponse,
     DebtPersonCreateRequest,
     DebtPersonModifyRequest,
@@ -909,6 +921,36 @@ export default {
     },
     deleteUserCustomExchangeRate: (req: UserCustomExchangeRateDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/exchange_rates/user_custom/delete.json', req);
+    },
+    getAllUtilityMeters: (): ApiResponsePromise<UtilityMeterInfoResponse[]> => {
+        return axios.get<ApiResponse<UtilityMeterInfoResponse[]>>('v1/utilities/meters/list.json');
+    },
+    addUtilityMeter: (req: UtilityMeterCreateRequest): ApiResponsePromise<UtilityMeterInfoResponse> => {
+        return axios.post<ApiResponse<UtilityMeterInfoResponse>>('v1/utilities/meters/add.json', req);
+    },
+    modifyUtilityMeter: (req: UtilityMeterModifyRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/utilities/meters/modify.json', req);
+    },
+    deleteUtilityMeter: (req: UtilityIdRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/utilities/meters/delete.json', req);
+    },
+    addUtilityTariff: (req: UtilityTariffCreateRequest): ApiResponsePromise<UtilityTariffInfoResponse> => {
+        return axios.post<ApiResponse<UtilityTariffInfoResponse>>('v1/utilities/tariffs/add.json', req);
+    },
+    modifyUtilityTariff: (req: UtilityTariffModifyRequest): ApiResponsePromise<UtilityTariffInfoResponse> => {
+        return axios.post<ApiResponse<UtilityTariffInfoResponse>>('v1/utilities/tariffs/modify.json', req);
+    },
+    deleteUtilityTariff: (req: UtilityIdRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/utilities/tariffs/delete.json', req);
+    },
+    addUtilityReading: (req: UtilityReadingCreateRequest): ApiResponsePromise<UtilityReadingInfoResponse> => {
+        return axios.post<ApiResponse<UtilityReadingInfoResponse>>('v1/utilities/readings/add.json', req);
+    },
+    modifyUtilityReading: (req: UtilityReadingModifyRequest): ApiResponsePromise<UtilityReadingInfoResponse> => {
+        return axios.post<ApiResponse<UtilityReadingInfoResponse>>('v1/utilities/readings/modify.json', req);
+    },
+    deleteUtilityReading: (req: UtilityIdRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/utilities/readings/delete.json', req);
     },
     getAllDebtPeople: (): ApiResponsePromise<DebtPersonInfoResponse[]> => {
         return axios.get<ApiResponse<DebtPersonInfoResponse[]>>('v1/debts/people/list.json');

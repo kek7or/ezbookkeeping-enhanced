@@ -237,5 +237,29 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] debt entry table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.UtilityMeter))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] utility meter table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.UtilityTariff))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] utility tariff table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.UtilityReading))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] utility reading table maintained successfully")
+
 	return nil
 }
