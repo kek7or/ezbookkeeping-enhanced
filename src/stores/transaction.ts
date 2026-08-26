@@ -669,6 +669,10 @@ export const useTransactionsStore = defineStore('transactions', () => {
             statisticsStore.updateTransactionStatisticsInvalidState(true);
         }
 
+        if (options.statistics && !statisticsStore.paycheckPeriodsStateInvalid) {
+            statisticsStore.updatePaycheckPeriodsInvalidState(true);
+        }
+
         if (options.explorer && !explorersStore.transactionExplorerStateInvalid) {
             explorersStore.updateTransactionExplorerInvalidState(true);
         }

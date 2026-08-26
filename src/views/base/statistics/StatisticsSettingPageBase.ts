@@ -3,10 +3,20 @@ import { computed } from 'vue';
 import { useI18n } from '@/locales/helpers.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
+import { useStatisticsStore } from '@/stores/statistics.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 
 import type { TypeAndDisplayName } from '@/core/base.ts';
 import { type LocalizedDateRange, DateRangeScene } from '@/core/datetime.ts';
 import { StatisticsAnalysisType } from '@/core/statistics.ts';
+import { CategoryType } from '@/core/category.ts';
+
+import { objectFieldToArrayItem, arrayItemToObjectField } from '@/lib/common.ts';
+
+export interface PaycheckCategoryOption {
+    readonly id: string;
+    readonly displayName: string;
+}
 
 export function useStatisticsSettingPageBase() {
     const {
@@ -20,6 +30,8 @@ export function useStatisticsSettingPageBase() {
     } = useI18n();
 
     const settingsStore = useSettingsStore();
+    const statisticsStore = useStatisticsStore();
+    const transactionCategoriesStore = useTransactionCategoriesStore();
 
     const allChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.CategoricalAnalysis));
     const allTimezoneTypesUsedForStatistics = computed<TypeAndDisplayName[]>(() => getAllTimezoneTypesUsedForStatistics());
@@ -30,6 +42,41 @@ export function useStatisticsSettingPageBase() {
     const allTrendChartTypes = computed<TypeAndDisplayName[]>(() => getAllTrendChartTypes());
     const allTrendChartDateRanges = computed<LocalizedDateRange[]>(() => getAllDateRanges(DateRangeScene.TrendAnalysis, {}));
     const allAssetTrendsChartDateRanges = computed<LocalizedDateRange[]>(() => getAllDateRanges(DateRangeScene.AssetTrends, {}));
+
+    // a paycheck is recorded against the category it was booked in, which is a secondary category
+    // whenever the primary one has any, so only the categories transactions can use are offered here
+    const allPaycheckCategories = computed<PaycheckCategoryOption[]>(() => {
+        const allOptions: PaycheckCategoryOption[] = [];
+        const incomeCategories = transactionCategoriesStore.allTransactionCategories[CategoryType.Income] || [];
+
+        for (const category of incomeCategories) {
+            if (category.subCategories && category.subCategories.length) {
+                for (const subCategory of category.subCategories) {
+                    allOptions.push({
+                        id: subCategory.id,
+                        displayName: `${category.name} / ${subCategory.name}`
+                    });
+                }
+            } else {
+                allOptions.push({
+                    id: category.id,
+                    displayName: category.name
+                });
+            }
+        }
+
+        return allOptions;
+    });
+
+    const paycheckCategoryIds = computed<string[]>({
+        get: () => objectFieldToArrayItem(settingsStore.appSettings.statistics.paycheckCategoryIds || {}),
+        set: (value: string[]) => {
+            settingsStore.setStatisticsPaycheckCategoryIds(arrayItemToObjectField(value, true));
+            // the pay periods were built from the categories that were selected until now
+            statisticsStore.updatePaycheckPeriodsInvalidState(true);
+            statisticsStore.updateTransactionStatisticsInvalidState(true);
+        }
+    });
 
     const defaultChartDataType = computed<number>({
         get: () => settingsStore.appSettings.statistics.defaultChartDataType,
@@ -92,6 +139,8 @@ export function useStatisticsSettingPageBase() {
         allTrendChartTypes,
         allTrendChartDateRanges,
         allAssetTrendsChartDateRanges,
+        allPaycheckCategories,
+        paycheckCategoryIds,
         defaultChartDataType,
         defaultTimezoneType,
         defaultKeywordMatchMode,

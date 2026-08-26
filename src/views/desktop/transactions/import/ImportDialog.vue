@@ -1346,6 +1346,7 @@ function submit(): void {
             transactionsStore.updateTransactionListInvalidState(true);
             overviewStore.updateTransactionOverviewInvalidState(true);
             statisticsStore.updateTransactionStatisticsInvalidState(true);
+            statisticsStore.updatePaycheckPeriodsInvalidState(true);
 
             submitting.value = false;
         }).catch(error => {

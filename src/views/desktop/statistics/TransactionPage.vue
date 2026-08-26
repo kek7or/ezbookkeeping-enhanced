@@ -8,7 +8,8 @@
                             <btn-vertical-group :disabled="loading" :buttons="[
                                 { name: tt('Categorical Analysis'), value: StatisticsAnalysisType.CategoricalAnalysis },
                                 { name: tt('Trend Analysis'), value: StatisticsAnalysisType.TrendAnalysis },
-                                { name: tt('Asset Trends'), value: StatisticsAnalysisType.AssetTrends }
+                                { name: tt('Asset Trends'), value: StatisticsAnalysisType.AssetTrends },
+                                { name: tt('Paycheck Analysis'), value: StatisticsAnalysisType.PaycheckAnalysis }
                             ]" v-model="queryAnalysisType" />
                         </div>
                         <v-divider />
@@ -77,7 +78,25 @@
                                                         <v-btn :disabled="loading || !canChangeDateRange"
                                                                v-bind="props">{{ queryDateRangeName }}</v-btn>
                                                     </template>
-                                                    <v-list :selected="[queryDateType]">
+                                                    <v-list :selected="[selectedPaycheckPeriodIndex]"
+                                                            v-if="queryAnalysisType === StatisticsAnalysisType.PaycheckAnalysis">
+                                                        <v-list-item :key="periodIndex" :value="periodIndex"
+                                                                     :append-icon="(selectedPaycheckPeriodIndex === periodIndex ? mdiCheck : undefined)"
+                                                                     v-for="(period, periodIndex) in paycheckPeriods">
+                                                            <v-list-item-title class="cursor-pointer"
+                                                                               @click="setPaycheckPeriod(periodIndex)">
+                                                                <div class="d-flex align-center">
+                                                                    <span>{{ period.isCurrent ? tt('Since Last Paycheck') : getPaycheckPeriodDisplayName(period) }}</span>
+                                                                </div>
+                                                                <div class="statistics-custom-datetime-range smaller" v-if="period.isCurrent">
+                                                                    <span>{{ getPaycheckPeriodDisplayName(period) }}</span>
+                                                                </div>
+                                                            </v-list-item-title>
+                                                        </v-list-item>
+                                                        <v-list-item :title="tt('No paychecks found')"
+                                                                     v-if="!paycheckPeriods.length"></v-list-item>
+                                                    </v-list>
+                                                    <v-list :selected="[queryDateType]" v-else>
                                                         <v-list-item :key="dateRange.type" :value="dateRange.type"
                                                                      :append-icon="(queryDateType === dateRange.type ? mdiCheck : undefined)"
                                                                      v-for="dateRange in allDateRanges">
@@ -189,7 +208,7 @@
                                     </template>
 
                                     <v-card-text class="statistics-overview-title pt-0" :class="{ 'disabled': loading }"
-                                                 v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && isQuerySpecialChartType && queryChartDataType === ChartDataType.Overview.type && (initing || categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length)">
+                                                 v-if="showsCategoricalCharts && isQuerySpecialChartType && queryChartDataType === ChartDataType.Overview.type && (initing || categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length)">
                                         <span class="statistics-subtitle">{{ tt('Total Income') }}</span>
                                         <span class="statistics-overview-amount ms-3 text-income"
                                               v-if="!initing && categoricalOverviewAnalysisData && categoricalOverviewAnalysisData.items && categoricalOverviewAnalysisData.items.length">
@@ -209,7 +228,7 @@
                                     </v-card-text>
 
                                     <v-card-text class="statistics-overview-title pt-0" :class="{ 'disabled': loading }"
-                                                 v-else-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && (initing || (categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length))">
+                                                 v-else-if="showsCategoricalCharts && !isQuerySpecialChartType && (initing || (categoricalAnalysisData && categoricalAnalysisData.items && categoricalAnalysisData.items.length))">
                                         <span class="statistics-subtitle">{{ totalAmountName }}</span>
                                         <span class="statistics-overview-amount ms-3"
                                               :class="statisticsTextColor"
@@ -223,15 +242,33 @@
 
                                     <v-card-text class="statistics-overview-title pt-0"
                                                  v-else-if="!loading && (
-                                                     (queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && isQuerySpecialChartType && queryChartDataType === ChartDataType.Overview.type && (!categoricalOverviewAnalysisData || !categoricalOverviewAnalysisData.items || !categoricalOverviewAnalysisData.items.length))
-                                                  || (queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && (!categoricalAnalysisData || !categoricalAnalysisData.items || !categoricalAnalysisData.items.length))
+                                                     (showsCategoricalCharts && isQuerySpecialChartType && queryChartDataType === ChartDataType.Overview.type && (!categoricalOverviewAnalysisData || !categoricalOverviewAnalysisData.items || !categoricalOverviewAnalysisData.items.length))
+                                                  || (showsCategoricalCharts && !isQuerySpecialChartType && (!categoricalAnalysisData || !categoricalAnalysisData.items || !categoricalAnalysisData.items.length))
                                                   || (queryAnalysisType === StatisticsAnalysisType.TrendAnalysis && (!trendsAnalysisData || !trendsAnalysisData.items || !trendsAnalysisData.items.length))
                                                   || (queryAnalysisType === StatisticsAnalysisType.AssetTrends && (!assetTrendsData || !assetTrendsData.items || !assetTrendsData.items.length))
                                                   )">
                                         <span class="statistics-subtitle statistics-overview-empty-tip">{{ tt('No transaction data') }}</span>
                                     </v-card-text>
 
-                                    <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && queryChartDataType === ChartDataType.Overview.type">
+                                    <v-card-text class="statistics-overview-title pt-0" :class="{ 'disabled': loading }"
+                                                 v-if="queryAnalysisType === StatisticsAnalysisType.PaycheckAnalysis && !initing && selectedPaycheckPeriod">
+                                        <span class="statistics-subtitle">{{ tt('Paycheck') }}</span>
+                                        <span class="statistics-overview-amount ms-3 text-income">{{ selectedPaycheckAmount }}</span>
+                                        <span class="statistics-subtitle ms-3">{{ selectedPaycheckDate }}</span>
+                                        <span class="statistics-subtitle ms-3" v-if="selectedPaycheckPeriod?.isCurrent && paycheckPeriodRemainingDays > 0">
+                                            {{ tt('format.misc.daysUntilNextPaycheck', { days: formatNumberToLocalizedNumerals(paycheckPeriodRemainingDays) }) }}
+                                        </span>
+                                        <span class="statistics-subtitle ms-3" v-else-if="selectedPaycheckPeriod?.isCurrent">
+                                            {{ tt('Next paycheck is due') }}
+                                        </span>
+                                    </v-card-text>
+
+                                    <v-card-text class="statistics-overview-title pt-0"
+                                                 v-if="queryAnalysisType === StatisticsAnalysisType.PaycheckAnalysis && !loading && !paycheckPeriods.length">
+                                        <span class="statistics-subtitle statistics-overview-empty-tip">{{ tt('No paycheck has been found in your recent income transactions. Choose the categories your pay arrives in under statistics settings.') }}</span>
+                                    </v-card-text>
+
+                                    <v-card-text :class="{ 'readonly': loading }" v-if="showsCategoricalCharts && queryChartDataType === ChartDataType.Overview.type">
                                         <account-and-category-sankey-chart
                                             :items="[]"
                                             :sorting-type="querySortingType"
@@ -247,7 +284,7 @@
                                         />
                                     </v-card-text>
 
-                                    <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && query.categoricalChartType === CategoricalChartType.Pie.type">
+                                    <v-card-text :class="{ 'readonly': loading }" v-if="showsCategoricalCharts && !isQuerySpecialChartType && queryChartType === CategoricalChartType.Pie.type">
                                         <pie-chart
                                             :items="[
                                                 { id: '1', name: '---', value: parseBigDecimal(60), color: '7c7c7f' },
@@ -271,7 +308,7 @@
                                         />
                                     </v-card-text>
 
-                                    <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && query.categoricalChartType === CategoricalChartType.Bar.type">
+                                    <v-card-text :class="{ 'readonly': loading }" v-if="showsCategoricalCharts && !isQuerySpecialChartType && queryChartType === CategoricalChartType.Bar.type">
                                         <v-list rounded lines="two" v-if="initing">
                                             <template :key="itemIdx" v-for="itemIdx in [ 1, 2, 3 ]">
                                                 <v-list-item class="ps-0">
@@ -326,7 +363,7 @@
                                         </v-list>
                                     </v-card-text>
 
-                                    <v-card-text :class="{ 'readonly': loading }" v-if="queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && !isQuerySpecialChartType && query.categoricalChartType === CategoricalChartType.Radar.type">
+                                    <v-card-text :class="{ 'readonly': loading }" v-if="showsCategoricalCharts && !isQuerySpecialChartType && queryChartType === CategoricalChartType.Radar.type">
                                         <radar-chart
                                             :items="[
                                                 {name: '---', value: 10},
@@ -579,6 +616,7 @@ const {
     getAllCategoricalChartTypes,
     getAllTrendChartTypes,
     formatAmountToWesternArabicNumeralsWithoutDigitGrouping,
+    formatNumberToLocalizedNumerals,
     formatPercentToLocalizedNumerals
 } = useI18n();
 
@@ -617,7 +655,14 @@ const {
     categoricalAnalysisData,
     trendsAnalysisData,
     assetTrendsData,
+    paycheckPeriods,
+    selectedPaycheckPeriodIndex,
+    selectedPaycheckPeriod,
+    selectedPaycheckAmount,
+    selectedPaycheckDate,
+    paycheckPeriodRemainingDays,
     canShowCustomDateRange,
+    getPaycheckPeriodDisplayName,
     getTransactionCategoricalAnalysisDataItemDisplayColor,
     getDisplayAmount
 } = useStatisticsTransactionPageBase();
@@ -644,8 +689,13 @@ const showFilterTagDialog = ref<boolean>(false);
 
 const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
 
+const showsCategoricalCharts = computed<boolean>(() => {
+    return analysisType.value === StatisticsAnalysisType.CategoricalAnalysis
+        || analysisType.value === StatisticsAnalysisType.PaycheckAnalysis;
+});
+
 const statisticsDataHasData = computed<boolean>(() => {
-    if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
+    if (showsCategoricalCharts.value) {
         return !!categoricalAnalysisData.value && !!categoricalAnalysisData.value.items && categoricalAnalysisData.value.items.length > 0;
     } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
         return !!trendsAnalysisData.value && !!trendsAnalysisData.value.items && trendsAnalysisData.value.items.length > 0 && !!monthlyTrendsChart.value;
@@ -657,7 +707,7 @@ const statisticsDataHasData = computed<boolean>(() => {
 });
 
 const allChartTypes = computed<TypeAndDisplayName[]>(() => {
-    if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
+    if (showsCategoricalCharts.value) {
         return getAllCategoricalChartTypes(true);
     } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
         return getAllTrendChartTypes();
@@ -683,6 +733,8 @@ const queryChartType = computed<number | undefined>({
             return query.value.trendChartType;
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return query.value.assetTrendsChartType;
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return query.value.paycheckChartType;
         } else {
             return undefined;
         }
@@ -814,6 +866,20 @@ function init(initProps: TransactionStatisticsProps): void {
         if (initProps.initAssetTrendsDateAggregationType) {
             assetTrendsDateAggregationType.value = parseInt(initProps.initAssetTrendsDateAggregationType);
         }
+    } else if (initProps.initAnalysisType === StatisticsAnalysisType.PaycheckAnalysis.toString()) {
+        filter.paycheckChartType = initProps.initChartType ? parseInt(initProps.initChartType) : undefined;
+        filter.paycheckChartStartTime = initProps.initStartTime ? parseInt(initProps.initStartTime) : undefined;
+        filter.paycheckChartEndTime = initProps.initEndTime ? parseInt(initProps.initEndTime) : undefined;
+
+        if (filter.paycheckChartStartTime !== query.value.paycheckChartStartTime
+            || filter.paycheckChartEndTime !== query.value.paycheckChartEndTime) {
+            needReload = true;
+        }
+
+        if (initProps.initAnalysisType !== analysisType.value.toString()) {
+            analysisType.value = StatisticsAnalysisType.PaycheckAnalysis;
+            needReload = true;
+        }
     }
 
     if (!isDefined(initProps.initAnalysisType)) {
@@ -833,7 +899,9 @@ function init(initProps: TransactionStatisticsProps): void {
         accountsStore.loadAllAccounts({force: false}),
         transactionCategoriesStore.loadAllCategories({force: false})
     ]).then(() => {
-        if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
+        if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return loadPaycheckAnalysis(false);
+        } else if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
             return statisticsStore.loadCategoricalAnalysis({
                 force: false
             }) as Promise<unknown>;
@@ -882,7 +950,9 @@ function reload(force: boolean): Promise<unknown> | null {
         query.value.chartDataType === ChartDataType.NetCashFlow.type ||
         query.value.chartDataType === ChartDataType.NetIncome.type ||
         query.value.chartDataType === ChartDataType.NetWorth.type) {
-        if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
+        if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            dispatchPromise = loadPaycheckAnalysis(force);
+        } else if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
             dispatchPromise = statisticsStore.loadCategoricalAnalysis({
                 force: force
             });
@@ -925,6 +995,61 @@ function reload(force: boolean): Promise<unknown> | null {
     }
 
     return dispatchPromise;
+}
+
+// the pay periods have to be read from the paycheck transactions before the statistics of one of
+// them can be requested, and the period selected earlier may no longer exist after a refresh
+function loadPaycheckAnalysis(force: boolean): Promise<unknown> {
+    return statisticsStore.loadPaycheckPeriods({
+        force: force
+    }).then(() => {
+        selectSelectedOrLatestPaycheckPeriod();
+
+        return statisticsStore.loadPaycheckAnalysis({
+            force: force
+        }) as Promise<unknown>;
+    });
+}
+
+function selectSelectedOrLatestPaycheckPeriod(): void {
+    const latestPeriod = paycheckPeriods.value[0];
+
+    if (!latestPeriod) {
+        statisticsStore.updateTransactionStatisticsFilter({
+            paycheckChartStartTime: 0,
+            paycheckChartEndTime: 0
+        });
+        return;
+    }
+
+    // the period selected before may no longer exist, its paycheck could have been edited away
+    if (selectedPaycheckPeriodIndex.value >= 0) {
+        return;
+    }
+
+    statisticsStore.updateTransactionStatisticsFilter({
+        paycheckChartStartTime: latestPeriod.startTime,
+        paycheckChartEndTime: latestPeriod.endTime
+    });
+}
+
+function setPaycheckPeriod(periodIndex: number): void {
+    const period = paycheckPeriods.value[periodIndex];
+
+    if (!period) {
+        return;
+    }
+
+    const changed = statisticsStore.updateTransactionStatisticsFilter({
+        paycheckChartStartTime: period.startTime,
+        paycheckChartEndTime: period.endTime
+    });
+
+    if (changed) {
+        loading.value = true;
+        statisticsStore.updateTransactionStatisticsInvalidState(true);
+        router.push(getFilterLinkUrl());
+    }
 }
 
 function setAnalysisType(type: StatisticsAnalysisType): void {
@@ -970,6 +1095,10 @@ function setChartType(type?: number): void {
     } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
         changed = statisticsStore.updateTransactionStatisticsFilter({
             assetTrendsChartType: type
+        });
+    } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+        changed = statisticsStore.updateTransactionStatisticsFilter({
+            paycheckChartType: type
         });
     }
 
@@ -1128,6 +1257,13 @@ function setCustomDateFilter(startTime: number | TextualYearMonth, endTime: numb
 function shiftDateRange(scale: number): void {
     let changed = false;
 
+    if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+        // the pay periods are ordered from the newest to the oldest, so shifting the range
+        // backwards in time moves forward through the list
+        setPaycheckPeriod(selectedPaycheckPeriodIndex.value - scale);
+        return;
+    }
+
     if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
         if (query.value.categoricalChartDateType === DateRange.All.type) {
             return;
@@ -1214,7 +1350,8 @@ function setKeywordFilter(keyword: string): void {
         changed = statisticsStore.updateTransactionStatisticsFilter({
             keyword: keyword
         });
-    } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis) {
+    } else if (analysisType.value === StatisticsAnalysisType.TrendAnalysis
+        || analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
         changed = statisticsStore.updateTransactionStatisticsFilter({
             keyword: keyword
         });
@@ -1228,10 +1365,10 @@ function setKeywordFilter(keyword: string): void {
 }
 
 function exportResults(): void {
-    if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis && categoricalAnalysisData.value && categoricalAnalysisData.value.items) {
+    if (showsCategoricalCharts.value && categoricalAnalysisData.value && categoricalAnalysisData.value.items) {
         let supportedMermaidCharts: ExportMermaidChartType[] | undefined = undefined;
 
-        if (query.value.categoricalChartType === CategoricalChartType.Pie.type) {
+        if (queryChartType.value === CategoricalChartType.Pie.type) {
             supportedMermaidCharts = [ ExportMermaidChartType.PieChart ];
         }
 

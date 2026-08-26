@@ -151,6 +151,13 @@ export const ALL_APPLICATION_CLOUD_SETTINGS: CategorizedApplicationCloudSettingI
             { settingKey: 'statistics.defaultAssetTrendsChartType', settingName: 'Default Chart Type', mobile: false, desktop: true },
             { settingKey: 'statistics.defaultAssetTrendsChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true }
         ]
+    },
+    {
+        categoryName: 'Statistics Settings',
+        categorySubName: 'Paycheck Analysis Settings',
+        items: [
+            { settingKey: 'statistics.paycheckCategoryIds', settingName: 'Paycheck Categories', mobile: false, desktop: true }
+        ]
     }
 ];
 

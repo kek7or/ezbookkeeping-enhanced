@@ -427,6 +427,12 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('statistics.defaultTransactionCategoryFilter', value);
     }
 
+    function setStatisticsPaycheckCategoryIds(value: Record<string, boolean>): void {
+        updateApplicationSettingsSubValue('statistics', 'paycheckCategoryIds', value);
+        appSettings.value.statistics.paycheckCategoryIds = value;
+        updateUserApplicationCloudSettingValue('statistics.paycheckCategoryIds', value);
+    }
+
     function setStatisticsDefaultKeywordMatchMode(value: number): void {
         updateApplicationSettingsSubValue('statistics', 'defaultKeywordMatchMode', value);
         appSettings.value.statistics.defaultKeywordMatchMode = value;
@@ -652,6 +658,7 @@ export const useSettingsStore = defineStore('settings', () => {
         setStatisticsDefaultTimezoneType,
         setStatisticsDefaultAccountFilter,
         setStatisticsDefaultTransactionCategoryFilter,
+        setStatisticsPaycheckCategoryIds,
         setStatisticsDefaultKeywordMatchMode,
         setStatisticsSortingType,
         setStatisticsDefaultCategoricalChartType,

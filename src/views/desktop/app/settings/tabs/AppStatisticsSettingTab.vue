@@ -59,6 +59,33 @@
         </v-col>
 
         <v-col cols="12">
+            <v-card :title="tt('Paycheck Analysis Settings')">
+                <v-form>
+                    <v-card-text>
+                        <v-row>
+                            <v-col cols="12">
+                                <v-select
+                                    item-title="displayName"
+                                    item-value="id"
+                                    multiple
+                                    chips
+                                    closable-chips
+                                    persistent-placeholder
+                                    persistent-hint
+                                    :label="tt('Paycheck Categories')"
+                                    :placeholder="tt('Paycheck Categories')"
+                                    :hint="tt('The income categories your pay arrives in. When none are selected, the largest income of each month is treated as the paycheck.')"
+                                    :items="allPaycheckCategories"
+                                    v-model="paycheckCategoryIds"
+                                />
+                            </v-col>
+                        </v-row>
+                    </v-card-text>
+                </v-form>
+            </v-card>
+        </v-col>
+
+        <v-col cols="12">
             <v-card :title="tt('Categorical Analysis Settings')">
                 <v-form>
                     <v-card-text>
@@ -177,6 +204,8 @@ import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFil
 import { useI18n } from '@/locales/helpers.ts';
 import { useStatisticsSettingPageBase } from '@/views/base/statistics/StatisticsSettingPageBase.ts';
 
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+
 const { tt } = useI18n();
 const {
     allChartDataTypes,
@@ -188,6 +217,8 @@ const {
     allTrendChartTypes,
     allTrendChartDateRanges,
     allAssetTrendsChartDateRanges,
+    allPaycheckCategories,
+    paycheckCategoryIds,
     defaultChartDataType,
     defaultTimezoneType,
     defaultKeywordMatchMode,
@@ -199,5 +230,12 @@ const {
     defaultAssetTrendsChartType,
     defaultAssetTrendsChartDateRange
 } = useStatisticsSettingPageBase();
+
+const transactionCategoriesStore = useTransactionCategoriesStore();
+
+// the paycheck categories are picked from the income categories, which are not loaded on this page yet
+transactionCategoriesStore.loadAllCategories({
+    force: false
+});
 </script>
 

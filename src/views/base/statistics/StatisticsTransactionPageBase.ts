@@ -4,12 +4,14 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
+import { useAccountsStore } from '@/stores/account.ts';
 import { type TransactionStatisticsFilter, useStatisticsStore } from '@/stores/statistics.ts';
 
 import type { TypeAndDisplayName } from '@/core/base.ts';
 import type { BigDecimal } from '@/core/numeral.ts';
 import { type LocalizedDateRange, type WeekDayValue, DateRangeScene, DateRange } from '@/core/datetime.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
+import type { PaycheckPeriod } from '@/core/paycheck.ts';
 import {
     StatisticsAnalysisType,
     ChartDataType,
@@ -32,8 +34,11 @@ import { limitText, findNameByType, findDisplayNameByType } from '@/lib/common.t
 import {
     parseDateTimeFromUnixTime,
     getYearMonthFirstUnixTime,
-    getYearMonthLastUnixTime
+    getYearMonthLastUnixTime,
+    getCurrentUnixTime
 } from '@/lib/datetime.ts';
+import { parseBigDecimal } from '@/lib/numeral.ts';
+import { findPaycheckPeriodIndex, getPaycheckPeriodRemainingDays } from '@/lib/paycheck.ts';
 import { getDisplayColor, getCategoryDisplayColor, getAccountDisplayColor } from '@/lib/color.ts';
 
 export function useStatisticsTransactionPageBase() {
@@ -42,6 +47,7 @@ export function useStatisticsTransactionPageBase() {
         getAllDateRanges,
         getAllStatisticsSortingTypes,
         getAllStatisticsDateAggregationTypes,
+        formatDateTimeToLongDate,
         formatDateTimeToLongDateTime,
         formatDateTimeToGregorianLikeLongYearMonth,
         formatDateRange,
@@ -50,6 +56,7 @@ export function useStatisticsTransactionPageBase() {
 
     const settingsStore = useSettingsStore();
     const userStore = useUserStore();
+    const accountsStore = useAccountsStore();
     const statisticsStore = useStatisticsStore();
 
     const loading = ref<boolean>(true);
@@ -71,6 +78,8 @@ export function useStatisticsTransactionPageBase() {
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return getAllDateRanges(DateRangeScene.AssetTrends, { includeCustom: true });
         } else {
+            // the paycheck analysis offers the pay periods read from the paycheck transactions
+            // rather than calendar date ranges, so the page builds that menu itself
             return [];
         }
     });
@@ -79,6 +88,34 @@ export function useStatisticsTransactionPageBase() {
     const allAssetTrendsDateAggregationTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsDateAggregationTypes(StatisticsAnalysisType.AssetTrends, false));
 
     const query = computed<TransactionStatisticsFilter>(() => statisticsStore.transactionStatisticsFilter);
+
+    const paycheckPeriods = computed<PaycheckPeriod[]>(() => statisticsStore.paycheckPeriods);
+
+    const selectedPaycheckPeriodIndex = computed<number>(() => findPaycheckPeriodIndex(paycheckPeriods.value, query.value.paycheckChartStartTime, query.value.paycheckChartEndTime));
+
+    const selectedPaycheckPeriod = computed<PaycheckPeriod | null>(() => paycheckPeriods.value[selectedPaycheckPeriodIndex.value] ?? null);
+
+    const selectedPaycheckAmount = computed<string>(() => {
+        const period = selectedPaycheckPeriod.value;
+
+        if (!period) {
+            return '';
+        }
+
+        const account = accountsStore.allAccountsMap[period.paycheckAccountId];
+        return getDisplayAmount(parseBigDecimal(period.paycheckAmount), account ? account.currency : defaultCurrency.value);
+    });
+
+    const selectedPaycheckDate = computed<string>(() => {
+        const period = selectedPaycheckPeriod.value;
+        return period ? formatDateTimeToLongDate(parseDateTimeFromUnixTime(period.paycheckTime)) : '';
+    });
+
+    const paycheckPeriodRemainingDays = computed<number>(() => {
+        const period = selectedPaycheckPeriod.value;
+        return period ? getPaycheckPeriodRemainingDays(period, getCurrentUnixTime()) : 0;
+    });
+
     const queryChartDataCategory = computed<string>(() => statisticsStore.categoricalAnalysisChartDataCategory);
     const queryDateType = computed<number | null>(() => {
         if (analysisType.value === StatisticsAnalysisType.CategoricalAnalysis) {
@@ -87,6 +124,8 @@ export function useStatisticsTransactionPageBase() {
             return query.value.trendChartDateType;
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return query.value.assetTrendsChartDateType;
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return DateRange.Custom.type;
         } else {
             return null;
         }
@@ -99,6 +138,8 @@ export function useStatisticsTransactionPageBase() {
             return formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime(query.value.trendChartStartYearMonth)));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(query.value.assetTrendsChartStartTime));
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(query.value.paycheckChartStartTime));
         } else {
             return '';
         }
@@ -111,6 +152,8 @@ export function useStatisticsTransactionPageBase() {
             return formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthLastUnixTime(query.value.trendChartEndYearMonth)));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(query.value.assetTrendsChartEndTime));
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(query.value.paycheckChartEndTime));
         } else {
             return '';
         }
@@ -128,6 +171,16 @@ export function useStatisticsTransactionPageBase() {
             return formatDateRange(query.value.trendChartDateType, getYearMonthFirstUnixTime(query.value.trendChartStartYearMonth), getYearMonthLastUnixTime(query.value.trendChartEndYearMonth));
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return formatDateRange(query.value.assetTrendsChartDateType, query.value.assetTrendsChartStartTime, query.value.assetTrendsChartEndTime);
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            if (!query.value.paycheckChartStartTime || !query.value.paycheckChartEndTime) {
+                return tt('Pay Period');
+            }
+
+            if (selectedPaycheckPeriod.value && selectedPaycheckPeriod.value.isCurrent) {
+                return tt('Since Last Paycheck');
+            }
+
+            return formatDateRange(DateRange.Custom.type, query.value.paycheckChartStartTime, query.value.paycheckChartEndTime);
         } else {
             return '';
         }
@@ -170,6 +223,8 @@ export function useStatisticsTransactionPageBase() {
             }
 
             return !!query.value.assetTrendsChartStartTime || !!query.value.assetTrendsChartEndTime;
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return !!selectedPaycheckPeriod.value && !selectedPaycheckPeriod.value.isCurrent;
         } else {
             return false;
         }
@@ -198,6 +253,8 @@ export function useStatisticsTransactionPageBase() {
             return query.value.trendChartDateType !== DateRange.All.type;
         } else if (analysisType.value === StatisticsAnalysisType.AssetTrends) {
             return query.value.assetTrendsChartDateType !== DateRange.All.type;
+        } else if (analysisType.value === StatisticsAnalysisType.PaycheckAnalysis) {
+            return paycheckPeriods.value.length > 1 && selectedPaycheckPeriodIndex.value >= 0;
         } else {
             return false;
         }
@@ -322,6 +379,10 @@ export function useStatisticsTransactionPageBase() {
         }
     }
 
+    function getPaycheckPeriodDisplayName(period: PaycheckPeriod): string {
+        return formatDateRange(DateRange.Custom.type, period.startTime, period.endTime);
+    }
+
     function getTransactionCategoricalAnalysisDataItemDisplayColor(item: TransactionCategoricalAnalysisDataItem): ColorStyleValue {
         if (item.type === 'category') {
             return getCategoryDisplayColor(item.color);
@@ -394,8 +455,15 @@ export function useStatisticsTransactionPageBase() {
         categoricalAnalysisData,
         trendsAnalysisData,
         assetTrendsData,
+        paycheckPeriods,
+        selectedPaycheckPeriodIndex,
+        selectedPaycheckPeriod,
+        selectedPaycheckAmount,
+        selectedPaycheckDate,
+        paycheckPeriodRemainingDays,
         // functions
         canShowCustomDateRange,
+        getPaycheckPeriodDisplayName,
         getTransactionCategoricalAnalysisDataItemDisplayColor,
         getDisplayAmount
     };

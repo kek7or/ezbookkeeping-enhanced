@@ -4,7 +4,8 @@ import { DateRange } from '@/core/datetime.ts';
 export enum StatisticsAnalysisType {
     CategoricalAnalysis = 0,
     TrendAnalysis = 1,
-    AssetTrends = 2
+    AssetTrends = 2,
+    PaycheckAnalysis = 3
 }
 
 export enum ChartDataAggregationType {
@@ -113,15 +114,15 @@ export class ChartDataType implements TypeAndName {
     private static readonly allInstancesForDesktop: ChartDataType[] = [];
     private static readonly allInstancesByType: Record<number, ChartDataType> = {};
 
-    public static readonly Overview = new ChartDataType(16, 'Overview', true, true, StatisticsAnalysisType.CategoricalAnalysis);
-    public static readonly OutflowsByAccount = new ChartDataType(11, 'Outflows By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly ExpenseByAccount = new ChartDataType(0, 'Expense By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly ExpenseByPrimaryCategory = new ChartDataType(1, 'Expense By Primary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly ExpenseBySecondaryCategory = new ChartDataType(2, 'Expense By Secondary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly InflowsByAccount = new ChartDataType(12, 'Inflows By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly IncomeByAccount = new ChartDataType(3, 'Income By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly IncomeByPrimaryCategory = new ChartDataType(4, 'Income By Primary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
-    public static readonly IncomeBySecondaryCategory = new ChartDataType(5, 'Income By Secondary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis);
+    public static readonly Overview = new ChartDataType(16, 'Overview', true, true, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly OutflowsByAccount = new ChartDataType(11, 'Outflows By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly ExpenseByAccount = new ChartDataType(0, 'Expense By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly ExpenseByPrimaryCategory = new ChartDataType(1, 'Expense By Primary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly ExpenseBySecondaryCategory = new ChartDataType(2, 'Expense By Secondary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly InflowsByAccount = new ChartDataType(12, 'Inflows By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly IncomeByAccount = new ChartDataType(3, 'Income By Account', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly IncomeByPrimaryCategory = new ChartDataType(4, 'Income By Primary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
+    public static readonly IncomeBySecondaryCategory = new ChartDataType(5, 'Income By Secondary Category', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.TrendAnalysis, StatisticsAnalysisType.PaycheckAnalysis);
     public static readonly AccountTotalAssets = new ChartDataType(6, 'Account Total Assets', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.AssetTrends);
     public static readonly AccountTotalLiabilities = new ChartDataType(7, 'Account Total Liabilities', false, false, StatisticsAnalysisType.CategoricalAnalysis, StatisticsAnalysisType.AssetTrends);
     public static readonly TotalOutflows = new ChartDataType(13, 'Total Outflows', false, false, StatisticsAnalysisType.TrendAnalysis);

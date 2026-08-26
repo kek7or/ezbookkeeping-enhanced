@@ -791,6 +791,10 @@ export function getTodayLastUnixTime(): number {
     return moment.unix(getTodayFirstUnixTime()).add(1, 'days').subtract(1, 'seconds').unix();
 }
 
+export function getDayFirstUnixTimeBySpecifiedUnixTime(unixTime: number): number {
+    return moment.unix(unixTime).set({ hour: 0, minute: 0, second: 0, millisecond: 0 }).unix();
+}
+
 export function getThisWeekFirstUnixTime(firstDayOfWeek: WeekDayValue): number {
     const today = moment.unix(getTodayFirstUnixTime());
 

@@ -478,6 +478,10 @@ export const useRootStore = defineStore('root', () => {
                     statisticsStore.updateTransactionStatisticsInvalidState(true);
                 }
 
+                if (!statisticsStore.paycheckPeriodsStateInvalid) {
+                    statisticsStore.updatePaycheckPeriodsInvalidState(true);
+                }
+
                 if (data.result.user && data.result.user.defaultCurrency !== userDefaultCurrency) {
                     exchangeRatesStore.resetLatestExchangeRates();
                 }
@@ -547,6 +551,10 @@ export const useRootStore = defineStore('root', () => {
                     statisticsStore.updateTransactionStatisticsInvalidState(true);
                 }
 
+                if (!statisticsStore.paycheckPeriodsStateInvalid) {
+                    statisticsStore.updatePaycheckPeriodsInvalidState(true);
+                }
+
                 resolve(data.result);
             }).catch(error => {
                 logger.error('failed to clear user data', error);
@@ -584,6 +592,10 @@ export const useRootStore = defineStore('root', () => {
 
                 if (!statisticsStore.transactionStatisticsStateInvalid) {
                     statisticsStore.updateTransactionStatisticsInvalidState(true);
+                }
+
+                if (!statisticsStore.paycheckPeriodsStateInvalid) {
+                    statisticsStore.updatePaycheckPeriodsInvalidState(true);
                 }
 
                 resolve(data.result);
@@ -631,6 +643,10 @@ export const useRootStore = defineStore('root', () => {
 
                 if (!statisticsStore.transactionStatisticsStateInvalid) {
                     statisticsStore.updateTransactionStatisticsInvalidState(true);
+                }
+
+                if (!statisticsStore.paycheckPeriodsStateInvalid) {
+                    statisticsStore.updatePaycheckPeriodsInvalidState(true);
                 }
 
                 resolve(data.result);

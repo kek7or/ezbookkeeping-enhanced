@@ -15,7 +15,14 @@ import { TimezoneTypeForStatistics } from '@/core/timezone.ts';
 import type { ColorValue } from '@/core/color.ts';
 import type { CategoricalChartSourceDataItem, TrendsChartSourceDataItem } from '@/core/chart.ts';
 import { CategoryType } from '@/core/category.ts';
-import { TransactionRelatedAccountType } from '@/core/transaction.ts';
+import { TransactionType, TransactionRelatedAccountType } from '@/core/transaction.ts';
+import {
+    type PaycheckPeriod,
+    PAYCHECK_LOOKBACK_MONTHS,
+    PAYCHECK_PAGE_SIZE,
+    PAYCHECK_MAX_PAGE_COUNT,
+    PAYCHECK_MAX_PERIOD_COUNT
+} from '@/core/paycheck.ts';
 import {
     StatisticsAnalysisType,
     CategoricalChartType,
@@ -31,6 +38,7 @@ import { DEFAULT_ACCOUNT_ICON, DEFAULT_CATEGORY_ICON } from '@/consts/icon.ts';
 import { DEFAULT_ACCOUNT_COLOR, DEFAULT_CATEGORY_COLOR } from '@/consts/color.ts';
 
 import {
+    type TransactionInfoResponse,
     type TransactionStatisticResponse,
     type TransactionStatisticResponseItem,
     type TransactionStatisticTrendsResponseItem,
@@ -78,11 +86,19 @@ import {
     getYearMonthDayDateTime,
     getGregorianCalendarYearAndMonthFromUnixTime,
     getDayDifference,
-    getDateRangeByDateType
+    getDateRangeByDateType,
+    getCurrentUnixTime,
+    getTodayLastUnixTime,
+    getUnixTimeBeforeUnixTime
 } from '@/lib/datetime.ts';
 import { getFinalAccountIdsByFilteredAccountIds } from '@/lib/account.ts';
 import { getFinalCategoryIdsByFilteredCategoryIds } from '@/lib/category.ts';
 import { sortStatisticsItems } from '@/lib/statistics.ts';
+import {
+    isPaycheckCategorySelected,
+    selectPaycheckTransactions,
+    buildPaycheckPeriods
+} from '@/lib/paycheck.ts';
 import logger from '@/lib/logger.ts';
 import services from '@/lib/services.ts';
 
@@ -143,6 +159,9 @@ export interface TransactionStatisticsPartialFilter {
     assetTrendsChartDateType?: number;
     assetTrendsChartStartTime?: number;
     assetTrendsChartEndTime?: number;
+    paycheckChartType?: number;
+    paycheckChartStartTime?: number;
+    paycheckChartEndTime?: number;
     filterAccountIds?: Record<string, boolean>;
     filterCategoryIds?: Record<string, boolean>;
     tagFilter?: string;
@@ -165,6 +184,9 @@ export interface TransactionStatisticsFilter extends TransactionStatisticsPartia
     assetTrendsChartDateType: number;
     assetTrendsChartStartTime: number;
     assetTrendsChartEndTime: number;
+    paycheckChartType: number;
+    paycheckChartStartTime: number;
+    paycheckChartEndTime: number;
     filterAccountIds: Record<string, boolean>;
     filterCategoryIds: Record<string, boolean>;
     tagFilter: string;
@@ -194,6 +216,9 @@ export const useStatisticsStore = defineStore('statistics', () => {
         assetTrendsChartDateType: DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE.type,
         assetTrendsChartStartTime: 0,
         assetTrendsChartEndTime: 0,
+        paycheckChartType: CategoricalChartType.Default.type,
+        paycheckChartStartTime: 0,
+        paycheckChartEndTime: 0,
         filterAccountIds: {},
         filterCategoryIds: {},
         tagFilter: '',
@@ -206,6 +231,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
     const transactionCategoryTrendsData = ref<TransactionStatisticTrendsResponseItem[]>([]);
     const transactionAssetTrendsData = ref<TransactionStatisticAssetTrendsResponseItem[]>([]);
     const transactionStatisticsStateInvalid = ref<boolean>(true);
+    const paycheckPeriods = ref<PaycheckPeriod[]>([]);
+    const paycheckPeriodsStateInvalid = ref<boolean>(true);
 
     const categoricalAnalysisChartDataCategory = computed<string>(() => {
         if (transactionStatisticsFilter.value.chartDataType === ChartDataType.OutflowsByAccount.type ||
@@ -1379,6 +1406,12 @@ export const useStatisticsStore = defineStore('statistics', () => {
         transactionStatisticsStateInvalid.value = invalidState;
     }
 
+    // the pay periods are read from the paycheck transactions themselves, so they go stale
+    // whenever transactions change, not when the statistics filter changes
+    function updatePaycheckPeriodsInvalidState(invalidState: boolean): void {
+        paycheckPeriodsStateInvalid.value = invalidState;
+    }
+
     function resetTransactionStatistics(): void {
         transactionStatisticsFilter.value.chartDataType = ChartDataType.Default.type;
         transactionStatisticsFilter.value.categoricalChartType = CategoricalChartType.Default.type;
@@ -1393,6 +1426,9 @@ export const useStatisticsStore = defineStore('statistics', () => {
         transactionStatisticsFilter.value.assetTrendsChartDateType = DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE.type;
         transactionStatisticsFilter.value.assetTrendsChartStartTime = 0;
         transactionStatisticsFilter.value.assetTrendsChartEndTime = 0;
+        transactionStatisticsFilter.value.paycheckChartType = CategoricalChartType.Default.type;
+        transactionStatisticsFilter.value.paycheckChartStartTime = 0;
+        transactionStatisticsFilter.value.paycheckChartEndTime = 0;
         transactionStatisticsFilter.value.filterAccountIds = {};
         transactionStatisticsFilter.value.filterCategoryIds = {};
         transactionStatisticsFilter.value.tagFilter = '';
@@ -1401,6 +1437,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
         transactionCategoryStatisticsData.value = null;
         transactionCategoryTrendsData.value = [];
         transactionStatisticsStateInvalid.value = true;
+        paycheckPeriods.value = [];
+        paycheckPeriodsStateInvalid.value = true;
     }
 
     function initTransactionStatisticsFilter(analysisType: StatisticsAnalysisType, filter?: TransactionStatisticsPartialFilter): void {
@@ -1410,7 +1448,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             transactionStatisticsFilter.value.chartDataType = settingsStore.appSettings.statistics.defaultChartDataType;
         }
 
-        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis) {
+        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis || analysisType === StatisticsAnalysisType.PaycheckAnalysis) {
             if (!ChartDataType.isAvailableForAnalysisType(transactionStatisticsFilter.value.chartDataType, analysisType)) {
                 transactionStatisticsFilter.value.chartDataType = ChartDataType.Default.type;
             }
@@ -1558,6 +1596,30 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
+        // Paycheck Analysis filter initialization, the pay period itself cannot be resolved here
+        // because it is read from the paycheck transactions, the page fills it in once they are loaded
+        if (filter && isInteger(filter.paycheckChartType)) {
+            transactionStatisticsFilter.value.paycheckChartType = filter.paycheckChartType;
+        } else {
+            transactionStatisticsFilter.value.paycheckChartType = settingsStore.appSettings.statistics.defaultCategoricalChartType;
+        }
+
+        if (!CategoricalChartType.isValidType(transactionStatisticsFilter.value.paycheckChartType)) {
+            transactionStatisticsFilter.value.paycheckChartType = CategoricalChartType.Default.type;
+        }
+
+        if (filter && isInteger(filter.paycheckChartStartTime)) {
+            transactionStatisticsFilter.value.paycheckChartStartTime = filter.paycheckChartStartTime;
+        } else {
+            transactionStatisticsFilter.value.paycheckChartStartTime = 0;
+        }
+
+        if (filter && isInteger(filter.paycheckChartEndTime)) {
+            transactionStatisticsFilter.value.paycheckChartEndTime = filter.paycheckChartEndTime;
+        } else {
+            transactionStatisticsFilter.value.paycheckChartEndTime = 0;
+        }
+
         // Other filter initialization
         if (filter && isObject(filter.filterAccountIds)) {
             transactionStatisticsFilter.value.filterAccountIds = filter.filterAccountIds;
@@ -1671,6 +1733,22 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
+        // Paycheck Analysis filter update
+        if (filter && isInteger(filter.paycheckChartType) && transactionStatisticsFilter.value.paycheckChartType !== filter.paycheckChartType) {
+            transactionStatisticsFilter.value.paycheckChartType = filter.paycheckChartType;
+            changed = true;
+        }
+
+        if (filter && isInteger(filter.paycheckChartStartTime) && transactionStatisticsFilter.value.paycheckChartStartTime !== filter.paycheckChartStartTime) {
+            transactionStatisticsFilter.value.paycheckChartStartTime = filter.paycheckChartStartTime;
+            changed = true;
+        }
+
+        if (filter && isInteger(filter.paycheckChartEndTime) && transactionStatisticsFilter.value.paycheckChartEndTime !== filter.paycheckChartEndTime) {
+            transactionStatisticsFilter.value.paycheckChartEndTime = filter.paycheckChartEndTime;
+            changed = true;
+        }
+
         // Other filter update
         if (filter && isObject(filter.filterAccountIds) && !isEquals(transactionStatisticsFilter.value.filterAccountIds, filter.filterAccountIds)) {
             transactionStatisticsFilter.value.filterAccountIds = filter.filterAccountIds;
@@ -1742,6 +1820,13 @@ export const useStatisticsStore = defineStore('statistics', () => {
 
             if (assetTrendsDateAggregationType !== ChartDateAggregationType.Default.type) {
                 querys.push('assetTrendsDateAggregationType=' + assetTrendsDateAggregationType);
+            }
+        } else if (analysisType === StatisticsAnalysisType.PaycheckAnalysis) {
+            querys.push('chartType=' + transactionStatisticsFilter.value.paycheckChartType);
+
+            if (transactionStatisticsFilter.value.paycheckChartStartTime && transactionStatisticsFilter.value.paycheckChartEndTime) {
+                querys.push('startTime=' + transactionStatisticsFilter.value.paycheckChartStartTime);
+                querys.push('endTime=' + transactionStatisticsFilter.value.paycheckChartEndTime);
             }
         }
 
@@ -1840,7 +1925,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
         ) {
             querys.push('accountIds=' + itemId);
 
-            if ((analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis) && !isObjectEmpty(transactionStatisticsFilter.value.filterCategoryIds)) {
+            if ((analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis || analysisType === StatisticsAnalysisType.PaycheckAnalysis) && !isObjectEmpty(transactionStatisticsFilter.value.filterCategoryIds)) {
                 querys.push('categoryIds=' + getFinalCategoryIdsByFilteredCategoryIds(transactionCategoriesStore.allTransactionCategoriesMap, transactionStatisticsFilter.value.filterCategoryIds));
             }
         } else if (itemId && (transactionStatisticsFilter.value.chartDataType === ChartDataType.IncomeByPrimaryCategory.type ||
@@ -1863,7 +1948,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
             }
         }
 
-        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis) {
+        if (analysisType === StatisticsAnalysisType.CategoricalAnalysis || analysisType === StatisticsAnalysisType.TrendAnalysis || analysisType === StatisticsAnalysisType.PaycheckAnalysis) {
             if (transactionStatisticsFilter.value.tagFilter) {
                 querys.push('tagFilter=' + transactionStatisticsFilter.value.tagFilter);
             }
@@ -1887,16 +1972,122 @@ export const useStatisticsStore = defineStore('statistics', () => {
             querys.push('dateType=' + dateRange.dateType);
             querys.push('minTime=' + dateRange.minTime);
             querys.push('maxTime=' + dateRange.maxTime);
+        } else if (analysisType === StatisticsAnalysisType.PaycheckAnalysis
+            && transactionStatisticsFilter.value.paycheckChartStartTime
+            && transactionStatisticsFilter.value.paycheckChartEndTime) {
+            querys.push('dateType=' + DateRange.Custom.type);
+            querys.push('minTime=' + transactionStatisticsFilter.value.paycheckChartStartTime);
+            querys.push('maxTime=' + transactionStatisticsFilter.value.paycheckChartEndTime);
         }
 
         return querys.join('&');
     }
 
+    function loadPaycheckPeriods({ force }: { force: boolean }): Promise<PaycheckPeriod[]> {
+        if (!force && !paycheckPeriodsStateInvalid.value) {
+            return Promise.resolve(paycheckPeriods.value);
+        }
+
+        const currentUnixTime = getCurrentUnixTime();
+        const minTime = getUnixTimeBeforeUnixTime(currentUnixTime, PAYCHECK_LOOKBACK_MONTHS, 'months');
+        const paycheckCategoryIds = settingsStore.appSettings.statistics.paycheckCategoryIds;
+        const categoryIds = isPaycheckCategorySelected(paycheckCategoryIds) ? objectFieldToArrayItem(paycheckCategoryIds).join(',') : '';
+
+        // the paycheck the current pay period starts with may be older than one page of income
+        // transactions, so keep reading pages until the lookback window is covered
+        function loadIncomeTransactionPage(maxTime: number, page: number, loadedTransactions: TransactionInfoResponse[]): Promise<TransactionInfoResponse[]> {
+            return services.getTransactions({
+                maxTime: maxTime,
+                minTime: minTime * 1000,
+                count: PAYCHECK_PAGE_SIZE,
+                page: 1,
+                withCount: false,
+                type: TransactionType.Income,
+                categoryIds: categoryIds,
+                accountIds: '',
+                tagFilter: '',
+                amountFilter: '',
+                keyword: '',
+                matchMode: KeywordMatchMode.Default.type
+            }).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    return Promise.reject({ message: 'Unable to retrieve transaction list' });
+                }
+
+                const allTransactions = loadedTransactions.concat(data.result.items || []);
+
+                if (!data.result.nextTimeSequenceId || page >= PAYCHECK_MAX_PAGE_COUNT) {
+                    return Promise.resolve(allTransactions);
+                }
+
+                return loadIncomeTransactionPage(data.result.nextTimeSequenceId, page + 1, allTransactions);
+            });
+        }
+
+        return new Promise((resolve, reject) => {
+            loadIncomeTransactionPage(0, 1, []).then(transactions => {
+                const paychecks = selectPaycheckTransactions(transactions, paycheckCategoryIds);
+                const periods = buildPaycheckPeriods(paychecks, currentUnixTime, getTodayLastUnixTime());
+
+                paycheckPeriods.value = periods.slice(0, PAYCHECK_MAX_PERIOD_COUNT);
+                paycheckPeriodsStateInvalid.value = false;
+
+                resolve(paycheckPeriods.value);
+            }).catch(error => {
+                logger.error('failed to retrieve paycheck transactions', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to retrieve transaction list' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function loadCategoricalAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticResponse> {
+        return loadCategoricalStatistics({
+            force: force,
+            startTime: transactionStatisticsFilter.value.categoricalChartStartTime,
+            endTime: transactionStatisticsFilter.value.categoricalChartEndTime
+        });
+    }
+
+    // the paycheck analysis shows the same categorical statistics as the categorical analysis,
+    // over the selected pay period instead of a calendar date range
+    function loadPaycheckAnalysis({ force }: { force: boolean }): Promise<TransactionStatisticResponse> {
+        const startTime = transactionStatisticsFilter.value.paycheckChartStartTime;
+        const endTime = transactionStatisticsFilter.value.paycheckChartEndTime;
+
+        // no paycheck was found to build a pay period from, so there is nothing to show and the
+        // statistics of whichever range was loaded before must not be left on screen
+        if (!startTime || !endTime) {
+            transactionCategoryStatisticsData.value = null;
+            updateTransactionStatisticsInvalidState(false);
+
+            return Promise.resolve({
+                startTime: 0,
+                endTime: 0,
+                items: []
+            });
+        }
+
+        return loadCategoricalStatistics({
+            force: force,
+            startTime: startTime,
+            endTime: endTime
+        });
+    }
+
+    function loadCategoricalStatistics({ force, startTime, endTime }: { force: boolean, startTime: number, endTime: number }): Promise<TransactionStatisticResponse> {
         return new Promise((resolve, reject) => {
             services.getTransactionStatistics({
-                startTime: transactionStatisticsFilter.value.categoricalChartStartTime,
-                endTime: transactionStatisticsFilter.value.categoricalChartEndTime,
+                startTime: startTime,
+                endTime: endTime,
                 tagFilter: transactionStatisticsFilter.value.tagFilter,
                 keyword: transactionStatisticsFilter.value.keyword,
                 matchMode: transactionStatisticsFilter.value.matchMode,
@@ -2023,6 +2214,8 @@ export const useStatisticsStore = defineStore('statistics', () => {
         transactionCategoryStatisticsData,
         transactionCategoryTrendsData,
         transactionStatisticsStateInvalid,
+        paycheckPeriods,
+        paycheckPeriodsStateInvalid,
         // computed states
         categoricalAnalysisChartDataCategory,
         categoricalOverviewAnalysisData,
@@ -2031,12 +2224,15 @@ export const useStatisticsStore = defineStore('statistics', () => {
         assetTrendsData,
         // functions
         updateTransactionStatisticsInvalidState,
+        updatePaycheckPeriodsInvalidState,
         resetTransactionStatistics,
         initTransactionStatisticsFilter,
         updateTransactionStatisticsFilter,
         getTransactionStatisticsPageParams,
         getTransactionListPageParams,
+        loadPaycheckPeriods,
         loadCategoricalAnalysis,
+        loadPaycheckAnalysis,
         loadTrendAnalysis,
         loadAssetTrends
     };
