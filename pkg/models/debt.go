@@ -7,8 +7,9 @@ import (
 )
 
 // MaximumDebtEntriesCountOfOneRequest is the largest number of debt entries one request may attach,
-// settle or reopen at once. Attaching is done a receipt at a time and settling a visit at a time,
-// so the limit is only what stops a malformed request from touching an unbounded number of rows.
+// settle, forgive or reopen at once. Attaching is done a receipt at a time and settling a visit at
+// a time, so the limit is only what stops a malformed request from touching an unbounded number of
+// rows.
 const MaximumDebtEntriesCountOfOneRequest = 500
 
 // DebtPerson is somebody who owes the user money.
@@ -67,9 +68,21 @@ type DebtEntry struct {
 	// which payment it came back in.
 	SettlementTransactionId int64 `xorm:"NOT NULL"`
 	SettledUnixTime         int64 `xorm:"NOT NULL"`
-	CreatedUnixTime         int64
-	UpdatedUnixTime         int64
-	DeletedUnixTime         int64
+	// ForgivenUnixTime is when what was owed was written off, and is zero while it is still owed or
+	// while it stands as paid back.
+	//
+	// Forgiving is not detaching. The money was spent, the thing was bought for somebody, and both
+	// of those stay on the record - all that changes is that the money is no longer expected back.
+	// It is kept apart from the settlement rather than written as one, because a debt let go and a
+	// debt paid are two different things that only happen to end the same way, and a row saying the
+	// money came back when it never did is a lie the ledger can no longer be checked against.
+	//
+	// It carries a default because it is added to a table that already exists, and a NOT NULL column
+	// without one cannot be added to a populated table.
+	ForgivenUnixTime int64 `xorm:"NOT NULL DEFAULT 0"`
+	CreatedUnixTime  int64
+	UpdatedUnixTime  int64
+	DeletedUnixTime  int64
 }
 
 // DebtPersonGetRequest represents all parameters of a request to get one person
@@ -96,7 +109,8 @@ type DebtPersonDeleteRequest struct {
 // DebtEntryListRequest represents all parameters of a request to list what one person owes
 type DebtEntryListRequest struct {
 	PersonId int64 `form:"personId,string" binding:"required,min=1"`
-	// IncludeSettled asks for what has already been paid back as well as what is still open
+	// IncludeSettled asks for what is no longer owed as well as what is still open - what has been
+	// paid back, and what was forgiven
 	IncludeSettled bool `form:"includeSettled"`
 }
 
@@ -109,9 +123,9 @@ type DebtEntryListByTransactionRequest struct {
 // DebtEntryExportRequest represents all parameters of a request for the receipt of what one person
 // still owes.
 //
-// It names only the person, because a receipt is always for everything still open. What has been
-// paid back is deliberately not offered: the sheet is handed to somebody as a bill, and a paid row
-// on a bill is an invitation to pay it twice.
+// It names only the person, because a receipt is always for everything still open. What is no
+// longer owed is deliberately not offered: the sheet is handed to somebody as a bill, and a row on
+// a bill that was paid or forgiven is an invitation to pay it twice.
 type DebtEntryExportRequest struct {
 	PersonId int64 `form:"personId,string" binding:"required,min=1"`
 }
@@ -178,7 +192,17 @@ type DebtEntrySettleRequest struct {
 	SettlementTransactionId int64    `json:"settlementTransactionId,string" binding:"required,min=1"`
 }
 
-// DebtEntryReopenRequest represents all parameters of a request to put settled entries back on the bill
+// DebtEntryForgiveRequest represents all parameters of a request to write entries off.
+//
+// It names only the entries, because there is nothing else for it to name. No money comes back, so
+// there is no transaction to point at: what was spent was already an expense when it was spent, and
+// forgiving it only means that expense stays the user's own.
+type DebtEntryForgiveRequest struct {
+	Ids []string `json:"ids" binding:"required,min=1,max=500"`
+}
+
+// DebtEntryReopenRequest represents all parameters of a request to put settled or forgiven entries
+// back on the bill
 type DebtEntryReopenRequest struct {
 	Ids []string `json:"ids" binding:"required,min=1,max=500"`
 }
@@ -215,6 +239,11 @@ type DebtEntryInfoResponse struct {
 	Settled                 bool   `json:"settled,omitempty"`
 	SettlementTransactionId int64  `json:"settlementTransactionId,string,omitempty"`
 	SettledTime             int64  `json:"settledTime,omitempty"`
+	// Forgiven says this was written off rather than paid back, and ForgivenTime when that was
+	// decided. It goes on saying that this was bought for this person; it stops saying that this
+	// person is to pay for it.
+	Forgiven     bool  `json:"forgiven,omitempty"`
+	ForgivenTime int64 `json:"forgivenTime,omitempty"`
 	// Manual says this debt was entered by hand and has no transaction behind it
 	Manual bool `json:"manual,omitempty"`
 	// Name is what the position is called on the receipt, or what a debt entered by hand was called,
@@ -259,6 +288,8 @@ func (e *DebtEntry) ToDebtEntryInfoResponse() *DebtEntryInfoResponse {
 		Settled:                 e.SettlementTransactionId > 0,
 		SettlementTransactionId: e.SettlementTransactionId,
 		SettledTime:             e.SettledUnixTime,
+		Forgiven:                e.ForgivenUnixTime > 0,
+		ForgivenTime:            e.ForgivenUnixTime,
 		Manual:                  e.TransactionId <= 0,
 		Name:                    e.Description,
 	}

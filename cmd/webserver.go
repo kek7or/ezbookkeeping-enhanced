@@ -470,6 +470,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/debts/entries/modify.json", bindApi(api.Debts.EntryModifyHandler, config))
 			apiV1Route.POST("/debts/entries/delete.json", bindApi(api.Debts.EntryDeleteHandler, config))
 			apiV1Route.POST("/debts/entries/settle.json", bindApi(api.Debts.EntrySettleHandler, config))
+			apiV1Route.POST("/debts/entries/forgive.json", bindApi(api.Debts.EntryForgiveHandler, config))
 			apiV1Route.POST("/debts/entries/reopen.json", bindApi(api.Debts.EntryReopenHandler, config))
 
 			// Transaction Templates

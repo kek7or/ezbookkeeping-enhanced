@@ -7,6 +7,7 @@ import type {
     DebtEntryCreateBatchRequest,
     DebtEntryCreateManualRequest
 } from '@/models/debt.ts';
+import { isDebtEntryOpen } from '@/models/debt.ts';
 
 import { KnownFileType } from '@/core/file.ts';
 
@@ -85,7 +86,7 @@ export const useDebtsStore = defineStore('debts', () => {
         return map;
     });
 
-    const openEntries = computed<DebtEntryInfoResponse[]>(() => currentEntries.value.filter(entry => !entry.settled));
+    const openEntries = computed<DebtEntryInfoResponse[]>(() => currentEntries.value.filter(entry => isDebtEntryOpen(entry)));
     const settledEntries = computed<DebtEntryInfoResponse[]>(() => currentEntries.value.filter(entry => entry.settled));
 
     function resetDebts(): void {
@@ -410,6 +411,35 @@ export const useDebtsStore = defineStore('debts', () => {
         });
     }
 
+    // forgiveEntries writes things off. Nothing is asked of the ledger: no money comes back, so
+    // there is no transaction to record, and what was spent simply stays the user's own spending.
+    function forgiveEntries({ ids }: { ids: string[] }): Promise<boolean> {
+        return new Promise((resolve, reject) => {
+            services.forgiveDebtEntries({ ids: ids }).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to forgive this' });
+                    return;
+                }
+
+                peopleStateInvalid.value = true;
+
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('failed to forgive debt entries', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to forgive this' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function reopenEntries({ ids }: { ids: string[] }): Promise<boolean> {
         return new Promise((resolve, reject) => {
             services.reopenDebtEntries({ ids: ids }).then(response => {
@@ -502,6 +532,7 @@ export const useDebtsStore = defineStore('debts', () => {
         modifyEntry,
         deleteEntries,
         settleEntries,
+        forgiveEntries,
         reopenEntries,
         exportReceipt
     };

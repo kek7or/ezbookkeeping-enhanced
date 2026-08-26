@@ -19,4 +19,5 @@ var (
 	ErrDebtEntryIsNotManual         = NewNormalError(NormalSubcategoryDebt, 12, http.StatusBadRequest, "debt entry has a transaction and cannot be renamed")
 	ErrDebtEntryDescriptionIsEmpty  = NewNormalError(NormalSubcategoryDebt, 13, http.StatusBadRequest, "debt entry description is empty")
 	ErrDebtPersonOwesNothing        = NewNormalError(NormalSubcategoryDebt, 14, http.StatusBadRequest, "this person owes nothing to make a receipt of")
+	ErrDebtEntryAlreadyForgiven     = NewNormalError(NormalSubcategoryDebt, 15, http.StatusBadRequest, "debt entry has already been forgiven")
 )

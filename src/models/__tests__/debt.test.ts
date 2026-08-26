@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries } from '@/models/debt.ts';
+import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen } from '@/models/debt.ts';
 import type { DebtEntryInfoResponse } from '@/models/debt.ts';
 
 function createEntry(amount: number, currency: string): DebtEntryInfoResponse {
@@ -49,6 +49,15 @@ function settledBy(entry: DebtEntryInfoResponse, settlementTransactionId: string
         settled: true,
         settlementTransactionId: settlementTransactionId,
         settledTime: 1755000000
+    };
+}
+
+// a thing let go says when it was let go, and points at no payment, because none was made
+function forgiven(entry: DebtEntryInfoResponse): DebtEntryInfoResponse {
+    return {
+        ...entry,
+        forgiven: true,
+        forgivenTime: 1755000000
     };
 }
 
@@ -314,5 +323,43 @@ describe('groupDebtEntries', () => {
         ]);
 
         expect(rows.map(row => row.key)).toEqual(['1', '2']);
+    });
+
+    test('leaves what was forgiven out of what a trip can still be paid back for', () => {
+        const rows = groupDebtEntries([
+            forgiven(createReceiptEntry('1', 'r1', 40)),
+            createReceiptEntry('2', 'r1', 47)
+        ]);
+
+        expect(rows.length).toEqual(1);
+        expect(rows[0]!.key).toEqual('receipt_r1');
+        expect(rows[0]!.group!.totalAmount).toEqual(87);
+        expect(rows[0]!.group!.openEntryIds).toEqual(['2']);
+    });
+
+    test('gathers nothing by a repayment when a trip was forgiven rather than paid', () => {
+        const rows = groupDebtEntries([
+            forgiven(createReceiptEntry('1', 'r1', 40)),
+            forgiven(createReceiptEntry('2', 'r1', 47))
+        ]);
+
+        expect(rows.length).toEqual(1);
+        expect(rows[0]!.key).toEqual('receipt_r1');
+        expect(rows[0]!.group!.kind).toEqual('receipt');
+        expect(rows[0]!.group!.openEntryIds).toEqual([]);
+    });
+});
+
+describe('isDebtEntryOpen', () => {
+    test('says something nothing has happened to is still owed', () => {
+        expect(isDebtEntryOpen(createReceiptEntry('1', undefined, 40))).toEqual(true);
+    });
+
+    test('says something paid back is no longer owed', () => {
+        expect(isDebtEntryOpen(settledBy(createReceiptEntry('1', undefined, 40), 's1'))).toEqual(false);
+    });
+
+    test('says something forgiven is no longer owed', () => {
+        expect(isDebtEntryOpen(forgiven(createReceiptEntry('1', undefined, 40)))).toEqual(false);
     });
 });

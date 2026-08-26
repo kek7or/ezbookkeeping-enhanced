@@ -30,6 +30,11 @@ export interface DebtEntryInfoResponse {
     readonly settled?: boolean;
     readonly settlementTransactionId?: string;
     readonly settledTime?: number;
+    // forgiven says this was written off rather than paid back, and forgivenTime when that was
+    // decided. It goes on saying that this was bought for this person; it stops saying that this
+    // person is to pay for it.
+    readonly forgiven?: boolean;
+    readonly forgivenTime?: number;
     // manual says this debt was entered by hand and has no transaction behind it
     readonly manual?: boolean;
     // name is what the position is called on the receipt, or what a debt entered by hand was called,
@@ -101,8 +106,21 @@ export interface DebtEntrySettleRequest {
     readonly settlementTransactionId: string;
 }
 
+// DebtEntryForgiveRequest writes things off. It names only the entries, because no money comes back
+// and so there is no transaction to point at.
+export interface DebtEntryForgiveRequest {
+    readonly ids: string[];
+}
+
 export interface DebtEntryReopenRequest {
     readonly ids: string[];
+}
+
+// isDebtEntryOpen reports whether something is still owed, which is what is totalled, what a
+// repayment can cover, and what goes on a receipt. A thing paid back and a thing let go are both
+// done with, however differently they got there.
+export function isDebtEntryOpen(entry: DebtEntryInfoResponse): boolean {
+    return !entry.settled && !entry.forgiven;
 }
 
 // DebtEntryGroupKind says what the things owed in a group have in common: the shopping trip they
@@ -225,7 +243,7 @@ function makeGroup(kind: DebtEntryGroupKind, id: string, merchantName: string, r
     for (const entry of entries) {
         totalAmount += entry.amount;
 
-        if (!entry.settled) {
+        if (isDebtEntryOpen(entry)) {
             openEntryIds.push(entry.id);
         }
     }

@@ -59,6 +59,7 @@ import type {
     DebtEntryModifyRequest,
     DebtEntryDeleteRequest,
     DebtEntrySettleRequest,
+    DebtEntryForgiveRequest,
     DebtEntryReopenRequest
 } from '@/models/debt.ts';
 import type {
@@ -941,6 +942,9 @@ export default {
     },
     settleDebtEntries: (req: DebtEntrySettleRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/debts/entries/settle.json', req);
+    },
+    forgiveDebtEntries: (req: DebtEntryForgiveRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/debts/entries/forgive.json', req);
     },
     reopenDebtEntries: (req: DebtEntryReopenRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/debts/entries/reopen.json', req);

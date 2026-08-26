@@ -225,19 +225,24 @@ func (s *DebtService) DeletePerson(c core.Context, uid int64, personId int64) er
 }
 
 // GetAllOpenEntriesByUid returns everything that is still owed by anybody, which is what the list of
-// people is totalled from
+// people is totalled from.
+//
+// What has been written off is left out of it for the same reason what has been paid back is: it is
+// no longer expected, and a total of what people owe that counted it would be asking for money
+// nobody is going to hand over.
 func (s *DebtService) GetAllOpenEntriesByUid(c core.Context, uid int64) ([]*models.DebtEntry, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
 
 	var entries []*models.DebtEntry
-	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND settlement_transaction_id=?", uid, false, 0).Find(&entries)
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND settlement_transaction_id=? AND forgiven_unix_time=?", uid, false, 0, 0).Find(&entries)
 
 	return entries, err
 }
 
-// GetEntriesByPersonId returns what one person owes, optionally including what they have already paid back
+// GetEntriesByPersonId returns what one person owes, optionally including what is no longer owed -
+// what they have paid back, and what was written off
 func (s *DebtService) GetEntriesByPersonId(c core.Context, uid int64, personId int64, includeSettled bool) ([]*models.DebtEntry, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
@@ -251,7 +256,7 @@ func (s *DebtService) GetEntriesByPersonId(c core.Context, uid int64, personId i
 	sess := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND person_id=?", uid, false, personId)
 
 	if !includeSettled {
-		sess = sess.And("settlement_transaction_id=?", 0)
+		sess = sess.And("settlement_transaction_id=?", 0).And("forgiven_unix_time=?", 0)
 	}
 
 	err := sess.Find(&entries)
@@ -433,6 +438,12 @@ func (s *DebtService) ModifyEntry(c core.Context, uid int64, entryId int64, amou
 			return errs.ErrDebtEntryAlreadySettled
 		}
 
+		// What was written off is history in the same way. The amount is what was let go, and
+		// changing it afterwards would restate a decision that has already been made.
+		if entry.ForgivenUnixTime > 0 {
+			return errs.ErrDebtEntryAlreadyForgiven
+		}
+
 		updatedRows, err := sess.ID(entryId).Cols(updateCols...).Where("uid=? AND deleted=?", uid, false).Update(updateModel)
 
 		if err != nil {
@@ -537,14 +548,15 @@ type sharedThing struct {
 // were counted in to begin with.
 //
 // Three kinds of thing are left exactly as they are. A debt entered by hand is a share of nothing,
-// as there is no transaction behind it to divide. Anything already paid back is history, and
-// dividing around a settled share would either restate a payment or charge somebody for one that
-// has already been made. And shares that are not an even division of the thing were put there by
-// hand, where the numbers say what the user meant them to say and nothing here may overrule them.
+// as there is no transaction behind it to divide. Anything already closed is history - dividing
+// around a settled share would either restate a payment or charge somebody for one that has already
+// been made, and dividing around a forgiven one would charge somebody more than what was let go was
+// worth. And shares that are not an even division of the thing were put there by hand, where the
+// numbers say what the user meant them to say and nothing here may overrule them.
 func (s *DebtService) resplitSharedThings(sess *xorm.Session, uid int64, removedEntries []*models.DebtEntry, dryRun bool) ([]*models.DebtEntryResplit, error) {
 	things := make([]sharedThing, 0, len(removedEntries))
 	removedShares := make(map[sharedThing][]int64)
-	settledThings := make(map[sharedThing]bool)
+	closedThings := make(map[sharedThing]bool)
 
 	for i := 0; i < len(removedEntries); i++ {
 		entry := removedEntries[i]
@@ -561,8 +573,8 @@ func (s *DebtService) resplitSharedThings(sess *xorm.Session, uid int64, removed
 
 		removedShares[thing] = append(removedShares[thing], entry.Amount)
 
-		if entry.SettlementTransactionId > 0 {
-			settledThings[thing] = true
+		if entry.SettlementTransactionId > 0 || entry.ForgivenUnixTime > 0 {
+			closedThings[thing] = true
 		}
 	}
 
@@ -571,7 +583,7 @@ func (s *DebtService) resplitSharedThings(sess *xorm.Session, uid int64, removed
 	for i := 0; i < len(things); i++ {
 		thing := things[i]
 
-		if settledThings[thing] {
+		if closedThings[thing] {
 			continue
 		}
 
@@ -609,7 +621,7 @@ func (s *DebtService) resplitSharedThing(sess *xorm.Session, uid int64, thing sh
 	oldShares = append(oldShares, removedShares...)
 
 	for i := 0; i < len(remainingEntries); i++ {
-		if remainingEntries[i].SettlementTransactionId > 0 {
+		if remainingEntries[i].SettlementTransactionId > 0 || remainingEntries[i].ForgivenUnixTime > 0 {
 			return nil, nil
 		}
 
@@ -712,7 +724,8 @@ func positiveAmount(amount int64) int64 {
 // SettleEntries marks entries as paid back by one transaction.
 //
 // Every entry named must still be open, because settling something twice would say the money came
-// back twice.
+// back twice, and settling something that was written off would say money came back that was
+// deliberately let go.
 func (s *DebtService) SettleEntries(c core.Context, uid int64, entryIds []int64, settlementTransactionId int64) error {
 	if uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -750,16 +763,76 @@ func (s *DebtService) SettleEntries(c core.Context, uid int64, entryIds []int64,
 			if entries[i].SettlementTransactionId > 0 {
 				return errs.ErrDebtEntryAlreadySettled
 			}
+
+			if entries[i].ForgivenUnixTime > 0 {
+				return errs.ErrDebtEntryAlreadyForgiven
+			}
 		}
 
-		_, err = sess.Cols("settlement_transaction_id", "settled_unix_time", "updated_unix_time").Where("uid=? AND deleted=? AND settlement_transaction_id=?", uid, false, 0).In("entry_id", entryIds).Update(updateModel)
+		_, err = sess.Cols("settlement_transaction_id", "settled_unix_time", "updated_unix_time").Where("uid=? AND deleted=? AND settlement_transaction_id=? AND forgiven_unix_time=?", uid, false, 0, 0).In("entry_id", entryIds).Update(updateModel)
 
 		return err
 	})
 }
 
-// ReopenEntries puts settled entries back on the bill, for when a payment was recorded against the
-// wrong things. The transaction that settled them is left alone - it is the user's to delete or keep.
+// ForgiveEntries writes entries off: they stop being owed, and stay on the record saying so.
+//
+// Nothing is written to the ledger and nothing is asked of it. The money was spent when it was
+// spent and was an expense then; being told it is not coming back does not move it anywhere, it
+// only leaves it where it already was, as the user's own spending. That is also why forgiving is
+// not the same as detaching: detaching says this was never this person's to pay, while forgiving
+// says it was theirs and is being let go, and only one of those is a thing worth being able to look
+// up a year later.
+//
+// Every entry named must still be open. What has been paid back cannot be forgiven - the money is
+// already back - and forgiving twice would move the date of a decision that was made once.
+func (s *DebtService) ForgiveEntries(c core.Context, uid int64, entryIds []int64) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	if len(entryIds) < 1 {
+		return errs.ErrDebtEntryIdInvalid
+	}
+
+	now := time.Now().Unix()
+
+	updateModel := &models.DebtEntry{
+		ForgivenUnixTime: now,
+		UpdatedUnixTime:  now,
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		var entries []*models.DebtEntry
+		err := sess.Where("uid=? AND deleted=?", uid, false).In("entry_id", entryIds).Find(&entries)
+
+		if err != nil {
+			return err
+		}
+
+		if len(entries) != len(entryIds) {
+			return errs.ErrDebtEntryNotFound
+		}
+
+		for i := 0; i < len(entries); i++ {
+			if entries[i].SettlementTransactionId > 0 {
+				return errs.ErrDebtEntryAlreadySettled
+			}
+
+			if entries[i].ForgivenUnixTime > 0 {
+				return errs.ErrDebtEntryAlreadyForgiven
+			}
+		}
+
+		_, err = sess.Cols("forgiven_unix_time", "updated_unix_time").Where("uid=? AND deleted=? AND settlement_transaction_id=? AND forgiven_unix_time=?", uid, false, 0, 0).In("entry_id", entryIds).Update(updateModel)
+
+		return err
+	})
+}
+
+// ReopenEntries puts entries that are no longer owed back on the bill, for when a payment was
+// recorded against the wrong things, or when something written off turns out to be coming back after
+// all. The transaction that settled them is left alone - it is the user's to delete or keep.
 func (s *DebtService) ReopenEntries(c core.Context, uid int64, entryIds []int64) error {
 	if uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -772,11 +845,12 @@ func (s *DebtService) ReopenEntries(c core.Context, uid int64, entryIds []int64)
 	updateModel := &models.DebtEntry{
 		SettlementTransactionId: 0,
 		SettledUnixTime:         0,
+		ForgivenUnixTime:        0,
 		UpdatedUnixTime:         time.Now().Unix(),
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.Cols("settlement_transaction_id", "settled_unix_time", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).In("entry_id", entryIds).Update(updateModel)
+		updatedRows, err := sess.Cols("settlement_transaction_id", "settled_unix_time", "forgiven_unix_time", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).In("entry_id", entryIds).Update(updateModel)
 
 		if err != nil {
 			return err

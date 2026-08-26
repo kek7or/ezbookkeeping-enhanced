@@ -662,7 +662,41 @@ func (a *DebtsApi) EntrySettleHandler(c *core.WebContext) (any, *errs.Error) {
 	return true, nil
 }
 
-// EntryReopenHandler puts settled entries back on the bill for current user
+// EntryForgiveHandler writes entries off for current user, so that they stop being owed and stay on
+// the record as let go.
+//
+// No transaction is named and none is written. The money was already spent, and forgiving it says
+// only that it is not coming back - which is a fact about the person, and so belongs beside the
+// transaction where everything else about the person is kept.
+func (a *DebtsApi) EntryForgiveHandler(c *core.WebContext) (any, *errs.Error) {
+	var entryForgiveReq models.DebtEntryForgiveRequest
+	err := c.ShouldBindJSON(&entryForgiveReq)
+
+	if err != nil {
+		log.Warnf(c, "[debts.EntryForgiveHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	entryIds, errParse := a.parseEntryIds(c, entryForgiveReq.Ids)
+
+	if errParse != nil {
+		return nil, errParse
+	}
+
+	err = a.debts.ForgiveEntries(c, uid, entryIds)
+
+	if err != nil {
+		log.Errorf(c, "[debts.EntryForgiveHandler] failed to forgive debt entries for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[debts.EntryForgiveHandler] user \"uid:%d\" has forgiven %d debt entries", uid, len(entryIds))
+
+	return true, nil
+}
+
+// EntryReopenHandler puts settled or forgiven entries back on the bill for current user
 func (a *DebtsApi) EntryReopenHandler(c *core.WebContext) (any, *errs.Error) {
 	var entryReopenReq models.DebtEntryReopenRequest
 	err := c.ShouldBindJSON(&entryReopenReq)

@@ -80,7 +80,7 @@
                         <v-btn density="comfortable" variant="text" color="default"
                                :prepend-icon="showSettled ? mdiEyeOffOutline : mdiEyeOutline"
                                :disabled="loadingEntries" @click="toggleShowSettled">
-                            {{ showSettled ? tt('Hide Settled') : tt('Show Settled') }}
+                            {{ showSettled ? tt('Show Only What Is Owed') : tt('Show Everything') }}
                         </v-btn>
                         <v-btn class="ms-2" density="comfortable" variant="text" color="default"
                                :prepend-icon="mdiFileExcelOutline" :loading="exportingReceipt"
@@ -162,7 +162,7 @@
                                     </v-btn>
                                 </td>
                             </tr>
-                            <tr :class="[`debt-entry-depth-${row.depth}`, { 'text-medium-emphasis': row.entry.settled }]"
+                            <tr :class="[`debt-entry-depth-${row.depth}`, { 'text-medium-emphasis': !isEntryOpen(row.entry) }]"
                                 v-else-if="!row.group">
                                 <td class="debt-entry-select">
                                     <v-checkbox density="compact" hide-details
@@ -175,6 +175,10 @@
                                         <span :class="{ 'cursor-pointer': !row.entry.manual }" @click="showTransaction(row.entry)">{{ getEntryDescription(row.entry) }}</span>
                                         <v-chip class="ms-2" size="x-small" label v-if="row.entry.manual">{{ tt('By Hand') }}</v-chip>
                                         <v-chip class="ms-2" size="x-small" label v-if="row.entry.settled">{{ tt('Settled') }}</v-chip>
+                                        <v-chip class="ms-2" size="x-small" label v-if="row.entry.forgiven">
+                                            {{ tt('Forgiven') }}
+                                            <v-tooltip activator="parent">{{ getForgivenTooltip(row.entry) }}</v-tooltip>
+                                        </v-chip>
                                         <v-chip class="ms-2" size="x-small" label color="warning" v-if="row.entry.missing">{{ tt('Transaction Deleted') }}</v-chip>
                                     </div>
                                     <div class="text-caption text-medium-emphasis" v-if="getEntryContext(row)">{{ getEntryContext(row) }}</div>
@@ -189,15 +193,19 @@
                                             <v-list>
                                                 <v-list-item :prepend-icon="mdiPencilOutline"
                                                              :title="tt('Change Amount Owed')"
-                                                             v-if="!row.entry.settled"
+                                                             v-if="isEntryOpen(row.entry)"
                                                              @click="changeAmount(row.entry)"></v-list-item>
                                                 <v-list-item :prepend-icon="mdiRenameOutline"
                                                              :title="tt('Rename')"
-                                                             v-if="row.entry.manual && !row.entry.settled"
+                                                             v-if="row.entry.manual && isEntryOpen(row.entry)"
                                                              @click="renameEntry(row.entry)"></v-list-item>
+                                                <v-list-item :prepend-icon="mdiHandHeartOutline"
+                                                             :title="tt('Forgive')"
+                                                             v-if="isEntryOpen(row.entry)"
+                                                             @click="forgive(row.entry)"></v-list-item>
                                                 <v-list-item :prepend-icon="mdiUndoVariant"
                                                              :title="tt('Put Back on the Bill')"
-                                                             v-if="row.entry.settled"
+                                                             v-if="!isEntryOpen(row.entry)"
                                                              @click="reopen(row.entry)"></v-list-item>
                                                 <v-list-item class="text-error" :prepend-icon="mdiDeleteOutline"
                                                              :title="tt('Detach')"
@@ -227,6 +235,11 @@
                             {{ tt('Tick what has been paid back, or what is no longer owed') }}
                         </span>
                         <v-spacer/>
+                        <v-btn color="default" variant="tonal"
+                               :disabled="!selectedOpenEntries.length || updating" @click="forgiveSelected">
+                            {{ tt('Forgive') }}
+                            <v-tooltip activator="parent" open-delay="500">{{ tt('Let these go: they stop being owed and stay on the record as forgiven') }}</v-tooltip>
+                        </v-btn>
                         <v-btn color="error" variant="tonal"
                                :disabled="!selectedEntries.length || updating" @click="detachSelected">
                             {{ tt('Detach') }}
@@ -275,7 +288,7 @@ import { TransactionType } from '@/core/transaction.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
 import type { DebtAmount, DebtEntryGroup, DebtEntryGroupKind, DebtEntryInfoResponse, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
-import { sumDebtAmountsByCurrency, groupDebtEntries } from '@/models/debt.ts';
+import { sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen } from '@/models/debt.ts';
 
 import { KnownFileType } from '@/core/file.ts';
 
@@ -293,6 +306,7 @@ import {
     mdiUndoVariant,
     mdiRenameOutline,
     mdiHandCoinOutline,
+    mdiHandHeartOutline,
     mdiEyeOutline,
     mdiEyeOffOutline,
     mdiChevronDown,
@@ -369,8 +383,9 @@ const selectedOpenEntries = computed<DebtEntryInfoResponse[]>(() => openEntries.
 const selectedEntries = computed<DebtEntryInfoResponse[]>(() => visibleEntries.value.filter(entry => selectedEntryIds.value.indexOf(entry.id) >= 0));
 
 // ticking the whole column means everything a repayment could cover, which is what is still open -
-// a settled row is shown for the record and there is nothing left to do to it
-const selectableEntries = computed<DebtEntryInfoResponse[]>(() => visibleEntries.value.filter(entry => !entry.settled));
+// a row that has been paid back or forgiven is shown for the record and there is nothing left to do
+// to it
+const selectableEntries = computed<DebtEntryInfoResponse[]>(() => visibleEntries.value.filter(entry => isDebtEntryOpen(entry)));
 
 const allSelected = computed<boolean>({
     get: () => selectableEntries.value.length > 0 && selectedOpenEntries.value.length >= selectableEntries.value.length,
@@ -458,6 +473,20 @@ function getDisplayOpenAmounts(person: DebtPersonInfoResponse): string {
 
 function getDisplayTime(unixTime: number): string {
     return formatDateTimeToLongDateTime(parseDateTimeFromUnixTime(unixTime));
+}
+
+function isEntryOpen(entry: DebtEntryInfoResponse): boolean {
+    return isDebtEntryOpen(entry);
+}
+
+// what was forgiven says when it was forgiven, because that is the whole of what the record adds:
+// the thing was owed until that day and has not been owed since
+function getForgivenTooltip(entry: DebtEntryInfoResponse): string {
+    if (!entry.forgivenTime) {
+        return tt('This is no longer owed');
+    }
+
+    return tt('format.misc.debtForgivenOn', { time: getDisplayTime(entry.forgivenTime) });
 }
 
 // a row is dated by when the money moved: a thing owed by when it was bought, and a repayment by
@@ -816,6 +845,54 @@ function detach(entry: DebtEntryInfoResponse): void {
     updating.value = true;
 
     debtsStore.deleteEntries({ ids: [entry.id] }).then(() => {
+        updating.value = false;
+        selectedEntryIds.value = selectedEntryIds.value.filter(id => id !== entry.id);
+        reload(true);
+    }).catch(error => {
+        updating.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+// forgiveSelected lets the ticked things go. They stop being owed and stay exactly where they are,
+// saying that they were owed and were forgiven - which is the one thing detaching them cannot say.
+//
+// Nothing is written to the ledger. What was bought was an expense the day it was bought, and being
+// told the money is not coming back leaves it there as the user's own spending rather than moving
+// it anywhere.
+function forgiveSelected(): void {
+    if (!selectedOpenEntries.value.length) {
+        return;
+    }
+
+    const entryIds = selectedOpenEntries.value.map(entry => entry.id);
+
+    confirmDialog.value?.open('Are you sure you want to forgive the ticked things? They will no longer be owed and will stay on the record as forgiven, and no transaction will be written.').then(() => {
+        updating.value = true;
+
+        debtsStore.forgiveEntries({ ids: entryIds }).then(() => {
+            updating.value = false;
+            selectedEntryIds.value = [];
+            reload(true);
+
+            snackbar.value?.showMessage('These have been forgiven');
+        }).catch(error => {
+            updating.value = false;
+
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
+    });
+}
+
+function forgive(entry: DebtEntryInfoResponse): void {
+    updating.value = true;
+
+    debtsStore.forgiveEntries({ ids: [entry.id] }).then(() => {
         updating.value = false;
         selectedEntryIds.value = selectedEntryIds.value.filter(id => id !== entry.id);
         reload(true);
