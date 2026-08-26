@@ -2942,7 +2942,6 @@
     "Price per kWh": "Price per kWh",
     "The Arbeitspreis on your bill, per kilowatt hour": "The Arbeitspreis on your bill, per kilowatt hour",
     "Base Fee": "Base Fee",
-    "Quoted": "Quoted",
     "per year": "per year",
     "per month": "per month",
     "Monthly Prepayment": "Monthly Prepayment",
@@ -3002,5 +3001,8 @@
     "Unable to save this tariff": "Unable to save this tariff",
     "Unable to delete this tariff": "Unable to delete this tariff",
     "Unable to save this reading": "Unable to save this reading",
-    "Unable to delete this reading": "Unable to delete this reading"
+    "Unable to delete this reading": "Unable to delete this reading",
+    "Charged": "Charged",
+    "How often that base fee is charged": "How often that base fee is charged",
+    "The Grundpreis on your bill, as your bill states it": "The Grundpreis on your bill, as your bill states it"
 }

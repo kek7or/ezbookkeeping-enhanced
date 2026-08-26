@@ -26,6 +26,8 @@
                           :persistent-placeholder="true"
                           :disabled="disabled"
                           :label="tt('Base Fee')"
+                          :hint="tt('The Grundpreis on your bill, as your bill states it')"
+                          :persistent-hint="true"
                           :model-value="modelValue.baseFee"
                           @update:model-value="update({ baseFee: $event })"/>
         </v-col>
@@ -33,7 +35,9 @@
             <v-select item-title="displayName" item-value="type"
                       persistent-placeholder
                       :disabled="disabled"
-                      :label="tt('Quoted')"
+                      :label="tt('Charged')"
+                      :hint="tt('How often that base fee is charged')"
+                      :persistent-hint="true"
                       :items="allBaseFeePeriods"
                       :model-value="modelValue.baseFeePerYear"
                       @update:model-value="update({ baseFeePerYear: $event })"/>
@@ -122,9 +126,12 @@ const isConverted = computed<boolean>(() => props.unit !== UtilityMeterUnit.Kilo
 const pricePerUnitSuffix = computed<string>(() => `/ ${isConverted.value ? 'kWh' : getUtilityMeterUnitName(props.unit)}`);
 const calorificValueSuffix = computed<string>(() => `kWh / ${getUtilityMeterUnitName(props.unit)}`);
 
+// a German bill quotes the Grundpreis either way - Vattenfall's Berlin electricity tariffs state a
+// monthly one, plenty of gas contracts state a yearly one - so the form takes whichever the bill in
+// the user's hand says and converts it, rather than asking them to do the multiplication
 const allBaseFeePeriods = computed(() => [
-    { type: true, displayName: tt('per year') },
-    { type: false, displayName: tt('per month') }
+    { type: false, displayName: tt('per month') },
+    { type: true, displayName: tt('per year') }
 ]);
 
 // what one unit off this dial will be counted as, spelled out, because a Brennwert entered in the

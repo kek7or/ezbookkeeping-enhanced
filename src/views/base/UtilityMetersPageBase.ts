@@ -54,7 +54,7 @@ export function newUtilityTariffFormValue(): UtilityTariffFormValue {
         startDate: firstOfThisMonth,
         unitPrice: 0,
         baseFee: 0,
-        baseFeePerYear: true,
+        baseFeePerYear: false,
         calorificValue: 0,
         stateNumber: 0,
         monthlyPrepayment: 0,
@@ -64,15 +64,18 @@ export function newUtilityTariffFormValue(): UtilityTariffFormValue {
 
 // toUtilityTariffFormValue returns a stored tariff as the form holds it.
 //
-// The base fee comes back as an annual one because that is the only form it is stored in, and a
-// yearly figure re-quoted per month would be a third number for the user to reconcile against a
-// bill that says neither.
+// The base fee is stored for a year and nothing else, but it comes back per month whenever the year
+// divides evenly into twelve - which is exactly when it was entered per month in the first place,
+// off a bill that quotes it that way. It is the same money either way; this is only about handing
+// back the figure the user typed rather than one they would have to divide to recognise.
 export function toUtilityTariffFormValue(tariff: UtilityTariffInfoResponse): UtilityTariffFormValue {
+    const perYear = tariff.baseFeeAnnual % 12 !== 0;
+
     return {
         startDate: getDateStringFromNumericDate(tariff.startDate),
         unitPrice: scaledValueToNumber(tariff.unitPrice, UTILITY_UNIT_PRICE_SCALE),
-        baseFee: tariff.baseFeeAnnual,
-        baseFeePerYear: true,
+        baseFee: perYear ? tariff.baseFeeAnnual : tariff.baseFeeAnnual / 12,
+        baseFeePerYear: perYear,
         calorificValue: scaledValueToNumber(tariff.calorificValue, UTILITY_CONVERSION_FACTOR_SCALE),
         stateNumber: scaledValueToNumber(tariff.stateNumber, UTILITY_CONVERSION_FACTOR_SCALE),
         monthlyPrepayment: tariff.monthlyPrepayment,
