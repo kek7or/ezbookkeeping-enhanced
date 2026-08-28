@@ -30,6 +30,7 @@ import {
     ChartDataType,
     ChartSortingType,
     ChartDateAggregationType,
+    SubscriptionFilterType,
     DEFAULT_CATEGORICAL_CHART_DATA_RANGE,
     DEFAULT_TREND_CHART_DATA_RANGE,
     DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE
@@ -167,6 +168,7 @@ export interface TransactionStatisticsPartialFilter {
     tagFilter?: string;
     keyword?: string;
     matchMode?: number;
+    subscriptionFilter?: number;
     sortingType?: number;
 }
 
@@ -192,6 +194,7 @@ export interface TransactionStatisticsFilter extends TransactionStatisticsPartia
     tagFilter: string;
     keyword: string;
     matchMode: number;
+    subscriptionFilter: number;
     sortingType: number;
 }
 
@@ -224,6 +227,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
         tagFilter: '',
         keyword: '',
         matchMode: KeywordMatchMode.Default.type,
+        subscriptionFilter: SubscriptionFilterType.Default.type,
         sortingType: ChartSortingType.Default.type
     });
 
@@ -1434,6 +1438,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
         transactionStatisticsFilter.value.tagFilter = '';
         transactionStatisticsFilter.value.keyword = '';
         transactionStatisticsFilter.value.matchMode = KeywordMatchMode.Default.type;
+        transactionStatisticsFilter.value.subscriptionFilter = SubscriptionFilterType.Default.type;
         transactionCategoryStatisticsData.value = null;
         transactionCategoryTrendsData.value = [];
         transactionStatisticsStateInvalid.value = true;
@@ -1651,6 +1656,12 @@ export const useStatisticsStore = defineStore('statistics', () => {
             transactionStatisticsFilter.value.matchMode = settingsStore.appSettings.statistics.defaultKeywordMatchMode;
         }
 
+        if (filter && isInteger(filter.subscriptionFilter) && SubscriptionFilterType.isValidType(filter.subscriptionFilter)) {
+            transactionStatisticsFilter.value.subscriptionFilter = filter.subscriptionFilter;
+        } else {
+            transactionStatisticsFilter.value.subscriptionFilter = SubscriptionFilterType.Default.type;
+        }
+
         if (filter && isInteger(filter.sortingType)) {
             transactionStatisticsFilter.value.sortingType = filter.sortingType;
         } else {
@@ -1775,6 +1786,11 @@ export const useStatisticsStore = defineStore('statistics', () => {
             changed = true;
         }
 
+        if (filter && isInteger(filter.subscriptionFilter) && SubscriptionFilterType.isValidType(filter.subscriptionFilter) && transactionStatisticsFilter.value.subscriptionFilter !== filter.subscriptionFilter) {
+            transactionStatisticsFilter.value.subscriptionFilter = filter.subscriptionFilter;
+            changed = true;
+        }
+
         if (filter && isInteger(filter.sortingType) && transactionStatisticsFilter.value.sortingType !== filter.sortingType) {
             transactionStatisticsFilter.value.sortingType = filter.sortingType;
             changed = true;
@@ -1853,6 +1869,10 @@ export const useStatisticsStore = defineStore('statistics', () => {
         if (transactionStatisticsFilter.value.keyword) {
             querys.push('keyword=' + encodeURIComponent(transactionStatisticsFilter.value.keyword));
             querys.push('matchMode=' + transactionStatisticsFilter.value.matchMode);
+        }
+
+        if (transactionStatisticsFilter.value.subscriptionFilter !== SubscriptionFilterType.Default.type) {
+            querys.push('subscriptionFilter=' + transactionStatisticsFilter.value.subscriptionFilter);
         }
 
         querys.push('sortingType=' + transactionStatisticsFilter.value.sortingType);
@@ -2091,6 +2111,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 tagFilter: transactionStatisticsFilter.value.tagFilter,
                 keyword: transactionStatisticsFilter.value.keyword,
                 matchMode: transactionStatisticsFilter.value.matchMode,
+                subscriptionFilter: transactionStatisticsFilter.value.subscriptionFilter,
                 useTransactionTimezone: settingsStore.appSettings.statistics.defaultTimezoneType === TimezoneTypeForStatistics.TransactionTimezone.type
             }).then(response => {
                 const data = response.data;
@@ -2134,6 +2155,7 @@ export const useStatisticsStore = defineStore('statistics', () => {
                 tagFilter: transactionStatisticsFilter.value.tagFilter,
                 keyword: transactionStatisticsFilter.value.keyword,
                 matchMode: transactionStatisticsFilter.value.matchMode,
+                subscriptionFilter: transactionStatisticsFilter.value.subscriptionFilter,
                 useTransactionTimezone: settingsStore.appSettings.statistics.defaultTimezoneType === TimezoneTypeForStatistics.TransactionTimezone.type
             }).then(response => {
                 const data = response.data;

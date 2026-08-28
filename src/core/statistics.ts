@@ -13,6 +13,43 @@ export enum ChartDataAggregationType {
     Last = 1
 }
 
+// SubscriptionFilterType is how a chart treats subscriptions. It crosses the grouping rather than
+// replacing it, so "Expense By Primary Category, subscriptions only" is a question that can be
+// asked - which is the whole reason a subscription is a mark on a transaction and not a category.
+export class SubscriptionFilterType implements TypeAndName {
+    private static readonly allInstances: SubscriptionFilterType[] = [];
+    private static readonly allInstancesByType: Record<number, SubscriptionFilterType> = {};
+
+    public static readonly All = new SubscriptionFilterType(0, 'All Transactions');
+    public static readonly Only = new SubscriptionFilterType(1, 'Subscriptions Only');
+    public static readonly Exclude = new SubscriptionFilterType(2, 'Excluding Subscriptions');
+
+    public static readonly Default = SubscriptionFilterType.All;
+
+    public readonly type: number;
+    public readonly name: string;
+
+    private constructor(type: number, name: string) {
+        this.type = type;
+        this.name = name;
+
+        SubscriptionFilterType.allInstances.push(this);
+        SubscriptionFilterType.allInstancesByType[type] = this;
+    }
+
+    public static values(): SubscriptionFilterType[] {
+        return SubscriptionFilterType.allInstances;
+    }
+
+    public static valueOf(type: number): SubscriptionFilterType | undefined {
+        return SubscriptionFilterType.allInstancesByType[type];
+    }
+
+    public static isValidType(type: number): boolean {
+        return !!SubscriptionFilterType.allInstancesByType[type];
+    }
+}
+
 export class CategoricalChartType implements TypeAndName {
     private static readonly allInstancesForAll: CategoricalChartType[] = [];
     private static readonly allInstancesForDesktop: CategoricalChartType[] = [];

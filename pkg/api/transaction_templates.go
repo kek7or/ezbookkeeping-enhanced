@@ -287,6 +287,7 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 		Type:                 templateModifyReq.Type,
 		CategoryId:           templateModifyReq.CategoryId,
 		AccountId:            templateModifyReq.SourceAccountId,
+		IsSubscription:       template.TemplateType == models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE && templateModifyReq.IsSubscription,
 		TagIds:               strings.Join(templateModifyReq.TagIds, ","),
 		Amount:               templateModifyReq.SourceAmount,
 		RelatedAccountId:     templateModifyReq.DestinationAccountId,
@@ -343,7 +344,8 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 		if template.TemplateType == models.TRANSACTION_TEMPLATE_TYPE_NORMAL {
 			return nil, errs.ErrNothingWillBeUpdated
 		} else if template.TemplateType == models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE {
-			if newTemplate.ScheduledFrequencyType == template.ScheduledFrequencyType &&
+			if newTemplate.IsSubscription == template.IsSubscription &&
+				newTemplate.ScheduledFrequencyType == template.ScheduledFrequencyType &&
 				newTemplate.ScheduledFrequency == template.ScheduledFrequency &&
 				newTemplate.ScheduledStartTime == template.ScheduledStartTime &&
 				newTemplate.ScheduledEndTime == template.ScheduledEndTime &&
@@ -497,6 +499,7 @@ func (a *TransactionTemplatesApi) createNewTemplateModel(uid int64, templateCrea
 		Type:                 templateCreateReq.Type,
 		CategoryId:           templateCreateReq.CategoryId,
 		AccountId:            templateCreateReq.SourceAccountId,
+		IsSubscription:       templateCreateReq.TemplateType == models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE && templateCreateReq.IsSubscription,
 		TagIds:               strings.Join(templateCreateReq.TagIds, ","),
 		Amount:               templateCreateReq.SourceAmount,
 		RelatedAccountId:     templateCreateReq.DestinationAccountId,

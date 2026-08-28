@@ -82,9 +82,11 @@
                                         <v-badge class="right-bottom-icon" color="secondary"
                                                  location="bottom right" offset-x="8" :icon="mdiEyeOffOutline"
                                                  v-if="element.hidden">
-                                            <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline"/>
+                                            <v-icon size="20" start :icon="getTemplateIcon(element)"/>
                                         </v-badge>
-                                        <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline" v-else-if="!element.hidden"/>
+                                        <v-icon size="20" start :icon="getTemplateIcon(element)" v-else-if="!element.hidden">
+                                            <v-tooltip activator="parent" v-if="element.isSubscription">{{ tt('This is a subscription') }}</v-tooltip>
+                                        </v-icon>
                                         <span class="transaction-template-name">{{ element.name }}</span>
                                     </div>
                                 </td>
@@ -147,7 +149,11 @@
                     <tfoot v-if="isScheduleList && !noAvailableTemplate && scheduleTotalRows.length">
                     <tr class="schedule-total-row" :key="row.label" v-for="row in scheduleTotalRows">
                         <td class="text-end font-weight-medium" :colspan="columnCount - 2">{{ row.label }}</td>
-                        <td class="text-end text-no-wrap font-weight-medium">{{ row.amount }}</td>
+                        <td class="text-end text-no-wrap font-weight-medium">
+                            <div>{{ row.amount }}</div>
+                            <div class="text-caption text-medium-emphasis font-weight-regular"
+                                 v-if="row.subscriptionAmount">{{ tt('Of which subscriptions') }} {{ row.subscriptionAmount }}</div>
+                        </td>
                         <td></td>
                     </tr>
                     </tfoot>
@@ -200,8 +206,15 @@ import {
     mdiDrag,
     mdiDotsVertical,
     mdiTextBoxOutline,
-    mdiClockTimeNineOutline
+    mdiClockTimeNineOutline,
+    mdiAutorenew
 } from '@mdi/js';
+
+interface ScheduleTotalRow {
+    label: string;
+    amount: string;
+    subscriptionAmount: string;
+}
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
@@ -241,38 +254,54 @@ const firstDayOfWeek = computed<WeekDayValue>(() => userStore.currentUserFirstDa
 
 const scheduleTotals = computed<ScheduledCostTotal[]>(() => sumScheduledCostByCurrency(templates.value, showHidden.value, getTemplateCurrency));
 
+// The subscription figure is a share of the expense figure above it, not a third total beside it.
+// It is what the page is asked for once the rent and the Abschlag are taken as given: of everything
+// committed, how much is the part that could be cancelled tomorrow.
+const subscriptionTotals = computed<ScheduledCostTotal[]>(() => sumScheduledCostByCurrency(templates.value.filter(template => template.isSubscription), showHidden.value, getTemplateCurrency));
+
 // The footer says what a month and a year of the listed schedules come to. Expense and income are
 // named only when both are present: a page of nothing but outgoings does not need to be told which
 // it is looking at, and a page that has both must never let the two be read as one figure.
-const scheduleTotalRows = computed<{ label: string, amount: string }[]>(() => {
+const scheduleTotalRows = computed<ScheduleTotalRow[]>(() => {
     const totals = scheduleTotals.value;
-    const rows: { label: string, amount: string }[] = [];
+    const rows: ScheduleTotalRow[] = [];
 
     const hasExpense = totals.some(total => !total.yearlyExpense.isZero());
     const hasIncome = totals.some(total => !total.yearlyIncome.isZero());
 
-    for (const [label, pick, present] of [
-        [tt('Expense'), (total: ScheduledCostTotal) => total.yearlyExpense, hasExpense] as const,
-        [tt('Income'), (total: ScheduledCostTotal) => total.yearlyIncome, hasIncome] as const
+    for (const [label, pick, present, subscriptions] of [
+        [tt('Expense'), (total: ScheduledCostTotal) => total.yearlyExpense, hasExpense, subscriptionTotals.value] as const,
+        [tt('Income'), (total: ScheduledCostTotal) => total.yearlyIncome, hasIncome, [] as ScheduledCostTotal[]] as const
     ]) {
         if (!present) {
             continue;
         }
 
         const named = hasExpense && hasIncome;
+        const perMonth = (total: ScheduledCostTotal): BigDecimal => pick(total).divide(12);
 
         rows.push({
             label: named ? `${label} · ${tt('Per Month')}` : tt('Per Month'),
-            amount: formatTotals(totals, total => pick(total).divide(12))
+            amount: formatTotals(totals, perMonth),
+            subscriptionAmount: formatTotals(subscriptions, perMonth)
         });
         rows.push({
             label: named ? `${label} · ${tt('Per Year')}` : tt('Per Year'),
-            amount: formatTotals(totals, pick)
+            amount: formatTotals(totals, pick),
+            subscriptionAmount: formatTotals(subscriptions, pick)
         });
     }
 
     return rows;
 });
+
+function getTemplateIcon(template: TransactionTemplate): string {
+    if (templateType.value !== TemplateType.Schedule.type) {
+        return mdiTextBoxOutline;
+    }
+
+    return template.isSubscription ? mdiAutorenew : mdiClockTimeNineOutline;
+}
 
 // Totals of different currencies are joined rather than summed, because there is no honest single
 // number for them - see sumScheduledCostByCurrency.

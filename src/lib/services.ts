@@ -596,6 +596,10 @@ export default {
             queryParams.push(`match_mode=${req.matchMode}`);
         }
 
+        if (req.subscriptionFilter) {
+            queryParams.push(`subscription_filter=${req.subscriptionFilter}`);
+        }
+
         return axios.get<ApiResponse<TransactionStatisticResponse>>(`v1/transactions/statistics.json?use_transaction_timezone=${req.useTransactionTimezone}` + (queryParams.length ? '&' + queryParams.join('&') : ''));
     },
     getTransactionStatisticsTrends: (req: TransactionStatisticTrendsRequest): ApiResponsePromise<TransactionStatisticTrendsResponseItem[]> => {
@@ -619,6 +623,10 @@ export default {
 
         if (req.matchMode) {
             queryParams.push(`match_mode=${req.matchMode}`);
+        }
+
+        if (req.subscriptionFilter) {
+            queryParams.push(`subscription_filter=${req.subscriptionFilter}`);
         }
 
         return axios.get<ApiResponse<TransactionStatisticTrendsResponseItem[]>>(`v1/transactions/statistics/trends.json?use_transaction_timezone=${req.useTransactionTimezone}` + (queryParams.length ? '&' + queryParams.join('&') : ''));

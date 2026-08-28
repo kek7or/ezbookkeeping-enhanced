@@ -144,6 +144,15 @@ type Transaction struct {
 	// the default is what lets this column be added to a table that already has rows: every
 	// transaction that existed before receipts did belongs to none, which is exactly zero
 	ReceiptId        int64   `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
+	// IsSubscription marks money that went to a service subscribed to rather than a bill that had
+	// to be paid. It is a second axis and not a category: Netflix stays Entertainment and the gym
+	// stays Sport, and the statistics can be asked for either the committed part of a category or
+	// the rest of it without one answer being destroyed to give the other.
+	//
+	// It is set from the template for a schedule that posts itself, and by hand for a charge that
+	// lands on a day nobody could name in advance. The default is what lets this column be added to
+	// a table that already has rows: nothing recorded before subscriptions could be marked is one.
+	IsSubscription   bool    `xorm:"NOT NULL DEFAULT 0"`
 	GeoLongitude     float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
 	GeoLatitude      float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
 	CreatedIp        string  `xorm:"VARCHAR(39)"`
@@ -177,6 +186,7 @@ type TransactionCreateRequest struct {
 	SourceAmount         int64                          `json:"sourceAmount" binding:"min=-999999999999999,max=999999999999999"`
 	DestinationAmount    int64                          `json:"destinationAmount" binding:"min=-999999999999999,max=999999999999999"`
 	HideAmount           bool                           `json:"hideAmount"`
+	IsSubscription       bool                           `json:"isSubscription"`
 	TagIds               []string                       `json:"tagIds"`
 	PictureIds           []string                       `json:"pictureIds"`
 	Comment              string                         `json:"comment" binding:"max=255"`
@@ -205,6 +215,7 @@ type TransactionModifyRequest struct {
 	SourceAmount         int64                          `json:"sourceAmount" binding:"min=-999999999999999,max=999999999999999"`
 	DestinationAmount    int64                          `json:"destinationAmount" binding:"min=-999999999999999,max=999999999999999"`
 	HideAmount           bool                           `json:"hideAmount"`
+	IsSubscription       bool                           `json:"isSubscription"`
 	TagIds               []string                       `json:"tagIds"`
 	PictureIds           []string                       `json:"pictureIds"`
 	Comment              string                         `json:"comment" binding:"max=255"`
@@ -309,6 +320,19 @@ type TransactionReconciliationStatementRequest struct {
 	EndTime   int64 `form:"end_time"`
 }
 
+// TransactionSubscriptionFilterType represents how a statistics query treats subscriptions
+type TransactionSubscriptionFilterType byte
+
+// Transaction subscription filter types
+const (
+	// TRANSACTION_SUBSCRIPTION_FILTER_NONE counts every transaction, subscription or not
+	TRANSACTION_SUBSCRIPTION_FILTER_NONE TransactionSubscriptionFilterType = 0
+	// TRANSACTION_SUBSCRIPTION_FILTER_ONLY counts only what is marked a subscription
+	TRANSACTION_SUBSCRIPTION_FILTER_ONLY TransactionSubscriptionFilterType = 1
+	// TRANSACTION_SUBSCRIPTION_FILTER_EXCLUDE counts everything that is not
+	TRANSACTION_SUBSCRIPTION_FILTER_EXCLUDE TransactionSubscriptionFilterType = 2
+)
+
 // TransactionStatisticRequest represents all parameters of transaction statistic request
 type TransactionStatisticRequest struct {
 	StartTime              int64          `form:"start_time" binding:"min=0"`
@@ -317,6 +341,11 @@ type TransactionStatisticRequest struct {
 	Keyword                string         `form:"keyword"`
 	MatchMode              core.MatchMode `form:"match_mode" binding:"min=0,max=1"`
 	UseTransactionTimezone bool           `form:"use_transaction_timezone"`
+	// SubscriptionFilter narrows the query to the committed part of every category, or to the rest
+	// of it. It crosses the grouping rather than replacing it, so "Expense By Primary Category,
+	// subscriptions only" is a question that can be asked - which is the whole reason a subscription
+	// is a mark on a transaction and not a category of its own.
+	SubscriptionFilter TransactionSubscriptionFilterType `form:"subscription_filter" binding:"min=0,max=2"`
 }
 
 // TransactionStatisticTrendsRequest represents all parameters of transaction statistic trends request
@@ -326,6 +355,8 @@ type TransactionStatisticTrendsRequest struct {
 	Keyword                string         `form:"keyword"`
 	MatchMode              core.MatchMode `form:"match_mode" binding:"min=0,max=1"`
 	UseTransactionTimezone bool           `form:"use_transaction_timezone"`
+	// SubscriptionFilter is the same narrowing as on TransactionStatisticRequest
+	SubscriptionFilter TransactionSubscriptionFilterType `form:"subscription_filter" binding:"min=0,max=2"`
 }
 
 // TransactionStatisticAssetTrendsRequest represents all parameters of transaction statistic asset trends request
@@ -433,6 +464,7 @@ type TransactionInfoResponse struct {
 	SourceAmount         int64                                    `json:"sourceAmount"`
 	DestinationAmount    int64                                    `json:"destinationAmount,omitempty"`
 	HideAmount           bool                                     `json:"hideAmount"`
+	IsSubscription       bool                                     `json:"isSubscription"`
 	TagIds               []string                                 `json:"tagIds"`
 	Tags                 []*TransactionTagInfoResponse            `json:"tags,omitempty"`
 	Pictures             TransactionPictureInfoBasicResponseSlice `json:"pictures,omitempty"`
@@ -651,6 +683,7 @@ func (t *Transaction) ToTransactionInfoResponse(tagIds []int64, editable bool) *
 		SourceAmount:         sourceAmount,
 		DestinationAmount:    destinationAmount,
 		HideAmount:           t.HideAmount,
+		IsSubscription:       t.IsSubscription,
 		TagIds:               utils.Int64ArrayToStringArray(tagIds),
 		Comment:              t.Comment,
 		GeoLocation:          geoLocation,

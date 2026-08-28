@@ -45,6 +45,15 @@ type TransactionTemplate struct {
 	ScheduledEndTime           *int64                           `xorm:"INDEX(IDX_transaction_template_deleted_type_freqtype_scheduled_time)"`
 	ScheduledAt                int16                            `xorm:"INDEX(IDX_transaction_template_deleted_type_freqtype_scheduled_time)"`
 	ScheduledTimezoneUtcOffset int16
+	// IsSubscription marks a schedule as a service subscribed to rather than a bill that has to be
+	// paid - Netflix rather than the rent. Both recur and both are committed money, so neither the
+	// template type nor the frequency can tell them apart, and only the person paying knows which
+	// is which. It is what a subscription total is counted over, and what a transaction created
+	// from this template is marked with.
+	//
+	// It carries a default because it is added to a table that already has rows: every schedule
+	// that existed before subscriptions could be marked is a plain schedule, which is exactly false.
+	IsSubscription             bool   `xorm:"NOT NULL DEFAULT 0"`
 	TagIds                     string `xorm:"VARCHAR(255) NOT NULL"`
 	Amount                     int64  `xorm:"NOT NULL"`
 	RelatedAccountId           int64  `xorm:"NOT NULL"`
@@ -79,6 +88,7 @@ type TransactionTemplateCreateRequest struct {
 	SourceAmount               int64                             `json:"sourceAmount" binding:"min=-999999999999999,max=999999999999999"`
 	DestinationAmount          int64                             `json:"destinationAmount" binding:"min=-999999999999999,max=999999999999999"`
 	HideAmount                 bool                              `json:"hideAmount"`
+	IsSubscription             bool                              `json:"isSubscription"`
 	TagIds                     []string                          `json:"tagIds"`
 	Comment                    string                            `json:"comment" binding:"max=255"`
 	ScheduledFrequencyType     *TransactionScheduleFrequencyType `json:"scheduledFrequencyType" binding:"omitempty"`
@@ -106,6 +116,7 @@ type TransactionTemplateModifyRequest struct {
 	SourceAmount               int64                             `json:"sourceAmount" binding:"min=-999999999999999,max=999999999999999"`
 	DestinationAmount          int64                             `json:"destinationAmount" binding:"min=-999999999999999,max=999999999999999"`
 	HideAmount                 bool                              `json:"hideAmount"`
+	IsSubscription             bool                              `json:"isSubscription"`
 	TagIds                     []string                          `json:"tagIds"`
 	Comment                    string                            `json:"comment" binding:"max=255"`
 	ScheduledFrequencyType     *TransactionScheduleFrequencyType `json:"scheduledFrequencyType" binding:"omitempty"`
@@ -141,6 +152,7 @@ type TransactionTemplateInfoResponse struct {
 	*TransactionInfoResponse
 	TemplateType           TransactionTemplateType           `json:"templateType"`
 	Name                   string                            `json:"name"`
+	IsSubscription         bool                              `json:"isSubscription"`
 	ScheduledFrequencyType *TransactionScheduleFrequencyType `json:"scheduledFrequencyType,omitempty"`
 	ScheduledFrequency     *string                           `json:"scheduledFrequency,omitempty"`
 	ScheduledStartDate     *string                           `json:"scheduledStartDate" binding:"omitempty"`
@@ -175,6 +187,7 @@ func (t *TransactionTemplate) ToTransactionTemplateInfoResponse(serverUtcOffset 
 		TransactionInfoResponse: t.toTransactionInfoResponse(utcOffset),
 		TemplateType:            t.TemplateType,
 		Name:                    t.Name,
+		IsSubscription:          t.IsSubscription,
 		DisplayOrder:            t.DisplayOrder,
 		Hidden:                  t.Hidden,
 	}

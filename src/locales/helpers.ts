@@ -158,6 +158,7 @@ import {
     AccountBalanceTrendChartType,
     ChartDataType,
     ChartSortingType,
+    SubscriptionFilterType,
     ChartDateAggregationType
 } from '@/core/statistics.ts';
 
@@ -2653,6 +2654,7 @@ export function useI18n() {
         getAllTransactionQuickSaveButtonStyles: () => getLocalizedDisplayNameAndType(TransactionQuickSaveButtonStyle.values()),
         getAllTransactionQuickAddButtonActionTypes: () => getLocalizedDisplayNameAndType(TransactionQuickAddButtonActionType.values()),
         getAllTransactionScheduledFrequencyTypes: () => getLocalizedDisplayNameAndType(ScheduledTemplateFrequencyType.values()),
+        getAllSubscriptionFilterTypes: () => getLocalizedDisplayNameAndType(SubscriptionFilterType.values()),
         getAllImportTransactionColumnTypes: () => getLocalizedDisplayNameAndType(ImportTransactionColumnType.values()),
         getAllTransactionDefaultCategories,
         getAllDisplayExchangeRates,

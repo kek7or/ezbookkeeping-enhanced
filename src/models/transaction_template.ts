@@ -15,7 +15,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
     public displayOrder: number;
     public hidden: boolean;
 
-    private constructor(id: string, templateType: number, name: string, type: number, categoryId: string, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmount: number, destinationAmount: number, hideAmount: boolean, scheduledFrequencyType: number | undefined, scheduledFrequency: string | undefined, scheduledStartDate: TextualYearMonthDay | undefined, scheduledEndDate: TextualYearMonthDay | undefined, scheduledAt: number | undefined, tagIds: string[], comment: string, editable: boolean, displayOrder: number, hidden: boolean) {
+    private constructor(id: string, templateType: number, name: string, type: number, categoryId: string, timeZone: string | undefined, utcOffset: number, sourceAccountId: string, destinationAccountId: string, sourceAmount: number, destinationAmount: number, hideAmount: boolean, scheduledFrequencyType: number | undefined, scheduledFrequency: string | undefined, scheduledStartDate: TextualYearMonthDay | undefined, scheduledEndDate: TextualYearMonthDay | undefined, scheduledAt: number | undefined, tagIds: string[], comment: string, editable: boolean, displayOrder: number, hidden: boolean, isSubscription: boolean) {
         super(id, '', type, categoryId, 0, timeZone, utcOffset, sourceAccountId, destinationAccountId, sourceAmount, destinationAmount, hideAmount, tagIds, comment, editable);
         this.templateType = templateType;
         this.name = name;
@@ -26,6 +26,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
         this.scheduledAt = scheduledAt;
         this.displayOrder = displayOrder;
         this.hidden = hidden;
+        this.isSubscription = isSubscription;
     }
 
     public fillFrom(other: TransactionTemplate): void {
@@ -39,6 +40,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             this.scheduledEndDate = other.scheduledEndDate;
             this.utcOffset = other.utcOffset;
             this.timeZone = undefined;
+            this.isSubscription = other.isSubscription;
         }
     }
 
@@ -53,6 +55,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
+            isSubscription: this.templateType === TemplateType.Schedule.type && this.isSubscription,
             tagIds: this.tagIds,
             comment: this.comment,
             scheduledFrequencyType: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequencyType : undefined,
@@ -75,6 +78,7 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
+            isSubscription: this.templateType === TemplateType.Schedule.type && this.isSubscription,
             tagIds: this.tagIds,
             comment: this.comment,
             scheduledFrequencyType: this.templateType === TemplateType.Schedule.type ? this.scheduledFrequencyType : undefined,
@@ -108,7 +112,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             transaction.comment,
             true,
             0,
-            false
+            false,
+            false // isSubscription
         );
     }
 
@@ -135,7 +140,8 @@ export class TransactionTemplate extends Transaction implements TransactionTempl
             templateResponse.comment,
             true, // editable
             templateResponse.displayOrder,
-            templateResponse.hidden
+            templateResponse.hidden,
+            templateResponse.isSubscription ?? false
         );
     }
 
@@ -160,6 +166,7 @@ export interface TransactionTemplateCreateRequest {
     readonly sourceAmount: number;
     readonly destinationAmount: number;
     readonly hideAmount: boolean;
+    readonly isSubscription: boolean;
     readonly tagIds: string[];
     readonly comment: string;
     readonly scheduledFrequencyType?: number;
@@ -180,6 +187,7 @@ export interface TransactionTemplateModifyRequest {
     readonly sourceAmount: number;
     readonly destinationAmount: number;
     readonly hideAmount: boolean;
+    readonly isSubscription: boolean;
     readonly tagIds: string[];
     readonly comment: string;
     readonly scheduledFrequencyType?: number;
@@ -210,6 +218,7 @@ export interface TransactionTemplateDeleteRequest {
 export interface TransactionTemplateInfoResponse extends TransactionInfoResponse {
     readonly templateType: number;
     readonly name: string;
+    readonly isSubscription?: boolean;
     readonly scheduledFrequencyType?: number;
     readonly scheduledFrequency?: string;
     readonly scheduledStartDate?: TextualYearMonthDay;

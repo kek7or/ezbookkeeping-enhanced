@@ -1458,6 +1458,7 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 			AccountId:         template.AccountId,
 			Amount:            template.Amount,
 			HideAmount:        template.HideAmount,
+			IsSubscription:    template.IsSubscription,
 			Comment:           template.Comment,
 			CreatedIp:         c.ClientIP(),
 			ScheduledCreated:  true,
@@ -1696,6 +1697,10 @@ func (s *TransactionService) ModifyTransaction(c core.Context, transaction *mode
 
 		if transaction.HideAmount != oldTransaction.HideAmount {
 			updateCols = append(updateCols, "hide_amount")
+		}
+
+		if transaction.IsSubscription != oldTransaction.IsSubscription {
+			updateCols = append(updateCols, "is_subscription")
 		}
 
 		if transaction.Comment != oldTransaction.Comment {
@@ -2971,6 +2976,19 @@ func appendExcludedCategoryIdsCondition(condition string, conditionParams []any,
 	return condition + " AND category_id NOT IN (" + categoryIdsCondition.String() + ")", conditionParams
 }
 
+// appendSubscriptionFilterCondition narrows a statistics query to the subscriptions or to everything
+// that is not one. It is a condition on the transaction rather than a different grouping, so it
+// composes with whatever the query was already grouping by.
+func appendSubscriptionFilterCondition(condition string, conditionParams []any, subscriptionFilter models.TransactionSubscriptionFilterType) (string, []any) {
+	if subscriptionFilter == models.TRANSACTION_SUBSCRIPTION_FILTER_ONLY {
+		return condition + " AND is_subscription=?", append(conditionParams, true)
+	} else if subscriptionFilter == models.TRANSACTION_SUBSCRIPTION_FILTER_EXCLUDE {
+		return condition + " AND is_subscription=?", append(conditionParams, false)
+	}
+
+	return condition, conditionParams
+}
+
 // GetAccountsTotalIncomeAndExpense returns the every accounts total income and expense amount by specific date range
 func (s *TransactionService) GetAccountsTotalIncomeAndExpense(c core.Context, uid int64, startUnixTime int64, endUnixTime int64, excludeAccountIds []int64, excludeCategoryIds []int64, clientTimezone *time.Location, useTransactionTimezone bool) (map[int64]int64, map[int64]int64, error) {
 	if uid <= 0 {
@@ -3110,7 +3128,7 @@ func (s *TransactionService) GetAccountsTotalIncomeAndExpense(c core.Context, ui
 }
 
 // GetAccountsAndCategoriesTotalInflowAndOutflow returns the every accounts and categories total inflows and outflows amount by specific date range
-func (s *TransactionService) GetAccountsAndCategoriesTotalInflowAndOutflow(c core.Context, uid int64, startUnixTime int64, endUnixTime int64, tagFilters []*models.TransactionTagFilter, noTags bool, keyword string, matchMode core.MatchMode, clientTimezone *time.Location, useTransactionTimezone bool) ([]*models.Transaction, error) {
+func (s *TransactionService) GetAccountsAndCategoriesTotalInflowAndOutflow(c core.Context, uid int64, startUnixTime int64, endUnixTime int64, tagFilters []*models.TransactionTagFilter, noTags bool, keyword string, matchMode core.MatchMode, subscriptionFilter models.TransactionSubscriptionFilterType, clientTimezone *time.Location, useTransactionTimezone bool) ([]*models.Transaction, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
@@ -3145,6 +3163,7 @@ func (s *TransactionService) GetAccountsAndCategoriesTotalInflowAndOutflow(c cor
 	}
 
 	condition, conditionParams = appendExcludedCategoryIdsCondition(condition, conditionParams, statisticsExcludedCategoryIds)
+	condition, conditionParams = appendSubscriptionFilterCondition(condition, conditionParams, subscriptionFilter)
 
 	minTransactionTime := startTransactionTime
 	maxTransactionTime := endTransactionTime
@@ -3244,7 +3263,7 @@ func (s *TransactionService) GetAccountsAndCategoriesTotalInflowAndOutflow(c cor
 }
 
 // GetAccountsAndCategoriesMonthlyInflowAndOutflow returns the every accounts monthly inflows and outflows amount by specific date range
-func (s *TransactionService) GetAccountsAndCategoriesMonthlyInflowAndOutflow(c core.Context, uid int64, startYear int32, startMonth int32, endYear int32, endMonth int32, tagFilters []*models.TransactionTagFilter, noTags bool, keyword string, matchMode core.MatchMode, clientTimezone *time.Location, useTransactionTimezone bool) (map[int32][]*models.Transaction, error) {
+func (s *TransactionService) GetAccountsAndCategoriesMonthlyInflowAndOutflow(c core.Context, uid int64, startYear int32, startMonth int32, endYear int32, endMonth int32, tagFilters []*models.TransactionTagFilter, noTags bool, keyword string, matchMode core.MatchMode, subscriptionFilter models.TransactionSubscriptionFilterType, clientTimezone *time.Location, useTransactionTimezone bool) (map[int32][]*models.Transaction, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
@@ -3284,6 +3303,7 @@ func (s *TransactionService) GetAccountsAndCategoriesMonthlyInflowAndOutflow(c c
 	}
 
 	condition, conditionParams = appendExcludedCategoryIdsCondition(condition, conditionParams, statisticsExcludedCategoryIds)
+	condition, conditionParams = appendSubscriptionFilterCondition(condition, conditionParams, subscriptionFilter)
 
 	minTransactionTime := startTransactionTime
 	maxTransactionTime := endTransactionTime

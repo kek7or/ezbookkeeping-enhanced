@@ -47,6 +47,7 @@ export function useStatisticsTransactionPageBase() {
         getAllDateRanges,
         getAllStatisticsSortingTypes,
         getAllStatisticsDateAggregationTypes,
+        getAllSubscriptionFilterTypes,
         formatDateTimeToLongDate,
         formatDateTimeToLongDateTime,
         formatDateTimeToGregorianLikeLongYearMonth,
@@ -84,6 +85,7 @@ export function useStatisticsTransactionPageBase() {
         }
     });
     const allSortingTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsSortingTypes());
+    const allSubscriptionFilterTypes = computed<TypeAndDisplayName[]>(() => getAllSubscriptionFilterTypes());
     const allTrendAnalysisDateAggregationTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsDateAggregationTypes(StatisticsAnalysisType.TrendAnalysis, false));
     const allAssetTrendsDateAggregationTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsDateAggregationTypes(StatisticsAnalysisType.AssetTrends, false));
 
@@ -292,6 +294,10 @@ export function useStatisticsTransactionPageBase() {
         return canUseServerCustomFilter.value;
     });
 
+    const canUseSubscriptionFilter = computed<boolean>(() => {
+        return canUseServerCustomFilter.value;
+    });
+
     const showAmountInChart = computed<boolean>(() => {
         if (hideAmount.value) {
             return false;
@@ -427,6 +433,7 @@ export function useStatisticsTransactionPageBase() {
         fiscalYearStart,
         allDateRanges,
         allSortingTypes,
+        allSubscriptionFilterTypes,
         allTrendAnalysisDateAggregationTypes,
         allAssetTrendsDateAggregationTypes,
         query,
@@ -445,6 +452,7 @@ export function useStatisticsTransactionPageBase() {
         canUseCategoryFilter,
         canUseTagFilter,
         canUseKeywordFilter,
+        canUseSubscriptionFilter,
         showAmountInChart,
         totalAmountName,
         showPercentInCategoricalChart,

@@ -191,6 +191,16 @@
                                                                      :title="tt('Filter Transaction Tags')"
                                                                      @click="showFilterTagDialog = true"
                                                                      v-if="canUseTagFilter"></v-list-item>
+                                                        <template v-if="canUseSubscriptionFilter">
+                                                            <v-divider class="my-2"/>
+                                                            <v-list-subheader>{{ tt('Subscriptions') }}</v-list-subheader>
+                                                            <v-list-item :disabled="loading"
+                                                                         :key="subscriptionFilterType.type"
+                                                                         :prepend-icon="query.subscriptionFilter === subscriptionFilterType.type ? mdiCheck : mdiCheckboxBlankOutline"
+                                                                         :title="subscriptionFilterType.displayName"
+                                                                         v-for="subscriptionFilterType in allSubscriptionFilterTypes"
+                                                                         @click="setSubscriptionFilter(subscriptionFilterType.type)"></v-list-item>
+                                                        </template>
                                                         <v-divider class="my-2" v-if="!isQuerySpecialChartType" />
                                                         <v-list-item :prepend-icon="mdiExport"
                                                                      :title="tt('Export Results')"
@@ -548,6 +558,7 @@ import {
     ChartDataType,
     ChartSortingType,
     ChartDateAggregationType,
+    SubscriptionFilterType,
     ExportMermaidChartType
 } from '@/core/statistics.ts';
 
@@ -571,6 +582,7 @@ import {
 
 import {
     mdiCheck,
+    mdiCheckboxBlankOutline,
     mdiArrowLeft,
     mdiArrowRight,
     mdiCalendarRangeOutline,
@@ -600,6 +612,7 @@ interface TransactionStatisticsProps {
     initTagFilter?: string,
     initKeyword?: string;
     initMatchMode?: string;
+    initSubscriptionFilter?: string;
     initSortingType?: string,
     initTrendDateAggregationType?: string
     initAssetTrendsDateAggregationType?: string
@@ -630,6 +643,7 @@ const {
     fiscalYearStart,
     allDateRanges,
     allSortingTypes,
+    allSubscriptionFilterTypes,
     allTrendAnalysisDateAggregationTypes,
     allAssetTrendsDateAggregationTypes,
     query,
@@ -645,6 +659,7 @@ const {
     canUseCategoryFilter,
     canUseTagFilter,
     canUseKeywordFilter,
+    canUseSubscriptionFilter,
     showAmountInChart,
     totalAmountName,
     showPercentInCategoricalChart,
@@ -796,6 +811,7 @@ function init(initProps: TransactionStatisticsProps): void {
         tagFilter: initProps.initTagFilter,
         keyword: initProps.initKeyword,
         matchMode: initProps.initMatchMode ? parseInt(initProps.initMatchMode) : undefined,
+        subscriptionFilter: initProps.initSubscriptionFilter ? parseInt(initProps.initSubscriptionFilter) : undefined,
         sortingType: initProps.initSortingType ? parseInt(initProps.initSortingType) : undefined
     };
 
@@ -1110,6 +1126,22 @@ function setChartType(type?: number): void {
 function setChartDataType(type: number): void {
     const changed = statisticsStore.updateTransactionStatisticsFilter({
         chartDataType: type
+    });
+
+    if (changed) {
+        router.push(getFilterLinkUrl());
+    }
+}
+
+// The subscription filter narrows every chart the server answers, and rides in the page url with
+// the rest of the query so a filtered chart can be reloaded and linked to like any other.
+function setSubscriptionFilter(type: number): void {
+    if (!SubscriptionFilterType.isValidType(type)) {
+        return;
+    }
+
+    const changed = statisticsStore.updateTransactionStatisticsFilter({
+        subscriptionFilter: type
     });
 
     if (changed) {
@@ -1463,6 +1495,7 @@ onBeforeRouteUpdate((to) => {
             initTagFilter: (to.query['tagFilter'] as string | null) || undefined,
             initKeyword: (to.query['keyword'] as string | null) || undefined,
             initMatchMode: (to.query['matchMode'] as string | null) || undefined,
+            initSubscriptionFilter: (to.query['subscriptionFilter'] as string | null) || undefined,
             initSortingType: (to.query['sortingType'] as string | null) || undefined,
             initTrendDateAggregationType: (to.query['trendDateAggregationType'] as string | null) || undefined,
             initAssetTrendsDateAggregationType: (to.query['assetTrendsDateAggregationType'] as string | null) || undefined

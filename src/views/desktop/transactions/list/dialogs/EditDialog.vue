@@ -278,6 +278,16 @@
                                         v-model:type="transaction.scheduledFrequencyType"
                                         v-model="transaction.scheduledFrequency" />
                                 </v-col>
+                                <v-col cols="12" md="6" v-if="type === TransactionEditPageType.Transaction || (transaction instanceof TransactionTemplate && transaction.templateType === TemplateType.Schedule.type)">
+                                    <v-checkbox class="mt-2"
+                                                density="comfortable"
+                                                :readonly="mode === TransactionEditPageMode.View"
+                                                :disabled="loading || submitting || recognizing"
+                                                :label="tt('This is a subscription')"
+                                                :hint="tt('A service subscribed to rather than a bill that has to be paid, counted separately in the schedule totals')"
+                                                persistent-hint
+                                                v-model="transaction.isSubscription" />
+                                </v-col>
                                 <v-col cols="12" md="6" v-if="type === TransactionEditPageType.Transaction || (type === TransactionEditPageType.Template && transaction instanceof TransactionTemplate && transaction.templateType === TemplateType.Schedule.type)">
                                     <v-autocomplete
                                         class="transaction-edit-timezone"

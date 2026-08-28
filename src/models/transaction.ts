@@ -26,6 +26,11 @@ export class Transaction implements TransactionInfoResponse {
     public sourceAmount: number;
     public destinationAmount: number;
     public hideAmount: boolean;
+    // whether this went to a service subscribed to rather than a bill that had to be paid. It is a
+    // second axis and not a category - see the model on the server side. It is not a constructor
+    // parameter because every caller of a fifteen-argument constructor would have to be touched to
+    // pass a default that is right for all of them.
+    public isSubscription: boolean = false;
     public tagIds: string[];
     public comment: string;
     public editable: boolean;
@@ -246,6 +251,7 @@ export class Transaction implements TransactionInfoResponse {
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
+            isSubscription: this.isSubscription,
             tagIds: this.tagIds,
             pictureIds: this.getPictureIds(),
             comment: this.comment,
@@ -272,6 +278,7 @@ export class Transaction implements TransactionInfoResponse {
             sourceAmount: this.sourceAmount,
             destinationAmount: this.type === TransactionType.Transfer ? this.destinationAmount : 0,
             hideAmount: this.hideAmount,
+            isSubscription: this.isSubscription,
             tagIds: this.tagIds,
             pictureIds: this.getPictureIds(),
             comment: this.comment,
@@ -338,6 +345,8 @@ export class Transaction implements TransactionInfoResponse {
             transactionResponse.comment,
             transactionResponse.editable
         );
+
+        transaction.isSubscription = transactionResponse.isSubscription ?? false;
 
         if (transactionResponse.category) {
             transaction.setCategory(TransactionCategory.of(transactionResponse.category));
@@ -669,6 +678,7 @@ export interface TransactionCreateRequest {
     readonly sourceAmount: number;
     readonly destinationAmount: number;
     readonly hideAmount: boolean;
+    readonly isSubscription: boolean;
     readonly tagIds: string[];
     readonly pictureIds: string[];
     readonly comment: string;
@@ -691,6 +701,7 @@ export interface TransactionModifyRequest {
     readonly sourceAmount: number;
     readonly destinationAmount: number;
     readonly hideAmount: boolean;
+    readonly isSubscription: boolean;
     readonly tagIds: string[];
     readonly pictureIds: string[];
     readonly comment: string;
@@ -804,6 +815,7 @@ export interface TransactionInfoResponse {
     readonly sourceAmount: number;
     readonly destinationAmount: number;
     readonly hideAmount: boolean;
+    readonly isSubscription?: boolean;
     readonly tagIds: string[];
     readonly tags?: TransactionTagInfoResponse[];
     readonly pictures?: TransactionPictureInfoBasicResponse[];
@@ -820,6 +832,7 @@ export interface TransactionStatisticRequest {
     readonly tagFilter: string;
     readonly keyword: string;
     readonly matchMode: number;
+    readonly subscriptionFilter: number;
     readonly useTransactionTimezone: boolean;
 }
 
@@ -832,6 +845,7 @@ export interface TransactionStatisticTrendsRequest extends YearMonthRangeRequest
     readonly tagFilter: string;
     readonly keyword: string;
     readonly matchMode: number;
+    readonly subscriptionFilter: number;
     readonly useTransactionTimezone: boolean;
 }
 
