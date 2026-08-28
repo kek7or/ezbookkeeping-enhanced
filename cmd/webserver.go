@@ -473,6 +473,14 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/debts/entries/forgive.json", bindApi(api.Debts.EntryForgiveHandler, config))
 			apiV1Route.POST("/debts/entries/reopen.json", bindApi(api.Debts.EntryReopenHandler, config))
 
+			// Budget Plans
+			apiV1Route.GET("/budget_plans/get.json", bindApi(api.BudgetPlans.BudgetPlanGetHandler, config))
+			apiV1Route.POST("/budget_plans/items/add.json", bindApi(api.BudgetPlans.BudgetPlanItemCreateHandler, config))
+			apiV1Route.POST("/budget_plans/items/modify.json", bindApi(api.BudgetPlans.BudgetPlanItemModifyHandler, config))
+			apiV1Route.POST("/budget_plans/items/delete.json", bindApi(api.BudgetPlans.BudgetPlanItemDeleteHandler, config))
+			apiV1Route.POST("/budget_plans/items/copy.json", bindApi(api.BudgetPlans.BudgetPlanItemCopyHandler, config))
+			apiV1Route.POST("/budget_plans/adjustments/set.json", bindApi(api.BudgetPlans.BudgetPlanAdjustmentSetHandler, config))
+
 			// Utility Meters
 			apiV1Route.GET("/utilities/meters/list.json", bindApi(api.UtilityMeters.MeterListHandler, config))
 			apiV1Route.POST("/utilities/meters/add.json", bindApi(api.UtilityMeters.MeterCreateHandler, config))

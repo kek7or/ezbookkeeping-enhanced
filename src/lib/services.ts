@@ -75,6 +75,17 @@ import type {
     DebtEntryReopenRequest
 } from '@/models/debt.ts';
 import type {
+    BudgetPlanGetRequest,
+    BudgetPlanItemCreateRequest,
+    BudgetPlanItemModifyRequest,
+    BudgetPlanItemDeleteRequest,
+    BudgetPlanItemCopyRequest,
+    BudgetPlanAdjustmentSetRequest,
+    BudgetPlanItemInfoResponse,
+    BudgetPlanAdjustmentInfoResponse,
+    BudgetPlanInfoResponse
+} from '@/models/budget_plan.ts';
+import type {
     ExportTransactionDataRequest,
     ClearDataRequest,
     ClearAccountTransactionsRequest,
@@ -959,6 +970,24 @@ export default {
     },
     deleteUtilityReading: (req: UtilityIdRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/utilities/readings/delete.json', req);
+    },
+    getBudgetPlan: (req: BudgetPlanGetRequest): ApiResponsePromise<BudgetPlanInfoResponse> => {
+        return axios.get<ApiResponse<BudgetPlanInfoResponse>>(`v1/budget_plans/get.json?year=${req.year}&month=${req.month}`);
+    },
+    addBudgetPlanItem: (req: BudgetPlanItemCreateRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
+        return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/items/add.json', req);
+    },
+    modifyBudgetPlanItem: (req: BudgetPlanItemModifyRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
+        return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/items/modify.json', req);
+    },
+    deleteBudgetPlanItem: (req: BudgetPlanItemDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/items/delete.json', req);
+    },
+    copyBudgetPlanItems: (req: BudgetPlanItemCopyRequest): ApiResponsePromise<number> => {
+        return axios.post<ApiResponse<number>>('v1/budget_plans/items/copy.json', req);
+    },
+    setBudgetPlanAdjustment: (req: BudgetPlanAdjustmentSetRequest): ApiResponsePromise<BudgetPlanAdjustmentInfoResponse | null> => {
+        return axios.post<ApiResponse<BudgetPlanAdjustmentInfoResponse | null>>('v1/budget_plans/adjustments/set.json', req);
     },
     getAllDebtPeople: (): ApiResponsePromise<DebtPersonInfoResponse[]> => {
         return axios.get<ApiResponse<DebtPersonInfoResponse[]>>('v1/debts/people/list.json');

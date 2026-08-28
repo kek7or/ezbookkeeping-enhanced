@@ -85,6 +85,12 @@
                         <span class="nav-item-title">{{ tt('Scheduled Transactions') }}</span>
                     </router-link>
                 </li>
+                <li class="nav-link">
+                    <router-link to="/budget/plan">
+                        <v-icon class="nav-item-icon" :icon="mdiCalculatorVariantOutline"/>
+                        <span class="nav-item-title">{{ tt('Budget Plan') }}</span>
+                    </router-link>
+                </li>
                 <li class="nav-section-title">
                     <div class="title-wrapper">
                         <span class="title-text">{{ tt('Miscellaneous') }}</span>
@@ -257,6 +263,7 @@ import {
     mdiChartPieOutline,
     mdiCompassOutline,
     mdiAccountCashOutline,
+    mdiCalculatorVariantOutline,
     mdiCurrencyBtc,
     mdiGaugeFull,
     mdiSwapHorizontal,

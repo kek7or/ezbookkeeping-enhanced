@@ -237,6 +237,22 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] debt entry table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetPlanItem))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] budget plan item table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetPlanScheduleAdjustment))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] budget plan adjustment table maintained successfully")
+
 	err = datastore.Container.UserDataStore.SyncStructs(new(models.UtilityMeter))
 
 	if err != nil {
