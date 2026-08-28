@@ -70,11 +70,25 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		adjustmentResps[i] = adjustments[i].ToBudgetPlanAdjustmentInfoResponse()
 	}
 
+	expectations, err := a.budgetPlans.GetExpectationsByMonth(c, uid, planGetReq.Year, planGetReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanGetHandler] failed to get category expectations for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	expectationResps := make([]*models.BudgetPlanExpectationInfoResponse, len(expectations))
+
+	for i := 0; i < len(expectations); i++ {
+		expectationResps[i] = expectations[i].ToBudgetPlanExpectationInfoResponse()
+	}
+
 	return &models.BudgetPlanInfoResponse{
-		Year:        planGetReq.Year,
-		Month:       planGetReq.Month,
-		Items:       itemResps,
-		Adjustments: adjustmentResps,
+		Year:         planGetReq.Year,
+		Month:        planGetReq.Month,
+		Items:        itemResps,
+		Adjustments:  adjustmentResps,
+		Expectations: expectationResps,
 	}, nil
 }
 
@@ -216,7 +230,7 @@ func (a *BudgetPlansApi) BudgetPlanItemCopyHandler(c *core.WebContext) (any, *er
 
 	uid := c.GetCurrentUid()
 
-	copiedCount, err := a.budgetPlans.CopyItems(c, uid, itemCopyReq.FromYear, itemCopyReq.FromMonth, itemCopyReq.ToYear, itemCopyReq.ToMonth)
+	copiedCount, err := a.budgetPlans.CopyMonth(c, uid, itemCopyReq.FromYear, itemCopyReq.FromMonth, itemCopyReq.ToYear, itemCopyReq.ToMonth)
 
 	if err != nil {
 		log.Errorf(c, "[budget_plans.BudgetPlanItemCopyHandler] failed to copy plan items for user \"uid:%d\", because %s", uid, err.Error())
@@ -263,18 +277,52 @@ func (a *BudgetPlansApi) BudgetPlanAdjustmentSetHandler(c *core.WebContext) (any
 	return adjustment.ToBudgetPlanAdjustmentInfoResponse(), nil
 }
 
+// BudgetPlanExpectationSetHandler records what one category is expected to come to in one month for
+// the current user
+func (a *BudgetPlansApi) BudgetPlanExpectationSetHandler(c *core.WebContext) (any, *errs.Error) {
+	var expectationSetReq models.BudgetPlanExpectationSetRequest
+	err := c.ShouldBindJSON(&expectationSetReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanExpectationSetHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	if err := a.verifyCategory(c, uid, expectationSetReq.CategoryId); err != nil {
+		return nil, err
+	}
+
+	expectation := &models.BudgetPlanCategoryExpectation{
+		Uid:        uid,
+		Year:       expectationSetReq.Year,
+		Month:      expectationSetReq.Month,
+		CategoryId: expectationSetReq.CategoryId,
+		Amount:     expectationSetReq.Amount,
+	}
+
+	if err := a.budgetPlans.SetExpectation(c, expectation); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanExpectationSetHandler] failed to set expectation for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanExpectationSetHandler] user \"uid:%d\" has set an expectation on category \"id:%d\" for %d-%d", uid, expectation.CategoryId, expectation.Year, expectation.Month)
+
+	// an expectation cleared to nothing has no row to return, and the client takes the absence as
+	// the deletion it is
+	if expectation.ExpectationId < 1 {
+		return nil, nil
+	}
+
+	return expectation.ToBudgetPlanExpectationInfoResponse(), nil
+}
+
 // verifyCategoryAndAccount refuses a plan item pointing at a category or an account that is not the
 // user's own. A plan is only worth anything if what it names is the same thing the ledger names.
 func (a *BudgetPlansApi) verifyCategoryAndAccount(c *core.WebContext, uid int64, categoryId int64, accountId int64) *errs.Error {
-	category, err := a.categories.GetCategoryByCategoryId(c, uid, categoryId)
-
-	if err != nil {
-		log.Warnf(c, "[budget_plans.verifyCategoryAndAccount] failed to get category \"id:%d\" for user \"uid:%d\", because %s", categoryId, uid, err.Error())
-		return errs.Or(err, errs.ErrTransactionCategoryNotFound)
-	}
-
-	if category == nil {
-		return errs.ErrTransactionCategoryNotFound
+	if err := a.verifyCategory(c, uid, categoryId); err != nil {
+		return err
 	}
 
 	account, err := a.accounts.GetAccountByAccountId(c, uid, accountId)
@@ -286,6 +334,24 @@ func (a *BudgetPlansApi) verifyCategoryAndAccount(c *core.WebContext, uid int64,
 
 	if account == nil {
 		return errs.ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// verifyCategory refuses anything pointing at a category that is not the user's own. It is worth
+// checking on an expectation as much as on a plan item: an expectation set against a category that
+// does not exist would never be shown anywhere, and would sit in the data unexplained.
+func (a *BudgetPlansApi) verifyCategory(c *core.WebContext, uid int64, categoryId int64) *errs.Error {
+	category, err := a.categories.GetCategoryByCategoryId(c, uid, categoryId)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.verifyCategory] failed to get category \"id:%d\" for user \"uid:%d\", because %s", categoryId, uid, err.Error())
+		return errs.Or(err, errs.ErrTransactionCategoryNotFound)
+	}
+
+	if category == nil {
+		return errs.ErrTransactionCategoryNotFound
 	}
 
 	return nil

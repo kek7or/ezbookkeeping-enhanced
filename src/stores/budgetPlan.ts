@@ -14,34 +14,27 @@ import type { BigDecimal } from '@/core/numeral.ts';
 import { KeywordMatchMode } from '@/core/text.ts';
 
 import { TransactionTemplate } from '@/models/transaction_template.ts';
-import { type BudgetPlanAdjustment, BudgetPlanItem } from '@/models/budget_plan.ts';
+import { TransactionCategory } from '@/models/transaction_category.ts';
+import { type BudgetPlanAdjustment, type BudgetPlanExpectation, BudgetPlanItem } from '@/models/budget_plan.ts';
 import type { TransactionStatisticResponseItem } from '@/models/transaction.ts';
 
 import {
     type PlannedLine,
     type PlanTotals,
+    type CategoryBudgetNode,
     PlannedLineSource,
     buildScheduleLines,
     buildItemLines,
     sumPlannedLines,
-    sumPlannedLinesByCategory
+    sumPlannedLinesByCategory,
+    getPlannedTypesByCategory,
+    buildCategoryBudgetTree,
+    sumCategoryBudgets
 } from '@/lib/budgetPlan.ts';
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { getYearMonthFirstUnixTime, getYearMonthLastUnixTime, getCurrentDateTime } from '@/lib/datetime.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
-
-// CategoryComparison is one row of the plan set against the ledger: what this category was planned
-// to cost this month, and what it has actually cost so far.
-export interface CategoryComparison {
-    readonly categoryId: string;
-    readonly type: number;
-    readonly planned: BigDecimal;
-    readonly actual: BigDecimal;
-    // remaining is what is left of the plan. It goes negative when a category is overspent, which is
-    // the number the page exists to show, so it is not clamped at zero.
-    readonly remaining: BigDecimal;
-}
 
 export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const userStore = useUserStore();
@@ -56,6 +49,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const month = ref<number>(now.getGregorianCalendarMonth());
     const planItems = ref<BudgetPlanItem[]>([]);
     const planAdjustments = ref<BudgetPlanAdjustment[]>([]);
+    const planExpectations = ref<BudgetPlanExpectation[]>([]);
     const actualItems = ref<TransactionStatisticResponseItem[]>([]);
     const planStateInvalid = ref<boolean>(true);
 
@@ -86,13 +80,36 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const incomeLines = computed<PlannedLine[]>(() => allLines.value.filter(line => line.type === TransactionType.Income));
     const expenseLines = computed<PlannedLine[]>(() => allLines.value.filter(line => line.type !== TransactionType.Income));
 
-    const plannedTotals = computed<PlanTotals>(() => sumPlannedLines(allLines.value, convertToDefaultCurrency));
+    // plannedLineTotals is what the month is itemised at - every schedule and every planned item
+    // added up, and nothing else. It is not what the month costs: a category expected to come to
+    // more than what is listed under it costs the more. The two are kept apart because the
+    // difference between them is a real thing to show, namely money set aside but not yet spoken for.
+    const plannedLineTotals = computed<PlanTotals>(() => sumPlannedLines(allLines.value, convertToDefaultCurrency));
 
     // The committed part is what recurs whether or not anything is decided this month. What is left
     // of the income after it is the figure a month is actually planned within.
     const committedExpense = computed<BigDecimal>(() => sumPlannedLines(scheduleLines.value, convertToDefaultCurrency).expense);
 
     const plannedByCategory = computed<Record<string, BigDecimal>>(() => sumPlannedLinesByCategory(allLines.value, convertToDefaultCurrency));
+
+    const expectationByCategory = computed<Record<string, BigDecimal>>(() => {
+        const totals: Record<string, BigDecimal> = {};
+
+        for (const expectation of planExpectations.value) {
+            totals[expectation.categoryId] = parseBigDecimal(expectation.amount);
+        }
+
+        return totals;
+    });
+
+    // Only the two spending types are planned against. A transfer moves money between two accounts
+    // of one ledger and is neither earned nor spent, so there is nothing about it to expect.
+    const primaryCategories = computed<TransactionCategory[]>(() => {
+        const expense = transactionCategoriesStore.allTransactionCategories[CategoryType.Expense] || [];
+        const income = transactionCategoriesStore.allTransactionCategories[CategoryType.Income] || [];
+
+        return expense.concat(income);
+    });
 
     const actualByCategory = computed<Record<string, BigDecimal>>(() => {
         const totals: Record<string, BigDecimal> = {};
@@ -122,6 +139,15 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         return totals;
     });
 
+    // The tree is where the plan, the ledger and the expectations meet, and every figure the page
+    // shows below the hero comes out of it.
+    const categoryBudgetTree = computed<CategoryBudgetNode[]>(() => buildCategoryBudgetTree(primaryCategories.value, plannedByCategory.value, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(allLines.value)));
+
+    // What the month is planned to cost is the tree's own total, not the sum of the lines: a
+    // category expected to come to more than what is listed under it costs the more. With no
+    // expectation set anywhere the two are the same figure.
+    const plannedTotals = computed<PlanTotals>(() => sumCategoryBudgets(categoryBudgetTree.value));
+
     const actualTotals = computed<PlanTotals>(() => {
         let income = BIG_DECIMAL_ZERO;
         let expense = BIG_DECIMAL_ZERO;
@@ -142,38 +168,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             expense: expense,
             net: income.subtract(expense)
         };
-    });
-
-    // Every category named by either side appears, so a category that was planned for and not spent
-    // is as visible as one that was spent without being planned for.
-    const categoryComparisons = computed<CategoryComparison[]>(() => {
-        const categoryIds = new Set<string>();
-
-        for (const categoryId in plannedByCategory.value) {
-            categoryIds.add(categoryId);
-        }
-
-        for (const categoryId in actualByCategory.value) {
-            categoryIds.add(categoryId);
-        }
-
-        const comparisons: CategoryComparison[] = [];
-
-        for (const categoryId of categoryIds) {
-            const category = transactionCategoriesStore.allTransactionCategoriesMap[categoryId];
-            const planned = plannedByCategory.value[categoryId] ?? BIG_DECIMAL_ZERO;
-            const actual = actualByCategory.value[categoryId] ?? BIG_DECIMAL_ZERO;
-
-            comparisons.push({
-                categoryId: categoryId,
-                type: category ? (category.type === CategoryType.Income ? TransactionType.Income : TransactionType.Expense) : TransactionType.Expense,
-                planned: planned,
-                actual: actual,
-                remaining: planned.subtract(actual)
-            });
-        }
-
-        return comparisons.sort((comparison1, comparison2) => comparison2.planned.compareTo(comparison1.planned));
     });
 
     function getAccountCurrency(accountId: string): string | undefined {
@@ -228,6 +222,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
             planItems.value = BudgetPlanItem.ofMulti(planData.result.items || []);
             planAdjustments.value = planData.result.adjustments || [];
+            planExpectations.value = planData.result.expectations || [];
             actualItems.value = statisticsData && statisticsData.success && statisticsData.result ? (statisticsData.result.items || []) : [];
             planStateInvalid.value = false;
         }).catch(error => {
@@ -331,6 +326,40 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
+    // Setting an expectation is a write of one row and nothing else. Everything that follows from
+    // it - the category's own figure, its parent's, the month's total, the bar at the top - is
+    // derived, so the page moves the moment this resolves without anything being reloaded.
+    function setCategoryExpectation({ categoryId, amount }: { categoryId: string, amount: number }): Promise<void> {
+        return services.setBudgetPlanExpectation({
+            year: year.value,
+            month: month.value,
+            categoryId: categoryId,
+            amount: amount
+        }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success) {
+                throw new Error('Unable to set this expectation');
+            }
+
+            planExpectations.value = planExpectations.value.filter(expectation => expectation.categoryId !== categoryId);
+
+            if (data.result) {
+                planExpectations.value.push(data.result);
+            }
+        }).catch(error => {
+            logger.error('failed to set budget plan expectation', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to set this expectation' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
     function setScheduleAdjustment({ templateId, excluded, amount }: { templateId: string, excluded: boolean, amount?: number }): Promise<void> {
         return services.setBudgetPlanAdjustment({
             year: year.value,
@@ -369,6 +398,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         month,
         planItems,
         planAdjustments,
+        planExpectations,
         planStateInvalid,
         // computed states
         defaultCurrency,
@@ -378,9 +408,11 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         incomeLines,
         expenseLines,
         plannedTotals,
+        plannedLineTotals,
         committedExpense,
         actualTotals,
-        categoryComparisons,
+        primaryCategories,
+        categoryBudgetTree,
         // functions
         convertToDefaultCurrency,
         setMonth,
@@ -388,9 +420,10 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         saveBudgetPlanItem,
         deleteBudgetPlanItem,
         copyPreviousMonthItems,
-        setScheduleAdjustment
+        setScheduleAdjustment,
+        setCategoryExpectation
     };
 });
 
 export { PlannedLineSource };
-export type { PlannedLine, PlanTotals };
+export type { PlannedLine, PlanTotals, CategoryBudgetNode };

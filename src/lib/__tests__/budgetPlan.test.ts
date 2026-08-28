@@ -1,15 +1,22 @@
 import { describe, expect, test } from 'vitest';
 
 import { TransactionType } from '@/core/transaction.ts';
+import { CategoryType } from '@/core/category.ts';
 import { TemplateType, ScheduledTemplateFrequencyType } from '@/core/template.ts';
 import { TransactionTemplate, type TransactionTemplateInfoResponse } from '@/models/transaction_template.ts';
+import { TransactionCategory, type TransactionCategoryInfoResponse } from '@/models/transaction_category.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import type { BudgetPlanAdjustment } from '@/models/budget_plan.ts';
+import type { BigDecimal } from '@/core/numeral.ts';
+import { parseBigDecimal } from '@/lib/numeral.ts';
 import {
     getScheduleOccurrencesInMonth,
     buildScheduleLines,
     buildItemLines,
-    sumPlannedLines
+    sumPlannedLines,
+    buildCategoryBudgetTree,
+    sumCategoryBudgets,
+    hasCategoryBudgetActivity
 } from '@/lib/budgetPlan.ts';
 
 function createSchedule(frequencyType: number, frequency: string, options?: { amount?: number, type?: number, name?: string, startDate?: string, endDate?: string, hidden?: boolean, id?: string }): TransactionTemplate {
@@ -205,5 +212,170 @@ describe('sumPlannedLines', () => {
         ], currencyOf);
 
         expect(lines.length).toBe(0);
+    });
+});
+
+function createCategory(id: string, name: string, type: number, subCategories?: { id: string, name: string }[]): TransactionCategory {
+    const response: TransactionCategoryInfoResponse = {
+        id: id,
+        name: name,
+        parentId: '0',
+        type: type,
+        icon: '1',
+        color: '000000',
+        comment: '',
+        displayOrder: 1,
+        hidden: false,
+        excludeFromStatistics: false,
+        subCategories: (subCategories ?? []).map((subCategory, index) => ({
+            id: subCategory.id,
+            name: subCategory.name,
+            parentId: id,
+            type: type,
+            icon: '1',
+            color: '000000',
+            comment: '',
+            displayOrder: index + 1,
+            hidden: false,
+            excludeFromStatistics: false
+        }))
+    };
+
+    return TransactionCategory.of(response);
+}
+
+function amounts(values: Record<string, number>): Record<string, BigDecimal> {
+    const map: Record<string, BigDecimal> = {};
+
+    for (const key in values) {
+        map[key] = parseBigDecimal(values[key] as number);
+    }
+
+    return map;
+}
+
+function findNode(nodes: ReturnType<typeof buildCategoryBudgetTree>, categoryId: string) {
+    for (const node of nodes) {
+        if (node.categoryId === categoryId) {
+            return node;
+        }
+
+        for (const child of node.children) {
+            if (child.categoryId === categoryId) {
+                return child;
+            }
+        }
+    }
+
+    throw new Error(`no node for ${categoryId}`);
+}
+
+describe('budgetPlan buildCategoryBudgetTree', () => {
+    const food = createCategory('10', 'Food', CategoryType.Expense, [
+        { id: '11', name: 'Groceries' },
+        { id: '12', name: 'Restaurants' }
+    ]);
+    const salary = createCategory('20', 'Salary', CategoryType.Income, [
+        { id: '21', name: 'Pay' }
+    ]);
+
+    test('a branch with no expectation costs what is listed under it', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 20000, '12': 5000 }), {}, {});
+        const branch = findNode(tree, '10');
+
+        expect(branch.planned.toSafeIntegerNumber()).toBe(25000);
+        expect(branch.budget.toSafeIntegerNumber()).toBe(25000);
+        expect(branch.unallocated.toSafeIntegerNumber()).toBe(0);
+        expect(branch.overAllocated).toBe(false);
+    });
+
+    test('an expectation on a primary covers what is planned under it rather than adding to it', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 20000 }), {}, amounts({ '10': 60000 }));
+        const branch = findNode(tree, '10');
+
+        expect(branch.budget.toSafeIntegerNumber()).toBe(60000);
+        expect(branch.planned.toSafeIntegerNumber()).toBe(20000);
+        expect(branch.unallocated.toSafeIntegerNumber()).toBe(40000);
+    });
+
+    test('an expectation on a secondary raises the branch it sits in', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '11': 40000, '12': 20000 }));
+
+        expect(findNode(tree, '11').budget.toSafeIntegerNumber()).toBe(40000);
+        expect(findNode(tree, '10').budget.toSafeIntegerNumber()).toBe(60000);
+    });
+
+    test('both levels at once leave the difference unallocated', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '10': 60000, '11': 40000 }));
+        const branch = findNode(tree, '10');
+
+        expect(branch.budget.toSafeIntegerNumber()).toBe(60000);
+        expect(branch.allocated.toSafeIntegerNumber()).toBe(40000);
+        expect(branch.unallocated.toSafeIntegerNumber()).toBe(20000);
+        expect(branch.overAllocated).toBe(false);
+    });
+
+    test('subcategories adding up past the primary win, and the primary says so', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '10': 50000, '11': 40000, '12': 30000 }));
+        const branch = findNode(tree, '10');
+
+        expect(branch.budget.toSafeIntegerNumber()).toBe(70000);
+        expect(branch.unallocated.toSafeIntegerNumber()).toBe(0);
+        expect(branch.overAllocated).toBe(true);
+    });
+
+    test('a bill larger than the expectation is not wished down to it', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 80000 }), {}, amounts({ '11': 40000 }));
+
+        expect(findNode(tree, '11').budget.toSafeIntegerNumber()).toBe(80000);
+        expect(findNode(tree, '11').overAllocated).toBe(true);
+        expect(findNode(tree, '10').budget.toSafeIntegerNumber()).toBe(80000);
+    });
+
+    test('what has actually happened rolls up and is left over against the budget', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 15000, '12': 5000 }), amounts({ '10': 60000 }));
+        const branch = findNode(tree, '10');
+
+        expect(branch.actual.toSafeIntegerNumber()).toBe(20000);
+        expect(branch.remaining.toSafeIntegerNumber()).toBe(40000);
+    });
+
+    test('overspending a category shows as a negative remainder rather than a zero', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 50000 }), amounts({ '11': 40000 }));
+
+        expect(findNode(tree, '11').remaining.toSafeIntegerNumber()).toBe(-10000);
+    });
+
+    test('a category the plan and the ledger name but the tree does not is kept as its own root', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '99': 1000 }), amounts({ '98': 2000 }), {});
+
+        expect(findNode(tree, '99').budget.toSafeIntegerNumber()).toBe(1000);
+        expect(findNode(tree, '98').actual.toSafeIntegerNumber()).toBe(2000);
+        expect(sumCategoryBudgets(tree).expense.toSafeIntegerNumber()).toBe(1000);
+    });
+
+    test('income and expense are totalled apart', () => {
+        const tree = buildCategoryBudgetTree([food, salary], amounts({ '11': 20000, '21': 300000 }), {}, {});
+        const totals = sumCategoryBudgets(tree);
+
+        expect(totals.income.toSafeIntegerNumber()).toBe(300000);
+        expect(totals.expense.toSafeIntegerNumber()).toBe(20000);
+        expect(totals.net.toSafeIntegerNumber()).toBe(280000);
+    });
+
+    test('with no expectation anywhere the month totals exactly what is listed', () => {
+        const planned = amounts({ '11': 20000, '12': 5000, '21': 300000 });
+        const totals = sumCategoryBudgets(buildCategoryBudgetTree([food, salary], planned, {}, {}));
+
+        expect(totals.expense.toSafeIntegerNumber()).toBe(25000);
+        expect(totals.income.toSafeIntegerNumber()).toBe(300000);
+    });
+
+    test('a category with nothing expected, planned or spent is not worth a row', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 20000 }), {}, {});
+
+        expect(hasCategoryBudgetActivity(findNode(tree, '11'))).toBe(true);
+        expect(hasCategoryBudgetActivity(findNode(tree, '12'))).toBe(false);
+        expect(hasCategoryBudgetActivity(findNode(tree, '10'))).toBe(true);
     });
 });

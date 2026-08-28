@@ -72,6 +72,38 @@ type BudgetPlanScheduleAdjustment struct {
 	DeletedUnixTime int64
 }
 
+// BudgetPlanCategoryExpectation is what a whole category is expected to cost in a month, said
+// without listing what it is made of. Weekly food shopping is not worth planning line by line, but
+// the four hundred it comes to every month is worth planning.
+//
+// It is set at either level of the category tree, and the two mean different things. On a primary
+// category it is the ceiling for the whole branch; on a secondary it is that branch divided up.
+// Both can be set at once, which is the point: six hundred for Food, of which four hundred is
+// Groceries, leaves two hundred that has a home in the branch but not yet in a subcategory.
+//
+// An expectation covers what is already planned under the category rather than adding to it. Six
+// hundred expected for Food with a two hundred grocery delivery already scheduled means Food costs
+// six hundred this month, two hundred of it accounted for - not eight hundred. Where what is
+// already planned comes to more than the expectation, the plan wins, because a bill that exists
+// cannot be wished down to the figure someone hoped for.
+//
+// There is at most one expectation per category per month, enforced by the service rather than the
+// database for the same reason the adjustments are: a unique index would count the tombstones.
+type BudgetPlanCategoryExpectation struct {
+	ExpectationId int64 `xorm:"PK"`
+	Uid           int64 `xorm:"INDEX(IDX_budget_plan_expectation_uid_deleted_year_month) NOT NULL"`
+	Deleted       bool  `xorm:"INDEX(IDX_budget_plan_expectation_uid_deleted_year_month) NOT NULL"`
+	Year          int32 `xorm:"INDEX(IDX_budget_plan_expectation_uid_deleted_year_month) NOT NULL"`
+	Month         int32 `xorm:"INDEX(IDX_budget_plan_expectation_uid_deleted_year_month) NOT NULL"`
+	CategoryId    int64 `xorm:"NOT NULL"`
+	// Amount is never negative: an expectation is what a category is expected to come to, and a
+	// category that earns is an income category. Zero is not stored at all - see SetExpectation.
+	Amount          int64 `xorm:"NOT NULL"`
+	CreatedUnixTime int64
+	UpdatedUnixTime int64
+	DeletedUnixTime int64
+}
+
 // BudgetPlanGetRequest represents all parameters of a request for the plan of one month
 type BudgetPlanGetRequest struct {
 	Year  int32 `form:"year" binding:"required,min=1,max=9999"`
@@ -127,6 +159,16 @@ type BudgetPlanAdjustmentSetRequest struct {
 	Amount *int64 `json:"amount" binding:"omitempty,min=-999999999999999,max=999999999999999"`
 }
 
+// BudgetPlanExpectationSetRequest represents all parameters of a request to say what one category
+// is expected to come to in one month. An expectation of zero is the same as no expectation at all
+// - what is already planned under the category stands either way - so zero clears it.
+type BudgetPlanExpectationSetRequest struct {
+	Year       int32 `json:"year" binding:"required,min=1,max=9999"`
+	Month      int32 `json:"month" binding:"required,min=1,max=12"`
+	CategoryId int64 `json:"categoryId,string" binding:"required,min=1"`
+	Amount     int64 `json:"amount" binding:"min=0,max=999999999999999"`
+}
+
 // BudgetPlanItemInfoResponse represents a view-object of one planned item
 type BudgetPlanItemInfoResponse struct {
 	Id           int64           `json:"id,string"`
@@ -151,13 +193,23 @@ type BudgetPlanAdjustmentInfoResponse struct {
 	Amount     *int64 `json:"amount,omitempty"`
 }
 
+// BudgetPlanExpectationInfoResponse represents a view-object of one category expectation
+type BudgetPlanExpectationInfoResponse struct {
+	Id         int64 `json:"id,string"`
+	Year       int32 `json:"year"`
+	Month      int32 `json:"month"`
+	CategoryId int64 `json:"categoryId,string"`
+	Amount     int64 `json:"amount"`
+}
+
 // BudgetPlanInfoResponse is everything stored about one month's plan. What the month costs is not
 // in here: it is worked out from these, the schedules and the ledger, by whoever is displaying it.
 type BudgetPlanInfoResponse struct {
-	Year        int32                               `json:"year"`
-	Month       int32                               `json:"month"`
-	Items       []*BudgetPlanItemInfoResponse       `json:"items"`
-	Adjustments []*BudgetPlanAdjustmentInfoResponse `json:"adjustments"`
+	Year         int32                                `json:"year"`
+	Month        int32                                `json:"month"`
+	Items        []*BudgetPlanItemInfoResponse        `json:"items"`
+	Adjustments  []*BudgetPlanAdjustmentInfoResponse  `json:"adjustments"`
+	Expectations []*BudgetPlanExpectationInfoResponse `json:"expectations"`
 }
 
 // ToBudgetPlanItemInfoResponse returns a view-object according to database model
@@ -185,6 +237,17 @@ func (a *BudgetPlanScheduleAdjustment) ToBudgetPlanAdjustmentInfoResponse() *Bud
 		TemplateId: a.TemplateId,
 		Excluded:   a.Excluded,
 		Amount:     a.Amount,
+	}
+}
+
+// ToBudgetPlanExpectationInfoResponse returns a view-object according to database model
+func (e *BudgetPlanCategoryExpectation) ToBudgetPlanExpectationInfoResponse() *BudgetPlanExpectationInfoResponse {
+	return &BudgetPlanExpectationInfoResponse{
+		Id:         e.ExpectationId,
+		Year:       e.Year,
+		Month:      e.Month,
+		CategoryId: e.CategoryId,
+		Amount:     e.Amount,
 	}
 }
 

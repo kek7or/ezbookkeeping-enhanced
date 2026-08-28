@@ -53,18 +53,18 @@ type TransactionTemplate struct {
 	//
 	// It carries a default because it is added to a table that already has rows: every schedule
 	// that existed before subscriptions could be marked is a plain schedule, which is exactly false.
-	IsSubscription             bool   `xorm:"NOT NULL DEFAULT 0"`
-	TagIds                     string `xorm:"VARCHAR(255) NOT NULL"`
-	Amount                     int64  `xorm:"NOT NULL"`
-	RelatedAccountId           int64  `xorm:"NOT NULL"`
-	RelatedAccountAmount       int64  `xorm:"NOT NULL"`
-	HideAmount                 bool   `xorm:"NOT NULL"`
-	Comment                    string `xorm:"VARCHAR(255) NOT NULL"`
-	DisplayOrder               int32  `xorm:"INDEX(IDX_transaction_template_uid_deleted_template_type_order) NOT NULL"`
-	Hidden                     bool   `xorm:"NOT NULL"`
-	CreatedUnixTime            int64
-	UpdatedUnixTime            int64
-	DeletedUnixTime            int64
+	IsSubscription       bool   `xorm:"NOT NULL DEFAULT 0"`
+	TagIds               string `xorm:"VARCHAR(255) NOT NULL"`
+	Amount               int64  `xorm:"NOT NULL"`
+	RelatedAccountId     int64  `xorm:"NOT NULL"`
+	RelatedAccountAmount int64  `xorm:"NOT NULL"`
+	HideAmount           bool   `xorm:"NOT NULL"`
+	Comment              string `xorm:"VARCHAR(255) NOT NULL"`
+	DisplayOrder         int32  `xorm:"INDEX(IDX_transaction_template_uid_deleted_template_type_order) NOT NULL"`
+	Hidden               bool   `xorm:"NOT NULL"`
+	CreatedUnixTime      int64
+	UpdatedUnixTime      int64
+	DeletedUnixTime      int64
 }
 
 // TransactionTemplateListRequest represents all parameters of transaction template list request

@@ -78,6 +78,17 @@ export interface BudgetPlanAdjustment {
     readonly amount?: number;
 }
 
+// A category expectation is what a whole category is expected to come to in a month, said without
+// listing what it is made of - and it can be said at either level of the category tree. See the
+// model on the server side for what the two levels mean together.
+export interface BudgetPlanExpectation {
+    readonly id: string;
+    readonly year: number;
+    readonly month: number;
+    readonly categoryId: string;
+    readonly amount: number;
+}
+
 export interface BudgetPlanGetRequest {
     readonly year: number;
     readonly month: number;
@@ -123,6 +134,14 @@ export interface BudgetPlanAdjustmentSetRequest {
     readonly amount?: number;
 }
 
+export interface BudgetPlanExpectationSetRequest {
+    readonly year: number;
+    readonly month: number;
+    readonly categoryId: string;
+    // an amount of zero clears the expectation, because it says no more than having none
+    readonly amount: number;
+}
+
 export interface BudgetPlanItemInfoResponse {
     readonly id: string;
     readonly year: number;
@@ -145,9 +164,18 @@ export interface BudgetPlanAdjustmentInfoResponse {
     readonly amount?: number;
 }
 
+export interface BudgetPlanExpectationInfoResponse {
+    readonly id: string;
+    readonly year: number;
+    readonly month: number;
+    readonly categoryId: string;
+    readonly amount: number;
+}
+
 export interface BudgetPlanInfoResponse {
     readonly year: number;
     readonly month: number;
     readonly items: BudgetPlanItemInfoResponse[];
     readonly adjustments: BudgetPlanAdjustmentInfoResponse[];
+    readonly expectations: BudgetPlanExpectationInfoResponse[];
 }

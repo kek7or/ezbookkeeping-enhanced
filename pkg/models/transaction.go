@@ -143,7 +143,7 @@ type Transaction struct {
 	// transaction time alone cannot do - two unrelated things can be booked at the same second.
 	// the default is what lets this column be added to a table that already has rows: every
 	// transaction that existed before receipts did belongs to none, which is exactly zero
-	ReceiptId        int64   `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
+	ReceiptId int64 `xorm:"INDEX(IDX_transaction_uid_deleted_receipt_id) NOT NULL DEFAULT 0"`
 	// IsSubscription marks money that went to a service subscribed to rather than a bill that had
 	// to be paid. It is a second axis and not a category: Netflix stays Entertainment and the gym
 	// stays Sport, and the statistics can be asked for either the committed part of a category or

@@ -1,7 +1,9 @@
 import { TransactionType } from '@/core/transaction.ts';
+import { CategoryType } from '@/core/category.ts';
 import { ScheduledTemplateFrequencyType } from '@/core/template.ts';
 import { type BigDecimal } from '@/core/numeral.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
+import { TransactionCategory } from '@/models/transaction_category.ts';
 import { type BudgetPlanAdjustment, BudgetPlanItem } from '@/models/budget_plan.ts';
 
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
@@ -219,6 +221,19 @@ export function sumPlannedLines(lines: PlannedLine[], convert: (amount: BigDecim
     };
 }
 
+// getPlannedTypesByCategory says, for each category the plan names, whether what is planned in it
+// is money coming in or going out. It is only consulted for a category that is no longer in the
+// tree, where there is nothing else left to read the type off.
+export function getPlannedTypesByCategory(lines: PlannedLine[]): Record<string, number> {
+    const types: Record<string, number> = {};
+
+    for (const line of lines) {
+        types[line.categoryId] = line.type;
+    }
+
+    return types;
+}
+
 // sumPlannedLinesByCategory is what the planned-against-actual table is built on: the plan reduced
 // to one figure per category, which is the level the ledger can answer at.
 export function sumPlannedLinesByCategory(lines: PlannedLine[], convert: (amount: BigDecimal, currency: string) => BigDecimal | null): Record<string, BigDecimal> {
@@ -239,6 +254,166 @@ export function sumPlannedLinesByCategory(lines: PlannedLine[], convert: (amount
     }
 
     return totals;
+}
+
+// CategoryBudgetNode is one category of the plan, at either level of the two the categories have.
+//
+// Both levels can carry an expectation and they mean different things. A primary category's is the
+// ceiling for the whole branch - six hundred for Food. A secondary's is that branch divided up -
+// four hundred of the six for Groceries. Set both and the difference between them is money that has
+// a home in the branch but not yet in a subcategory, which is exactly the state a month is usually
+// planned in.
+export interface CategoryBudgetNode {
+    readonly categoryId: string;
+    readonly parentId: string;
+    readonly type: number;
+    // expectation is what was typed against this category, and null when nothing was. Zero is never
+    // stored, because an expectation of zero says no more than the absence of one.
+    readonly expectation: BigDecimal | null;
+    // plannedDirect is what the lines filed on this category itself come to. planned adds the
+    // children to it, so a primary's planned is what its whole branch is itemised at.
+    readonly plannedDirect: BigDecimal;
+    readonly planned: BigDecimal;
+    // allocated is what this node's contents come to once each child is taken at its own budget
+    // rather than at what it is itemised for - the figure the expectation is a ceiling over.
+    readonly allocated: BigDecimal;
+    // budget is what this category costs the month. See the rule in resolveNode.
+    readonly budget: BigDecimal;
+    readonly actualDirect: BigDecimal;
+    readonly actual: BigDecimal;
+    // remaining is budget less what has actually happened, and goes negative when overspent -
+    // which is the number worth showing, so it is not clamped
+    readonly remaining: BigDecimal;
+    // unallocated is the part of this category's budget that nothing under it accounts for yet:
+    // the two hundred of Food that is neither Groceries nor Restaurants.
+    readonly unallocated: BigDecimal;
+    // overAllocated says the contents come to more than the ceiling. The contents win - a bill that
+    // exists cannot be wished down - so this is a flag, not a correction.
+    readonly overAllocated: boolean;
+    readonly children: CategoryBudgetNode[];
+}
+
+// buildCategoryBudgetTree puts the plan, the ledger and the expectations onto the category tree.
+//
+// An expectation covers what is already planned under its category rather than adding to it, which
+// is the only rule that lets the two levels coexist. Adding would double-count the moment someone
+// says six hundred for Food and four hundred for Groceries; covering means the branch costs six
+// hundred either way, and the four hundred is a statement about where inside it the money goes.
+//
+// Categories named by the plan or the ledger that are not in the tree - deleted, or arriving from
+// an import - are kept as roots of their own rather than dropped, because a figure that vanishes
+// from a total is worse than one filed under a name nobody recognises.
+export function buildCategoryBudgetTree(categories: TransactionCategory[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>, orphanTypeByCategory?: Record<string, number>): CategoryBudgetNode[] {
+    const roots: CategoryBudgetNode[] = [];
+    const placed = new Set<string>();
+
+    for (const category of categories) {
+        const children: CategoryBudgetNode[] = [];
+
+        for (const subCategory of (category.subCategories || [])) {
+            placed.add(subCategory.id);
+            children.push(resolveNode(subCategory.id, category.id, toTransactionType(subCategory.type), [], plannedByCategory, actualByCategory, expectationByCategory));
+        }
+
+        placed.add(category.id);
+        roots.push(resolveNode(category.id, '0', toTransactionType(category.type), children, plannedByCategory, actualByCategory, expectationByCategory));
+    }
+
+    const orphanIds = new Set<string>();
+
+    for (const categoryId in plannedByCategory) {
+        if (!placed.has(categoryId)) {
+            orphanIds.add(categoryId);
+        }
+    }
+
+    for (const categoryId in actualByCategory) {
+        if (!placed.has(categoryId)) {
+            orphanIds.add(categoryId);
+        }
+    }
+
+    for (const categoryId of orphanIds) {
+        // A category the plan names but the tree does not still has lines, and a line knows whether
+        // it is money coming in or going out even when the category it points at has been deleted.
+        // Only where there is no line either - a figure that is in the ledger alone - is there
+        // nothing to read, and then it is taken as money going out, the safer of the two guesses.
+        const type = orphanTypeByCategory?.[categoryId] ?? TransactionType.Expense;
+
+        roots.push(resolveNode(categoryId, '0', type, [], plannedByCategory, actualByCategory, expectationByCategory));
+    }
+
+    return roots;
+}
+
+// sumCategoryBudgets is what the month comes to once the expectations are taken into account. With
+// no expectation anywhere it is exactly the sum of the planned lines, which is why adding the
+// feature does not move anybody's existing figures.
+export function sumCategoryBudgets(nodes: CategoryBudgetNode[]): PlanTotals {
+    let income = BIG_DECIMAL_ZERO;
+    let expense = BIG_DECIMAL_ZERO;
+
+    for (const node of nodes) {
+        if (node.type === TransactionType.Income) {
+            income = income.add(node.budget);
+        } else {
+            expense = expense.add(node.budget);
+        }
+    }
+
+    return {
+        income: income,
+        expense: expense,
+        net: income.subtract(expense)
+    };
+}
+
+// hasCategoryBudgetActivity says whether a category is worth a row of its own: something was
+// expected of it, something is planned in it, or something has already happened in it. A category
+// that is none of those is one of the many a person keeps and does not use this month.
+export function hasCategoryBudgetActivity(node: CategoryBudgetNode): boolean {
+    return node.expectation !== null || !node.planned.isZero() || !node.actual.isZero();
+}
+
+function resolveNode(categoryId: string, parentId: string, type: number, children: CategoryBudgetNode[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>): CategoryBudgetNode {
+    const expectation = expectationByCategory[categoryId] ?? null;
+    const plannedDirect = plannedByCategory[categoryId] ?? BIG_DECIMAL_ZERO;
+    const actualDirect = actualByCategory[categoryId] ?? BIG_DECIMAL_ZERO;
+
+    let planned = plannedDirect;
+    let allocated = plannedDirect;
+    let actual = actualDirect;
+
+    for (const child of children) {
+        planned = planned.add(child.planned);
+        // each child enters its parent at its own budget, so a subcategory given a figure of its
+        // own raises the branch even when nothing is itemised inside it
+        allocated = allocated.add(child.budget);
+        actual = actual.add(child.actual);
+    }
+
+    const budget = expectation && expectation.greaterThan(allocated) ? expectation : allocated;
+
+    return {
+        categoryId: categoryId,
+        parentId: parentId,
+        type: type,
+        expectation: expectation,
+        plannedDirect: plannedDirect,
+        planned: planned,
+        allocated: allocated,
+        budget: budget,
+        actualDirect: actualDirect,
+        actual: actual,
+        remaining: budget.subtract(actual),
+        unallocated: budget.subtract(allocated),
+        overAllocated: !!expectation && allocated.greaterThan(expectation),
+        children: children
+    };
+}
+
+function toTransactionType(categoryType: number): number {
+    return categoryType === CategoryType.Income ? TransactionType.Income : TransactionType.Expense;
 }
 
 function firesOnDay(frequencyType: number, values: number[], year: number, month: number, day: number, daysInMonth: number, startDate: string | undefined): boolean {

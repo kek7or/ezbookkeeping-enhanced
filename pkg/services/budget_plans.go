@@ -17,6 +17,11 @@ import (
 // such a month forward would multiply the problem every time.
 const maximumItemsCountOfBudgetPlanMonth = 200
 
+// maximumExpectationsCountOfBudgetPlanMonth is a ceiling on how many categories one month can have
+// a figure set against. There is one expectation per category at most, so this is really a limit on
+// how many categories a person keeps, and it is set well above any workable number of them.
+const maximumExpectationsCountOfBudgetPlanMonth = 500
+
 // BudgetPlanService represents the service of what a month is planned to cost
 type BudgetPlanService struct {
 	ServiceUsingDB
@@ -57,6 +62,18 @@ func (s *BudgetPlanService) GetAdjustmentsByMonth(c core.Context, uid int64, yea
 	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Find(&adjustments)
 
 	return adjustments, err
+}
+
+// GetExpectationsByMonth returns what every category is expected to come to in one month
+func (s *BudgetPlanService) GetExpectationsByMonth(c core.Context, uid int64, year int32, month int32) ([]*models.BudgetPlanCategoryExpectation, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var expectations []*models.BudgetPlanCategoryExpectation
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Find(&expectations)
+
+	return expectations, err
 }
 
 // GetItemByItemId returns one planned item
@@ -166,10 +183,18 @@ func (s *BudgetPlanService) DeleteItem(c core.Context, uid int64, itemId int64) 
 	})
 }
 
-// CopyItems copies everything planned by hand in one month into another, appending to whatever is
-// already planned there rather than replacing it - a plan half filled in is not something to throw
-// away because the last month is being copied over it.
-func (s *BudgetPlanService) CopyItems(c core.Context, uid int64, fromYear int32, fromMonth int32, toYear int32, toMonth int32) (int, error) {
+// CopyMonth copies one month's plan into another - everything planned by hand and every category
+// expectation - appending to whatever is already there rather than replacing it, because a plan
+// half filled in is not something to throw away because the last month is being copied over it.
+//
+// The schedule adjustments are deliberately not copied. An adjustment says how one month departs
+// from what usually happens, and a departure repeated every month is not a departure - it is the
+// schedule, and belongs in the template.
+//
+// An expectation already set in the target month is left alone rather than overwritten or doubled:
+// a figure typed for this month is a decision about this month, and the previous month does not get
+// to overrule it.
+func (s *BudgetPlanService) CopyMonth(c core.Context, uid int64, fromYear int32, fromMonth int32, toYear int32, toMonth int32) (int, error) {
 	if uid <= 0 {
 		return 0, errs.ErrUserIdInvalid
 	}
@@ -184,7 +209,13 @@ func (s *BudgetPlanService) CopyItems(c core.Context, uid int64, fromYear int32,
 		return 0, err
 	}
 
-	if len(sourceItems) < 1 {
+	sourceExpectations, err := s.GetExpectationsByMonth(c, uid, fromYear, fromMonth)
+
+	if err != nil {
+		return 0, err
+	}
+
+	if len(sourceItems) < 1 && len(sourceExpectations) < 1 {
 		return 0, errs.ErrBudgetPlanNothingToCopy
 	}
 
@@ -202,6 +233,18 @@ func (s *BudgetPlanService) CopyItems(c core.Context, uid int64, fromYear int32,
 
 	if err != nil {
 		return 0, err
+	}
+
+	existingExpectations, err := s.GetExpectationsByMonth(c, uid, toYear, toMonth)
+
+	if err != nil {
+		return 0, err
+	}
+
+	alreadySet := make(map[int64]bool, len(existingExpectations))
+
+	for i := 0; i < len(existingExpectations); i++ {
+		alreadySet[existingExpectations[i].CategoryId] = true
 	}
 
 	now := time.Now().Unix()
@@ -233,9 +276,47 @@ func (s *BudgetPlanService) CopyItems(c core.Context, uid int64, fromYear int32,
 		})
 	}
 
+	newExpectations := make([]*models.BudgetPlanCategoryExpectation, 0, len(sourceExpectations))
+
+	for i := 0; i < len(sourceExpectations); i++ {
+		sourceExpectation := sourceExpectations[i]
+
+		if alreadySet[sourceExpectation.CategoryId] {
+			continue
+		}
+
+		expectationId := s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+		if expectationId < 1 {
+			return 0, errs.ErrSystemIsBusy
+		}
+
+		newExpectations = append(newExpectations, &models.BudgetPlanCategoryExpectation{
+			ExpectationId:   expectationId,
+			Uid:             uid,
+			Deleted:         false,
+			Year:            toYear,
+			Month:           toMonth,
+			CategoryId:      sourceExpectation.CategoryId,
+			Amount:          sourceExpectation.Amount,
+			CreatedUnixTime: now,
+			UpdatedUnixTime: now,
+		})
+	}
+
+	if len(existingExpectations)+len(newExpectations) > maximumExpectationsCountOfBudgetPlanMonth {
+		return 0, errs.ErrBudgetPlanHasTooManyExpectations
+	}
+
 	err = s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		for i := 0; i < len(newItems); i++ {
 			if _, err := sess.Insert(newItems[i]); err != nil {
+				return err
+			}
+		}
+
+		for i := 0; i < len(newExpectations); i++ {
+			if _, err := sess.Insert(newExpectations[i]); err != nil {
 				return err
 			}
 		}
@@ -247,7 +328,66 @@ func (s *BudgetPlanService) CopyItems(c core.Context, uid int64, fromYear int32,
 		return 0, err
 	}
 
-	return len(newItems), nil
+	return len(newItems) + len(newExpectations), nil
+}
+
+// SetExpectation records what one category is expected to come to in one month, replacing whatever
+// was said about that category in that month before. An expectation of zero is a deletion: it says
+// nothing that the absence of a row does not already say, and keeping it would make the category
+// look budgeted at nothing when it is simply not budgeted.
+func (s *BudgetPlanService) SetExpectation(c core.Context, expectation *models.BudgetPlanCategoryExpectation) error {
+	if expectation.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	if expectation.Amount < 0 {
+		return errs.ErrBudgetPlanExpectationAmountInvalid
+	}
+
+	if expectation.Amount > 0 {
+		count, err := s.getExpectationCount(c, expectation.Uid, expectation.Year, expectation.Month)
+
+		if err != nil {
+			return err
+		} else if count >= maximumExpectationsCountOfBudgetPlanMonth {
+			return errs.ErrBudgetPlanHasTooManyExpectations
+		}
+	}
+
+	now := time.Now().Unix()
+
+	return s.UserDataDB(expectation.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		clearModel := &models.BudgetPlanCategoryExpectation{
+			Deleted:         true,
+			DeletedUnixTime: now,
+		}
+
+		_, err := sess.Cols("deleted", "deleted_unix_time").
+			Where("uid=? AND deleted=? AND year=? AND month=? AND category_id=?", expectation.Uid, false, expectation.Year, expectation.Month, expectation.CategoryId).
+			Update(clearModel)
+
+		if err != nil {
+			return err
+		}
+
+		if expectation.Amount == 0 {
+			return nil
+		}
+
+		expectation.ExpectationId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+		if expectation.ExpectationId < 1 {
+			return errs.ErrSystemIsBusy
+		}
+
+		expectation.Deleted = false
+		expectation.CreatedUnixTime = now
+		expectation.UpdatedUnixTime = now
+
+		_, err = sess.Insert(expectation)
+
+		return err
+	})
 }
 
 // SetAdjustment records how one month differs from one schedule, replacing whatever was said about
@@ -293,6 +433,10 @@ func (s *BudgetPlanService) SetAdjustment(c core.Context, adjustment *models.Bud
 
 		return err
 	})
+}
+
+func (s *BudgetPlanService) getExpectationCount(c core.Context, uid int64, year int32, month int32) (int64, error) {
+	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Count(&models.BudgetPlanCategoryExpectation{})
 }
 
 func (s *BudgetPlanService) getItemCount(c core.Context, uid int64, year int32, month int32) (int64, error) {

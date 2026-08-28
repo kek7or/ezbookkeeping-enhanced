@@ -242,49 +242,132 @@
         </v-col>
 
         <v-col cols="12">
-            <v-card :title="tt('Planned Against Actual')">
+            <v-card>
+                <template #title>
+                    <div class="title-and-toolbar d-flex align-center">
+                        <span>{{ tt('Category Expectations') }}</span>
+                        <v-spacer/>
+                        <v-switch class="budget-category-switch" density="compact" color="primary"
+                                  :hide-details="true" :disabled="loading"
+                                  :label="tt('Show every category')"
+                                  v-model="showAllCategories"/>
+                    </div>
+                </template>
                 <v-card-text class="pt-0">
-                    <span class="text-body-2 text-medium-emphasis">{{ tt('What each category was planned to cost this month, and what it has cost so far.') }}</span>
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('Say what a category should come to without listing what it is made of. A figure on a primary category is the ceiling for the whole branch; a figure on one beneath it divides that branch up.') }}</span>
                 </v-card-text>
-                <v-table class="budget-plan-table table-striped">
+                <v-table class="budget-plan-table budget-category-table table-striped">
                     <thead>
                     <tr>
                         <th>{{ tt('Category') }}</th>
                         <th class="budget-meter-column">{{ tt('Progress') }}</th>
+                        <th class="text-end">{{ tt('Expected') }}</th>
                         <th class="text-end">{{ tt('Planned') }}</th>
                         <th class="text-end">{{ tt('Actual') }}</th>
                         <th class="text-end">{{ tt('Left') }}</th>
+                        <th class="text-end budget-plan-operation-column"></th>
                     </tr>
                     </thead>
                     <tbody v-if="loading">
                     <tr :key="itemIdx" v-for="itemIdx in [ 1, 2 ]">
-                        <td class="px-0" colspan="5">
+                        <td class="px-0" colspan="7">
                             <v-skeleton-loader type="text" :loading="true"></v-skeleton-loader>
                         </td>
                     </tr>
                     </tbody>
-                    <tbody v-else-if="!categoryMeters.length">
+                    <tbody v-else-if="!categoryRows.length">
                     <tr>
-                        <td colspan="5">{{ tt('Nothing planned and nothing spent in this month.') }}</td>
+                        <td colspan="7" class="py-6 text-center">
+                            <div class="text-body-1">{{ tt('Nothing planned and nothing spent in this month.') }}</div>
+                            <div class="text-body-2 text-medium-emphasis">{{ tt('Turn on Show every category to set a figure against one anyway.') }}</div>
+                        </td>
                     </tr>
                     </tbody>
                     <tbody v-else>
-                    <tr :key="meter.categoryId" v-for="meter in categoryMeters">
-                        <td class="text-truncate">{{ getCategoryName(meter.categoryId) }}</td>
-                        <td class="budget-meter-column">
+                    <tr :key="row.categoryId"
+                        :class="row.isPrimary ? 'budget-category-primary-row' : ''"
+                        v-for="row in categoryRows"
+                        @mouseenter="hoveredCategoryId = row.categoryId"
+                        @mouseleave="hoveredCategoryId = ''">
+                        <td>
                             <div class="d-flex align-center">
-                                <div class="budget-meter" :style="{ background: meter.trackColor }">
-                                    <div class="budget-meter-fill" :style="{ width: meter.width, background: meter.color }"></div>
+                                <!-- the twisty keeps its space on a row that has none, so that the
+                                     names of the primaries all start at the same place -->
+                                <v-btn class="budget-category-twisty" density="compact" variant="text"
+                                       color="default" size="24" :icon="true"
+                                       :aria-label="getCategoryName(row.categoryId)"
+                                       :aria-expanded="!collapsedCategories[row.categoryId]"
+                                       @click="toggleCategory(row.categoryId)"
+                                       v-if="row.isPrimary && row.hasChildren">
+                                    <v-icon size="18" :icon="collapsedCategories[row.categoryId] ? mdiChevronRight : mdiChevronDown"/>
+                                </v-btn>
+                                <span class="budget-category-twisty" v-else-if="row.isPrimary"></span>
+                                <span class="budget-category-indent" v-else></span>
+                                <div class="d-flex flex-column">
+                                    <div class="d-flex align-center">
+                                        <span :class="row.isPrimary ? 'font-weight-medium' : ''">{{ getCategoryName(row.categoryId) }}</span>
+                                        <v-chip class="ms-2" size="x-small" color="error" variant="tonal"
+                                                v-if="row.node.overAllocated">{{ tt('Over-allocated') }}</v-chip>
+                                    </div>
+                                    <span class="text-caption text-medium-emphasis"
+                                          v-if="row.isPrimary && row.node.unallocated.isPositive()">
+                                        {{ tt('{amount} not yet in a subcategory', { amount: displayAmount(row.node.unallocated) }) }}
+                                    </span>
                                 </div>
-                                <!-- the state is named and iconed, never carried by the colour alone -->
-                                <v-icon class="ms-2" size="16" :icon="meter.icon" :style="{ color: meter.color }" v-if="meter.icon"/>
-                                <span class="text-caption text-medium-emphasis ms-2 text-no-wrap">{{ meter.statusText }}</span>
                             </div>
                         </td>
-                        <td class="text-end text-no-wrap">{{ displayAmount(meter.planned) }}</td>
-                        <td class="text-end text-no-wrap">{{ displayAmount(meter.actual) }}</td>
+                        <td class="budget-meter-column">
+                            <div class="d-flex align-center">
+                                <div class="budget-meter" :style="{ background: row.trackColor }">
+                                    <div class="budget-meter-fill" :style="{ width: row.width, background: row.color }"></div>
+                                </div>
+                                <!-- the state is named and iconed, never carried by the colour alone -->
+                                <v-icon class="ms-2" size="16" :icon="row.icon" :style="{ color: row.color }" v-if="row.icon"/>
+                                <span class="text-caption text-medium-emphasis ms-2 text-no-wrap">{{ row.statusText }}</span>
+                            </div>
+                        </td>
+                        <td class="text-end budget-plan-amount-cell">
+                            <amount-input class="budget-plan-amount-input"
+                                          density="compact" variant="outlined"
+                                          :autofocus="true"
+                                          :currency="defaultCurrency"
+                                          :show-currency="true"
+                                          :disabled="savingCategoryId === row.categoryId"
+                                          v-model="editingExpectation"
+                                          @enter="commitExpectation(row.node)"
+                                          v-if="editingCategoryId === row.categoryId"/>
+                            <button class="budget-plan-amount-button text-no-wrap"
+                                    @click="startEditingExpectation(row.node)"
+                                    v-else>
+                                <span v-if="row.node.expectation">{{ displayAmount(row.node.expectation) }}</span>
+                                <span class="text-medium-emphasis" v-else>{{ tt('Set a figure') }}</span>
+                                <v-icon class="budget-plan-amount-pencil ms-1" size="13" :icon="mdiPencilOutline"/>
+                            </button>
+                        </td>
+                        <td class="text-end text-no-wrap">{{ displayAmount(row.node.planned) }}</td>
+                        <td class="text-end text-no-wrap">{{ displayAmount(row.node.actual) }}</td>
+                        <!-- a negative remainder is only bad news on the way out: an income
+                             category past what was expected of it has earned more, not overspent -->
                         <td class="text-end text-no-wrap"
-                            :class="meter.remaining.isNegative() ? 'text-expense' : ''">{{ displayAmount(meter.remaining) }}</td>
+                            :class="!row.isIncome && row.node.remaining.isNegative() ? 'text-expense' : ''">{{ displayAmount(row.node.remaining) }}</td>
+                        <td class="text-end budget-plan-operation-column">
+                            <div class="budget-plan-operation-buttons"
+                                 :class="{ 'budget-plan-operation-buttons-shown': hoveredCategoryId === row.categoryId || editingCategoryId === row.categoryId }">
+                                <template v-if="editingCategoryId === row.categoryId">
+                                    <v-btn class="px-2" color="primary" density="comfortable" variant="text"
+                                           :prepend-icon="mdiCheck" :loading="savingCategoryId === row.categoryId"
+                                           @click="commitExpectation(row.node)">{{ tt('Save') }}</v-btn>
+                                    <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                           :prepend-icon="mdiClose" @click="cancelEditingExpectation">{{ tt('Cancel') }}</v-btn>
+                                </template>
+                                <!-- clearing is its own button because the alternative is typing a
+                                     zero, and a zero looks like a figure somebody meant -->
+                                <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                       :prepend-icon="mdiCloseCircleOutline" :disabled="loading"
+                                       @click="clearExpectation(row.node)"
+                                       v-else-if="row.node.expectation">{{ tt('Clear') }}</v-btn>
+                            </div>
+                        </td>
                     </tr>
                     </tbody>
                 </v-table>
@@ -311,12 +394,12 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
-import { type CategoryComparison, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
+import { type CategoryBudgetNode, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
-import { type PlannedLine, PlannedLineSource } from '@/lib/budgetPlan.ts';
+import { type PlannedLine, PlannedLineSource, hasCategoryBudgetActivity } from '@/lib/budgetPlan.ts';
 import { BIG_DECIMAL_ZERO } from '@/lib/numeral.ts';
 import { parseDateTimeFromUnixTime, getYearMonthFirstUnixTime } from '@/lib/datetime.ts';
 
@@ -338,6 +421,7 @@ import {
     mdiTuneVariant,
     mdiCancel,
     mdiRestore,
+    mdiCloseCircleOutline,
     mdiAlertCircleOutline,
     mdiAlertOutline
 } from '@mdi/js';
@@ -367,7 +451,12 @@ interface FlowSegment {
     showInlineLabel: boolean;
 }
 
-interface CategoryMeter extends CategoryComparison {
+interface CategoryRow {
+    categoryId: string;
+    node: CategoryBudgetNode;
+    isPrimary: boolean;
+    isIncome: boolean;
+    hasChildren: boolean;
     width: string;
     color: string;
     trackColor: string;
@@ -380,6 +469,10 @@ interface CategoryMeter extends CategoryComparison {
 // for the meters below, where they mean over and near-over rather than "the third series".
 const FLOW_COLOR_COMMITTED = 'rgb(var(--v-theme-primary))';
 const FLOW_COLOR_PLANNED = 'rgb(var(--v-theme-teal))';
+// The third hue is a literal rather than a theme token because the theme has only the two accents.
+// It was checked against both surfaces and against the other two for colour-vision separation
+// before being used, and it clears the band in light and dark alike.
+const FLOW_COLOR_SET_ASIDE = '#5b6ee1';
 const FLOW_COLOR_LEFT = 'rgba(var(--v-theme-on-surface), 0.14)';
 
 const FLOW_LABEL_ON_FILL = 'rgb(var(--v-theme-on-primary))';
@@ -414,9 +507,16 @@ const editingLineKey = ref<string>('');
 const savingLineKey = ref<string>('');
 const editingAmount = ref<number>(0);
 const collapsedGroups = ref<Record<string, boolean>>({});
+const collapsedCategories = ref<Record<string, boolean>>({});
+const hoveredCategoryId = ref<string>('');
+const editingCategoryId = ref<string>('');
+const savingCategoryId = ref<string>('');
+const editingExpectation = ref<number>(0);
+const showAllCategories = ref<boolean>(false);
 
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
+const plannedLineTotals = computed(() => budgetPlanStore.plannedLineTotals);
 const actualTotals = computed(() => budgetPlanStore.actualTotals);
 const committedExpense = computed<BigDecimal>(() => budgetPlanStore.committedExpense);
 const defaultCurrency = computed<string>(() => budgetPlanStore.defaultCurrency);
@@ -453,11 +553,16 @@ const flowSegments = computed<FlowSegment[]>(() => {
     }
 
     const committed = committedExpense.value;
-    const discretionary = plannedTotals.value.expense.subtract(committed);
+    const discretionary = plannedLineTotals.value.expense.subtract(committed);
+    // what a category is expected to come to over and above what is listed under it. It is money
+    // the month has spoken for without yet saying what on, which is neither committed, nor planned
+    // in particular, nor left over.
+    const setAside = plannedTotals.value.expense.subtract(plannedLineTotals.value.expense);
 
     const segments: FlowSegment[] = [
         buildSegment('committed', tt('Committed'), FLOW_COLOR_COMMITTED, FLOW_LABEL_ON_FILL, committed, total),
         buildSegment('planned', tt('Planned'), FLOW_COLOR_PLANNED, FLOW_LABEL_ON_FILL, discretionary, total),
+        buildSegment('set-aside', tt('Set Aside'), FLOW_COLOR_SET_ASIDE, FLOW_LABEL_ON_FILL, setAside, total),
         buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, plannedTotals.value.net, total)
     ];
 
@@ -476,15 +581,60 @@ const incomeMarkerLeft = computed<string>(() => {
     return `${(plannedTotals.value.income.toDoubleNumber() / flowTotal.value.toDoubleNumber()) * 100}%`;
 });
 
-const categoryMeters = computed<CategoryMeter[]>(() => budgetPlanStore.categoryComparisons.map(comparison => {
-    const ratio = comparison.planned.isPositive() ? comparison.actual.toDoubleNumber() / comparison.planned.toDoubleNumber() : (comparison.actual.isPositive() ? Infinity : 0);
+// A primary is shown when anything under it is planned, spent or expected; a secondary only when it
+// is itself. Turning on Show every category reveals the rest, which is how a figure gets set against
+// a category that has nothing in it yet - the commonest way an expectation starts life.
+const categoryRows = computed<CategoryRow[]>(() => {
+    const rows: CategoryRow[] = [];
+
+    for (const node of budgetPlanStore.categoryBudgetTree) {
+        const children = node.children.filter(isCategoryShown);
+
+        if (!isCategoryShown(node) && !children.length) {
+            continue;
+        }
+
+        rows.push(buildCategoryRow(node, true, node.children.length > 0));
+
+        if (collapsedCategories.value[node.categoryId]) {
+            continue;
+        }
+
+        for (const child of children) {
+            rows.push(buildCategoryRow(child, false, false));
+        }
+    }
+
+    return rows;
+});
+
+// A category hidden from the rest of the app stays hidden here too, unless something is planned or
+// spent in it - in which case leaving it out would make the totals not add up.
+function isCategoryShown(node: CategoryBudgetNode): boolean {
+    if (hasCategoryBudgetActivity(node)) {
+        return true;
+    }
+
+    return showAllCategories.value && !transactionCategoriesStore.allTransactionCategoriesMap[node.categoryId]?.hidden;
+}
+
+function buildCategoryRow(node: CategoryBudgetNode, isPrimary: boolean, hasChildren: boolean): CategoryRow {
+    // the meter runs against what the category costs the month, which is its expectation where it
+    // has one and what is listed under it where it has not
+    const ratio = node.budget.isPositive() ? node.actual.toDoubleNumber() / node.budget.toDoubleNumber() : (node.actual.isPositive() ? Infinity : 0);
+
+    const isIncome = node.type === TransactionType.Income;
 
     let color = METER_COLOR_UNDER;
     let trackColor = METER_TRACK_UNDER;
     let icon = '';
     let statusText: string;
 
-    if (!comparison.planned.isPositive() && comparison.actual.isPositive()) {
+    // Only spending is warned about. Earning more than was expected, or from somewhere that was not
+    // planned for at all, is not a problem to flag - and the status colours mean a problem.
+    if (isIncome) {
+        statusText = node.budget.isPositive() ? formatPercentToLocalizedNumerals(ratio * 100, 0, '<1') : tt('Unplanned');
+    } else if (!node.budget.isPositive() && node.actual.isPositive()) {
         color = METER_COLOR_OVER;
         trackColor = METER_TRACK_OVER;
         icon = mdiAlertCircleOutline;
@@ -504,14 +654,18 @@ const categoryMeters = computed<CategoryMeter[]>(() => budgetPlanStore.categoryC
     }
 
     return {
-        ...comparison,
+        categoryId: node.categoryId,
+        node: node,
+        isPrimary: isPrimary,
+        isIncome: isIncome,
+        hasChildren: hasChildren,
         width: `${Math.max(Math.min(ratio, 1) * 100, ratio > 0 ? 3 : 0)}%`,
         color: color,
         trackColor: trackColor,
         statusText: statusText,
         icon: icon
     };
-}));
+}
 
 function buildGroup(key: string, title: string, matches: (line: PlannedLine) => boolean): PlannedLineGroup {
     const lines = allLines.value.filter(matches);
@@ -584,6 +738,55 @@ function toggleGroup(key: string): void {
     collapsedGroups.value = { ...collapsedGroups.value, [key]: !collapsedGroups.value[key] };
 }
 
+function toggleCategory(categoryId: string): void {
+    collapsedCategories.value = { ...collapsedCategories.value, [categoryId]: !collapsedCategories.value[categoryId] };
+}
+
+// An expectation is typed in the default currency, because it is a figure about a category rather
+// than about an account, and a category has no currency of its own.
+function startEditingExpectation(node: CategoryBudgetNode): void {
+    editingCategoryId.value = node.categoryId;
+    editingExpectation.value = node.expectation ? node.expectation.toSafeIntegerNumber() : 0;
+}
+
+function cancelEditingExpectation(): void {
+    editingCategoryId.value = '';
+    editingExpectation.value = 0;
+}
+
+function commitExpectation(node: CategoryBudgetNode): void {
+    const newAmount = editingExpectation.value;
+    const oldAmount = node.expectation ? node.expectation.toSafeIntegerNumber() : 0;
+
+    if (newAmount === oldAmount) {
+        cancelEditingExpectation();
+        return;
+    }
+
+    saveExpectation(node.categoryId, newAmount);
+}
+
+// Clearing is saving nothing: the server takes a zero as the removal it is, so there is one path
+// through here rather than two.
+function clearExpectation(node: CategoryBudgetNode): void {
+    saveExpectation(node.categoryId, 0);
+}
+
+function saveExpectation(categoryId: string, amount: number): void {
+    savingCategoryId.value = categoryId;
+
+    budgetPlanStore.setCategoryExpectation({ categoryId: categoryId, amount: amount }).then(() => {
+        savingCategoryId.value = '';
+        cancelEditingExpectation();
+    }).catch(error => {
+        savingCategoryId.value = '';
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
 // The amount edited in place is what one occurrence costs, not what the month costs - the same
 // figure the adjust dialog asks for, so the two never disagree.
 function startEditingAmount(groupKey: string, line: PlannedLine): void {
@@ -643,6 +846,7 @@ function saveItemAmount(line: PlannedLine, newAmount: number): Promise<unknown> 
 function load(force: boolean): void {
     loading.value = true;
     cancelEditingAmount();
+    cancelEditingExpectation();
 
     budgetPlanStore.loadBudgetPlan({ force: force }).then(() => {
         loading.value = false;
@@ -848,6 +1052,38 @@ onMounted(() => {
 
 .budget-meter-column {
     width: 210px;
+}
+
+.budget-category-switch {
+    flex: 0 0 auto;
+}
+
+/* The twisty and the spacer that stands in for it are the same width, so a primary with
+   subcategories and one without line their names up in the same place; the indent is that width
+   again plus the step that puts a subcategory under its parent. */
+.budget-category-twisty {
+    width: 24px;
+    min-width: 24px;
+    flex: 0 0 auto;
+    margin-inline-end: 6px;
+}
+
+.budget-category-indent {
+    width: 48px;
+    min-width: 48px;
+    flex: 0 0 auto;
+}
+
+.budget-category-table .budget-category-primary-row > td {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.budget-category-table .budget-category-primary-row:first-child > td {
+    border-top: none;
+}
+
+.budget-category-table tr:hover .budget-plan-amount-button .budget-plan-amount-pencil {
+    opacity: 0.5;
 }
 
 .budget-meter {

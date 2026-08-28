@@ -81,8 +81,10 @@ import type {
     BudgetPlanItemDeleteRequest,
     BudgetPlanItemCopyRequest,
     BudgetPlanAdjustmentSetRequest,
+    BudgetPlanExpectationSetRequest,
     BudgetPlanItemInfoResponse,
     BudgetPlanAdjustmentInfoResponse,
+    BudgetPlanExpectationInfoResponse,
     BudgetPlanInfoResponse
 } from '@/models/budget_plan.ts';
 import type {
@@ -985,6 +987,9 @@ export default {
     },
     copyBudgetPlanItems: (req: BudgetPlanItemCopyRequest): ApiResponsePromise<number> => {
         return axios.post<ApiResponse<number>>('v1/budget_plans/items/copy.json', req);
+    },
+    setBudgetPlanExpectation: (req: BudgetPlanExpectationSetRequest): ApiResponsePromise<BudgetPlanExpectationInfoResponse | null> => {
+        return axios.post<ApiResponse<BudgetPlanExpectationInfoResponse | null>>('v1/budget_plans/expectations/set.json', req);
     },
     setBudgetPlanAdjustment: (req: BudgetPlanAdjustmentSetRequest): ApiResponsePromise<BudgetPlanAdjustmentInfoResponse | null> => {
         return axios.post<ApiResponse<BudgetPlanAdjustmentInfoResponse | null>>('v1/budget_plans/adjustments/set.json', req);
