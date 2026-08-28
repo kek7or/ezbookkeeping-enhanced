@@ -201,7 +201,8 @@ import {
     isObject,
     isString,
     isNumber,
-    isBoolean
+    isBoolean,
+    sortNumbersArray
 } from '@/lib/common.ts';
 
 import {
@@ -1826,6 +1827,30 @@ export function useI18n() {
         return joinMultiText(finalWeekdayNames);
     }
 
+    // getScheduleFrequencyDisplayName renders a scheduled template's recurrence as one line.
+    // An empty frequency value is not a broken record: it is a period whose day is not known - a
+    // subscription that renews every month on whichever day the merchant charges - and it reads as
+    // "Monthly, day varies" so it is never mistaken for one that will post itself.
+    function getScheduleFrequencyDisplayName(frequencyType: number, frequencyValue: string, firstDayOfWeek?: WeekDayValue): string {
+        const values: number[] = sortNumbersArray(frequencyValue.split(',').filter(value => !!value).map(value => parseInt(value)));
+
+        if (frequencyType === ScheduledTemplateFrequencyType.Disabled.type) {
+            return t('Not scheduled');
+        } else if (frequencyType === ScheduledTemplateFrequencyType.Daily.type) {
+            return t('Daily');
+        } else if (frequencyType === ScheduledTemplateFrequencyType.EveryNDays.type) {
+            return values.length ? t('format.misc.everyNDays', { n: values[0] }) : t('Every N Days');
+        } else if (frequencyType === ScheduledTemplateFrequencyType.Weekly.type) {
+            return values.length ? t('format.misc.everyMultiDaysOfWeek', { days: getMultiWeekdayLongNames(values, firstDayOfWeek) }) : t('Weekly, day varies');
+        } else if (frequencyType === ScheduledTemplateFrequencyType.Monthly.type) {
+            return values.length ? t('format.misc.everyMultiDaysOfMonth', { days: getMultiMonthdayShortNames(values) }) : t('Monthly, day varies');
+        } else if (frequencyType === ScheduledTemplateFrequencyType.Yearly.type) {
+            return values.length ? t('format.misc.everyMultiDaysOfYear', { days: getMultiMonthAndDayLongNames(values) }) : t('Yearly, date varies');
+        }
+
+        return '';
+    }
+
     function getAllLocalizedDigits(): string[] {
         const numeralSystem = getCurrentNumeralSystemType();
         return numeralSystem.getAllDigits();
@@ -2650,6 +2675,7 @@ export function useI18n() {
         getMultiMonthAndDayLongNames,
         getMultiMonthdayShortNames,
         getMultiWeekdayLongNames,
+        getScheduleFrequencyDisplayName,
         getAllLocalizedDigits,
         getLocaleDefaultCalendarDisplayType,
         getLocaleDefaultDateDisplayType,

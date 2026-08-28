@@ -106,9 +106,7 @@ const emit = defineEmits<{
 
 const {
     tt,
-    getMultiMonthAndDayLongNames,
-    getMultiMonthdayShortNames,
-    getMultiWeekdayLongNames
+    getScheduleFrequencyDisplayName
 } = useI18n();
 const {
     allTransactionScheduledFrequencyTypes,
@@ -157,47 +155,7 @@ const frequencyValue = computed<number[]>({
     }
 });
 
-const displayFrequency = computed<string>(() => {
-    if (frequencyType.value === ScheduledTemplateFrequencyType.Disabled.type) {
-        return tt('Disabled');
-    } else if (frequencyType.value === ScheduledTemplateFrequencyType.Daily.type) {
-        return tt('Daily');
-    } else if (frequencyType.value === ScheduledTemplateFrequencyType.EveryNDays.type) {
-        if (frequencyValue.value.length) {
-            return tt('format.misc.everyNDays', {
-                n: frequencyValue.value[0]
-            });
-        } else {
-            return tt('Every N Days');
-        }
-    } else if (frequencyType.value === ScheduledTemplateFrequencyType.Weekly.type) {
-        if (frequencyValue.value.length) {
-            return tt('format.misc.everyMultiDaysOfWeek', {
-                days: getMultiWeekdayLongNames(frequencyValue.value, firstDayOfWeek.value)
-            });
-        } else {
-            return tt('Weekly');
-        }
-    } else if (frequencyType.value === ScheduledTemplateFrequencyType.Monthly.type) {
-        if (frequencyValue.value.length) {
-            return tt('format.misc.everyMultiDaysOfMonth', {
-                days: getMultiMonthdayShortNames(frequencyValue.value)
-            });
-        } else {
-            return tt('Monthly');
-        }
-    } else if (frequencyType.value === ScheduledTemplateFrequencyType.Yearly.type) {
-        if (frequencyValue.value.length) {
-            return tt('format.misc.everyMultiDaysOfYear', {
-                days: getMultiMonthAndDayLongNames(frequencyValue.value)
-            });
-        } else {
-            return tt('Yearly');
-        }
-    } else {
-        return '';
-    }
-});
+const displayFrequency = computed<string>(() => getScheduleFrequencyDisplayName(frequencyType.value, props.modelValue, firstDayOfWeek.value));
 
 function isFrequencyValueSelected(currentValue: number): boolean {
     return frequencyValue.value.indexOf(currentValue) >= 0;

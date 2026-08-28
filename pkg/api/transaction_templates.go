@@ -138,9 +138,13 @@ func (a *TransactionTemplatesApi) TemplateCreateHandler(c *core.WebContext) (any
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 
+		// An empty frequency value against a real frequency type is a period without a day: a
+		// subscription that renews every month on whichever day the merchant picks. The period is
+		// known and worth keeping, the day is not, and so nothing is posted for it -
+		// CreateScheduledTransactions passes over such a template and the charge is entered when it
+		// actually lands. EVERY_N_DAYS is the exception checked below, because there the frequency
+		// value is the interval itself rather than a day inside one.
 		if *templateCreateReq.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateCreateReq.ScheduledFrequency != "" {
-			return nil, errs.ErrScheduledTransactionFrequencyInvalid
-		} else if *templateCreateReq.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateCreateReq.ScheduledFrequency == "" {
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 
@@ -249,9 +253,13 @@ func (a *TransactionTemplatesApi) TemplateModifyHandler(c *core.WebContext) (any
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 
+		// An empty frequency value against a real frequency type is a period without a day: a
+		// subscription that renews every month on whichever day the merchant picks. The period is
+		// known and worth keeping, the day is not, and so nothing is posted for it -
+		// CreateScheduledTransactions passes over such a template and the charge is entered when it
+		// actually lands. EVERY_N_DAYS is the exception checked below, because there the frequency
+		// value is the interval itself rather than a day inside one.
 		if *templateModifyReq.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateModifyReq.ScheduledFrequency != "" {
-			return nil, errs.ErrScheduledTransactionFrequencyInvalid
-		} else if *templateModifyReq.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DISABLED && *templateModifyReq.ScheduledFrequency == "" {
 			return nil, errs.ErrScheduledTransactionFrequencyInvalid
 		}
 

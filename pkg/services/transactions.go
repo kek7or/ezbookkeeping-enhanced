@@ -1348,14 +1348,23 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 			continue
 		}
 
-		if (template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY &&
+		if template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY &&
 			template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY &&
 			template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DAILY &&
 			template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_YEARLY &&
-			template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS) ||
-			template.ScheduledFrequency == "" {
+			template.ScheduledFrequencyType != models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS {
 			skipCount++
 			log.Warnf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has invalid scheduled transaction frequency", template.TemplateId)
+			continue
+		}
+
+		// A frequency type with no frequency value is a period whose day is not known - a
+		// subscription that renews monthly on whichever day the merchant charges. It is kept so the
+		// commitment can be listed and totalled, and it is never posted, because guessing the day
+		// would put a transaction in the ledger on a date the money did not move.
+		if template.ScheduledFrequency == "" {
+			skipCount++
+			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" recurs without a fixed day, nothing to create", template.TemplateId)
 			continue
 		}
 
