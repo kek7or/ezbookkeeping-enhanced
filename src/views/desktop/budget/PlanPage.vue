@@ -6,13 +6,13 @@
                     <div class="title-and-toolbar d-flex align-center">
                         <span>{{ tt('Budget Plan') }}</span>
                         <v-btn class="ms-3" density="comfortable" color="default" variant="text"
-                               :disabled="loading" :icon="mdiChevronLeft" @click="stepMonth(-1)">
+                               :disabled="loading" :icon="true" @click="stepMonth(-1)">
                             <v-icon :icon="mdiChevronLeft"/>
                             <v-tooltip activator="parent">{{ tt('Previous Month') }}</v-tooltip>
                         </v-btn>
-                        <span class="budget-plan-month text-body-1 mx-1">{{ displayMonth }}</span>
+                        <span class="budget-plan-month text-body-1">{{ displayMonth }}</span>
                         <v-btn density="comfortable" color="default" variant="text"
-                               :disabled="loading" :icon="mdiChevronRight" @click="stepMonth(1)">
+                               :disabled="loading" :icon="true" @click="stepMonth(1)">
                             <v-icon :icon="mdiChevronRight"/>
                             <v-tooltip activator="parent">{{ tt('Next Month') }}</v-tooltip>
                         </v-btn>
@@ -25,7 +25,7 @@
                             <v-tooltip activator="parent">{{ tt('Refresh') }}</v-tooltip>
                         </v-btn>
                         <v-spacer/>
-                        <v-btn class="ms-3" color="default" variant="outlined"
+                        <v-btn class="ms-3" color="primary" variant="tonal" :prepend-icon="mdiPlus"
                                :disabled="loading" @click="addItem">{{ tt('Plan Something') }}</v-btn>
                         <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                                :disabled="loading" :icon="true">
@@ -46,27 +46,64 @@
                     </div>
                 </template>
 
-                <v-card-text class="budget-plan-summary">
+                <v-card-text>
                     <v-row>
-                        <v-col cols="12" md="3">
-                            <div class="text-caption text-medium-emphasis">{{ tt('Planned Income') }}</div>
-                            <div class="text-h6 text-income">{{ displayAmount(plannedTotals.income) }}</div>
-                            <div class="text-caption text-medium-emphasis">{{ tt('So far') }} {{ displayAmount(actualTotals.income) }}</div>
+                        <v-col cols="12" md="4">
+                            <div class="text-caption text-medium-emphasis">{{ overspent ? tt('Over Plan By') : tt('Left Over') }}</div>
+                            <div class="budget-plan-hero" :class="overspent ? 'text-expense' : 'text-income'">
+                                <v-skeleton-loader type="heading" :loading="true" v-if="loading"/>
+                                <span v-else>{{ displayAmount(overspent ? plannedTotals.net.negate() : plannedTotals.net) }}</span>
+                            </div>
+                            <div class="text-body-2 text-medium-emphasis">
+                                {{ tt('of {amount} planned income', { amount: displayAmount(plannedTotals.income) }) }}
+                            </div>
                         </v-col>
-                        <v-col cols="12" md="3">
-                            <div class="text-caption text-medium-emphasis">{{ tt('Planned Expense') }}</div>
-                            <div class="text-h6 text-expense">{{ displayAmount(plannedTotals.expense) }}</div>
-                            <div class="text-caption text-medium-emphasis">{{ tt('So far') }} {{ displayAmount(actualTotals.expense) }}</div>
-                        </v-col>
-                        <v-col cols="12" md="3">
-                            <div class="text-caption text-medium-emphasis">{{ tt('Committed') }}</div>
-                            <div class="text-h6">{{ displayAmount(committedExpense) }}</div>
-                            <div class="text-caption text-medium-emphasis">{{ tt('What the schedules cost whatever else is decided') }}</div>
-                        </v-col>
-                        <v-col cols="12" md="3">
-                            <div class="text-caption text-medium-emphasis">{{ tt('Left Over') }}</div>
-                            <div class="text-h6" :class="plannedTotals.net.isNegative() ? 'text-expense' : 'text-income'">{{ displayAmount(plannedTotals.net) }}</div>
-                            <div class="text-caption text-medium-emphasis">{{ tt('Planned income less everything planned to leave') }}</div>
+                        <v-col cols="12" md="8">
+                            <!-- One bar, three parts of the same income: what recurs, what was
+                                 decided for this month, and what is not spoken for. -->
+                            <div class="budget-flow-bar-wrapper" v-if="!loading && flowSegments.length">
+                                <div class="budget-flow-bar">
+                                    <div class="budget-flow-segment"
+                                         :key="segment.key"
+                                         :style="{ flexGrow: segment.share, background: segment.color }"
+                                         v-for="segment in flowSegments">
+                                        <span class="budget-flow-inline-label" :style="{ color: segment.labelColor }"
+                                              v-if="segment.showInlineLabel">{{ segment.label }}</span>
+                                        <v-tooltip activator="parent" location="top">
+                                            {{ segment.label }} — {{ segment.displayAmount }} ({{ segment.displayShare }})
+                                        </v-tooltip>
+                                    </div>
+                                </div>
+                                <!-- where the income runs out. It is only drawn when the month
+                                     plans past it, because otherwise it sits on the bar's own end
+                                     and marks nothing. -->
+                                <div class="budget-flow-income-marker" :style="{ left: incomeMarkerLeft }"
+                                     v-if="incomeMarkerLeft">
+                                    <v-tooltip activator="parent" location="top">
+                                        {{ tt('Planned Income') }} — {{ displayAmount(plannedTotals.income) }}
+                                    </v-tooltip>
+                                </div>
+                            </div>
+                            <v-skeleton-loader type="text" :loading="true" v-else-if="loading"/>
+
+                            <div class="budget-flow-legend" v-if="!loading">
+                                <div class="budget-flow-legend-item" :key="segment.key" v-for="segment in flowSegments">
+                                    <span class="budget-flow-swatch" :style="{ background: segment.color }"></span>
+                                    <span class="text-body-2">{{ segment.label }}</span>
+                                    <span class="text-body-2 text-medium-emphasis ms-2">{{ segment.displayAmount }}</span>
+                                </div>
+                            </div>
+
+                            <div class="d-flex flex-wrap mt-3" v-if="!loading">
+                                <div class="me-8">
+                                    <span class="text-caption text-medium-emphasis">{{ tt('Spent so far') }}</span>
+                                    <span class="text-body-1 ms-2">{{ displayAmount(actualTotals.expense) }}</span>
+                                </div>
+                                <div class="me-8">
+                                    <span class="text-caption text-medium-emphasis">{{ tt('Received so far') }}</span>
+                                    <span class="text-body-1 ms-2">{{ displayAmount(actualTotals.income) }}</span>
+                                </div>
+                            </div>
                         </v-col>
                     </v-row>
                 </v-card-text>
@@ -75,6 +112,10 @@
 
         <v-col cols="12">
             <v-card :title="tt('The Plan')">
+                <v-card-text class="pt-0">
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('Click any amount to change it. Everything above recalculates as you type.') }}</span>
+                </v-card-text>
+
                 <v-table class="budget-plan-table table-striped" :hover="!loading">
                     <thead>
                     <tr>
@@ -97,53 +138,100 @@
 
                     <tbody v-else-if="!allLines.length">
                     <tr>
-                        <td colspan="6">{{ tt('Nothing is planned for this month yet. Scheduled transactions appear here on their own; anything else is added with Plan Something.') }}</td>
+                        <td colspan="6" class="py-6 text-center">
+                            <v-icon class="mb-2" size="32" :icon="mdiCalendarBlankOutline" color="secondary"/>
+                            <div class="text-body-1">{{ tt('Nothing is planned for this month yet') }}</div>
+                            <div class="text-body-2 text-medium-emphasis mb-3">{{ tt('Scheduled transactions appear here on their own; anything else is added with Plan Something.') }}</div>
+                            <v-btn color="primary" variant="tonal" :prepend-icon="mdiPlus" @click="addItem">{{ tt('Plan Something') }}</v-btn>
+                        </td>
                     </tr>
                     </tbody>
 
                     <tbody v-else>
-                    <template :key="group.title" v-for="group in lineGroups">
-                        <tr class="budget-plan-group-row" v-if="group.lines.length">
-                            <td colspan="6" class="text-uppercase text-caption text-medium-emphasis">{{ group.title }}</td>
+                    <template :key="group.key" v-for="group in lineGroups">
+                        <tr class="budget-plan-group-row" v-if="group.lines.length" @click="toggleGroup(group.key)">
+                            <td colspan="4">
+                                <div class="d-flex align-center">
+                                    <v-icon size="18" :icon="collapsedGroups[group.key] ? mdiChevronRight : mdiChevronDown"/>
+                                    <span class="text-uppercase text-caption font-weight-medium ms-1">{{ group.title }}</span>
+                                    <span class="text-caption text-medium-emphasis ms-2">{{ formatNumberToLocalizedNumerals(group.lines.length) }}</span>
+                                </div>
+                            </td>
+                            <td class="text-end text-no-wrap text-caption font-weight-medium">{{ displayAmount(group.total) }}</td>
+                            <td class="budget-plan-operation-column"></td>
                         </tr>
-                        <tr class="budget-plan-line-row" :key="group.title + '-' + line.source + '-' + line.id"
-                            v-for="line in group.lines"
-                            @mouseenter="hoveredLineKey = group.title + '-' + line.source + '-' + line.id"
+
+                        <tr class="budget-plan-line-row"
+                            :key="lineKey(group.key, line)"
+                            v-for="line in (collapsedGroups[group.key] ? [] : group.lines)"
+                            @mouseenter="hoveredLineKey = lineKey(group.key, line)"
                             @mouseleave="hoveredLineKey = ''">
                             <td>
                                 <div class="d-flex align-center">
                                     <v-icon size="20" start :icon="line.source === PlannedLineSource.Schedule ? mdiClockTimeNineOutline : mdiPencilOutline"/>
                                     <span :class="{ 'text-decoration-line-through text-medium-emphasis': line.excluded }">{{ line.name }}</span>
+                                    <v-chip class="ms-2" size="x-small" color="secondary" variant="tonal" v-if="line.excluded">{{ tt('Skipped') }}</v-chip>
+                                    <v-chip class="ms-2" size="x-small" color="primary" variant="tonal" v-else-if="line.adjusted">{{ tt('Adjusted') }}</v-chip>
                                 </div>
                             </td>
                             <td class="text-truncate">{{ getCategoryName(line.categoryId) }}</td>
                             <td class="text-truncate">{{ getAccountName(line.accountId) }}</td>
-                            <td class="text-end text-no-wrap">{{ displayOccurrences(line.occurrences) }}</td>
-                            <td class="text-end text-no-wrap" :class="{ 'text-medium-emphasis': line.excluded }">
-                                <span :class="{ 'text-decoration-line-through': line.excluded }">{{ displayLineAmount(line) }}</span>
-                                <v-icon class="ms-1" size="14" :icon="mdiPencilOutline" v-if="line.adjusted">
-                                    <v-tooltip activator="parent">{{ tt('Adjusted for this month') }}</v-tooltip>
-                                </v-icon>
+                            <td class="text-end text-no-wrap text-medium-emphasis">{{ displayOccurrences(line.occurrences) }}</td>
+                            <td class="text-end budget-plan-amount-cell">
+                                <amount-input class="budget-plan-amount-input"
+                                              density="compact" variant="outlined"
+                                              :autofocus="true"
+                                              :currency="line.currency"
+                                              :show-currency="true"
+                                              :disabled="savingLineKey === lineKey(group.key, line)"
+                                              v-model="editingAmount"
+                                              @enter="commitAmount(line)"
+                                              v-if="editingLineKey === lineKey(group.key, line)"/>
+                                <button class="budget-plan-amount-button text-no-wrap"
+                                        :class="{ 'text-medium-emphasis': line.excluded }"
+                                        :disabled="line.excluded"
+                                        @click="startEditingAmount(group.key, line)"
+                                        v-else>
+                                    <span :class="{ 'text-decoration-line-through': line.excluded }">{{ displayLineAmount(line) }}</span>
+                                    <v-icon class="budget-plan-amount-pencil ms-1" size="13" :icon="mdiPencilOutline"/>
+                                </button>
                             </td>
                             <td class="text-end budget-plan-operation-column">
-                                <div class="budget-plan-operation-buttons"
-                                     :class="{ 'budget-plan-operation-buttons-shown': hoveredLineKey === group.title + '-' + line.source + '-' + line.id }">
-                                    <template v-if="line.source === PlannedLineSource.Schedule">
-                                        <v-btn class="px-2" color="default" density="comfortable" variant="text"
-                                               :prepend-icon="mdiTuneVariant" :disabled="loading"
-                                               @click="adjustSchedule(line)">{{ tt('Adjust') }}</v-btn>
-                                        <v-btn class="px-2" color="default" density="comfortable" variant="text"
-                                               :prepend-icon="line.excluded ? mdiRestore : mdiCancel" :disabled="loading"
-                                               @click="toggleExcluded(line)">{{ line.excluded ? tt('Restore') : tt('Skip') }}</v-btn>
-                                    </template>
-                                    <template v-else>
-                                        <v-btn class="px-2" color="default" density="comfortable" variant="text"
-                                               :prepend-icon="mdiPencilOutline" :disabled="loading"
-                                               @click="editItem(line)">{{ tt('Edit') }}</v-btn>
-                                        <v-btn class="px-2" color="default" density="comfortable" variant="text"
-                                               :prepend-icon="mdiDeleteOutline" :disabled="loading"
-                                               @click="removeItem(line)">{{ tt('Delete') }}</v-btn>
-                                    </template>
+                                <div class="d-flex align-center justify-end">
+                                    <div class="budget-plan-operation-buttons"
+                                         :class="{ 'budget-plan-operation-buttons-shown': hoveredLineKey === lineKey(group.key, line) || editingLineKey === lineKey(group.key, line) }">
+                                        <template v-if="editingLineKey === lineKey(group.key, line)">
+                                            <v-btn class="px-2" color="primary" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiCheck" :loading="savingLineKey === lineKey(group.key, line)"
+                                                   @click="commitAmount(line)">{{ tt('Save') }}</v-btn>
+                                            <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiClose" @click="cancelEditingAmount">{{ tt('Cancel') }}</v-btn>
+                                        </template>
+                                        <template v-else-if="line.source === PlannedLineSource.Schedule">
+                                            <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiTuneVariant" :disabled="loading"
+                                                   @click="adjustSchedule(line)">{{ tt('Adjust') }}</v-btn>
+                                        </template>
+                                        <template v-else>
+                                            <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiPencilOutline" :disabled="loading"
+                                                   @click="editItem(line)">{{ tt('Edit') }}</v-btn>
+                                            <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiDeleteOutline" :disabled="loading"
+                                                   @click="removeItem(line)">{{ tt('Delete') }}</v-btn>
+                                        </template>
+                                    </div>
+
+                                    <!-- Skipping is the commonest thing a plan has to say about a
+                                         schedule, so it is one always-visible click rather than
+                                         something the row has to be hovered to reveal. -->
+                                    <v-btn class="ms-1" density="comfortable" color="default" variant="text"
+                                           :icon="true" :disabled="loading"
+                                           @click="toggleExcluded(line)"
+                                           v-if="line.source === PlannedLineSource.Schedule">
+                                        <v-icon size="20" :icon="line.excluded ? mdiRestore : mdiCancel"/>
+                                        <v-tooltip activator="parent">{{ line.excluded ? tt('Restore') : tt('Skip this month') }}</v-tooltip>
+                                    </v-btn>
                                 </div>
                             </td>
                         </tr>
@@ -158,27 +246,45 @@
                 <v-card-text class="pt-0">
                     <span class="text-body-2 text-medium-emphasis">{{ tt('What each category was planned to cost this month, and what it has cost so far.') }}</span>
                 </v-card-text>
-                <v-table class="budget-plan-table table-striped" :hover="!loading">
+                <v-table class="budget-plan-table table-striped">
                     <thead>
                     <tr>
                         <th>{{ tt('Category') }}</th>
+                        <th class="budget-meter-column">{{ tt('Progress') }}</th>
                         <th class="text-end">{{ tt('Planned') }}</th>
                         <th class="text-end">{{ tt('Actual') }}</th>
                         <th class="text-end">{{ tt('Left') }}</th>
                     </tr>
                     </thead>
-                    <tbody v-if="!loading && !categoryComparisons.length">
-                    <tr>
-                        <td colspan="4">{{ tt('Nothing planned and nothing spent in this month.') }}</td>
+                    <tbody v-if="loading">
+                    <tr :key="itemIdx" v-for="itemIdx in [ 1, 2 ]">
+                        <td class="px-0" colspan="5">
+                            <v-skeleton-loader type="text" :loading="true"></v-skeleton-loader>
+                        </td>
                     </tr>
                     </tbody>
-                    <tbody v-else-if="!loading">
-                    <tr :key="comparison.categoryId" v-for="comparison in categoryComparisons">
-                        <td class="text-truncate">{{ getCategoryName(comparison.categoryId) }}</td>
-                        <td class="text-end text-no-wrap">{{ displayAmount(comparison.planned) }}</td>
-                        <td class="text-end text-no-wrap">{{ displayAmount(comparison.actual) }}</td>
+                    <tbody v-else-if="!categoryMeters.length">
+                    <tr>
+                        <td colspan="5">{{ tt('Nothing planned and nothing spent in this month.') }}</td>
+                    </tr>
+                    </tbody>
+                    <tbody v-else>
+                    <tr :key="meter.categoryId" v-for="meter in categoryMeters">
+                        <td class="text-truncate">{{ getCategoryName(meter.categoryId) }}</td>
+                        <td class="budget-meter-column">
+                            <div class="d-flex align-center">
+                                <div class="budget-meter" :style="{ background: meter.trackColor }">
+                                    <div class="budget-meter-fill" :style="{ width: meter.width, background: meter.color }"></div>
+                                </div>
+                                <!-- the state is named and iconed, never carried by the colour alone -->
+                                <v-icon class="ms-2" size="16" :icon="meter.icon" :style="{ color: meter.color }" v-if="meter.icon"/>
+                                <span class="text-caption text-medium-emphasis ms-2 text-no-wrap">{{ meter.statusText }}</span>
+                            </div>
+                        </td>
+                        <td class="text-end text-no-wrap">{{ displayAmount(meter.planned) }}</td>
+                        <td class="text-end text-no-wrap">{{ displayAmount(meter.actual) }}</td>
                         <td class="text-end text-no-wrap"
-                            :class="comparison.remaining.isNegative() ? 'text-expense' : ''">{{ displayAmount(comparison.remaining) }}</td>
+                            :class="meter.remaining.isNegative() ? 'text-expense' : ''">{{ displayAmount(meter.remaining) }}</td>
                     </tr>
                     </tbody>
                 </v-table>
@@ -193,6 +299,7 @@
 </template>
 
 <script setup lang="ts">
+import AmountInput from '@/components/desktop/AmountInput.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditPlanItemDialog from './dialogs/EditPlanItemDialog.vue';
@@ -204,27 +311,35 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
-import { useBudgetPlanStore } from '@/stores/budgetPlan.ts';
+import { type CategoryComparison, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import { type PlannedLine, PlannedLineSource } from '@/lib/budgetPlan.ts';
+import { BIG_DECIMAL_ZERO } from '@/lib/numeral.ts';
 import { parseDateTimeFromUnixTime, getYearMonthFirstUnixTime } from '@/lib/datetime.ts';
 
 import {
     mdiRefresh,
+    mdiPlus,
+    mdiCheck,
+    mdiClose,
     mdiChevronLeft,
     mdiChevronRight,
+    mdiChevronDown,
     mdiDotsVertical,
     mdiContentCopy,
     mdiCalendarTodayOutline,
+    mdiCalendarBlankOutline,
     mdiClockTimeNineOutline,
     mdiPencilOutline,
     mdiDeleteOutline,
     mdiTuneVariant,
     mdiCancel,
-    mdiRestore
+    mdiRestore,
+    mdiAlertCircleOutline,
+    mdiAlertOutline
 } from '@mdi/js';
 
 type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
@@ -233,11 +348,56 @@ type EditPlanItemDialogType = InstanceType<typeof EditPlanItemDialog>;
 type AdjustScheduleDialogType = InstanceType<typeof AdjustScheduleDialog>;
 
 interface PlannedLineGroup {
+    key: string;
     title: string;
     lines: PlannedLine[];
+    total: BigDecimal;
 }
 
-const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatDateTimeToGregorianLikeLongYearMonth } = useI18n();
+interface FlowSegment {
+    key: string;
+    label: string;
+    color: string;
+    // labelColor is chosen against the fill rather than by position, so the one segment that can be
+    // either a light neutral or a dark red never ends up with unreadable text on it
+    labelColor: string;
+    share: number;
+    displayAmount: string;
+    displayShare: string;
+    showInlineLabel: boolean;
+}
+
+interface CategoryMeter extends CategoryComparison {
+    width: string;
+    color: string;
+    trackColor: string;
+    statusText: string;
+    icon: string;
+}
+
+// The three parts of one income are told apart by identity, so they take the app's own two accent
+// hues plus a neutral for the part that is not allocated at all. The status colours are left alone
+// for the meters below, where they mean over and near-over rather than "the third series".
+const FLOW_COLOR_COMMITTED = 'rgb(var(--v-theme-primary))';
+const FLOW_COLOR_PLANNED = 'rgb(var(--v-theme-teal))';
+const FLOW_COLOR_LEFT = 'rgba(var(--v-theme-on-surface), 0.14)';
+
+const FLOW_LABEL_ON_FILL = 'rgb(var(--v-theme-on-primary))';
+const FLOW_LABEL_ON_SURFACE = 'rgb(var(--v-theme-on-surface))';
+
+const METER_COLOR_UNDER = 'rgb(var(--v-theme-primary))';
+const METER_COLOR_NEAR = 'rgb(var(--v-theme-warning))';
+const METER_COLOR_OVER = 'rgb(var(--v-theme-error))';
+
+// the unfilled track is a lighter step of whatever the fill is, so the state reads across the whole
+// bar rather than only across the filled part
+const METER_TRACK_UNDER = 'rgba(var(--v-theme-primary), 0.16)';
+const METER_TRACK_NEAR = 'rgba(var(--v-theme-warning), 0.16)';
+const METER_TRACK_OVER = 'rgba(var(--v-theme-error), 0.16)';
+
+const NEAR_PLAN_RATIO = 0.85;
+
+const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatPercentToLocalizedNumerals, formatDateTimeToGregorianLikeLongYearMonth } = useI18n();
 
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
@@ -250,13 +410,18 @@ const adjustScheduleDialog = useTemplateRef<AdjustScheduleDialogType>('adjustSch
 
 const loading = ref<boolean>(true);
 const hoveredLineKey = ref<string>('');
+const editingLineKey = ref<string>('');
+const savingLineKey = ref<string>('');
+const editingAmount = ref<number>(0);
+const collapsedGroups = ref<Record<string, boolean>>({});
 
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
 const actualTotals = computed(() => budgetPlanStore.actualTotals);
 const committedExpense = computed<BigDecimal>(() => budgetPlanStore.committedExpense);
-const categoryComparisons = computed(() => budgetPlanStore.categoryComparisons);
 const defaultCurrency = computed<string>(() => budgetPlanStore.defaultCurrency);
+
+const overspent = computed<boolean>(() => plannedTotals.value.net.isNegative());
 
 const displayMonth = computed<string>(() => formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime({ year: budgetPlanStore.year, month0base: budgetPlanStore.month - 1 }))));
 
@@ -264,10 +429,129 @@ const displayMonth = computed<string>(() => formatDateTimeToGregorianLikeLongYea
 // order the month is actually reasoned about: what is coming in, what is already spoken for, and
 // what is left to decide.
 const lineGroups = computed<PlannedLineGroup[]>(() => [
-    { title: tt('Income'), lines: allLines.value.filter(line => line.type === TransactionType.Income) },
-    { title: tt('Scheduled'), lines: allLines.value.filter(line => line.type !== TransactionType.Income && line.source === PlannedLineSource.Schedule) },
-    { title: tt('Planned'), lines: allLines.value.filter(line => line.type !== TransactionType.Income && line.source === PlannedLineSource.Item) }
+    buildGroup('income', tt('Income'), line => line.type === TransactionType.Income),
+    buildGroup('scheduled', tt('Scheduled'), line => line.type !== TransactionType.Income && line.source === PlannedLineSource.Schedule),
+    buildGroup('planned', tt('Planned'), line => line.type !== TransactionType.Income && line.source === PlannedLineSource.Item)
 ]);
+
+// The bar is one income, or one month's spending, whichever is the larger - and it holds only
+// parts that do not overlap. What is spent past the income is deliberately NOT a fourth segment:
+// the overspend is the same money already drawn as committed and planned, and adding it again
+// would make the parts sum to more than the whole. It is the hero figure above, and the point on
+// the bar where the income ran out is the marker.
+const flowTotal = computed<BigDecimal>(() => {
+    const income = plannedTotals.value.income;
+    const expense = plannedTotals.value.expense;
+    return income.greaterThan(expense) ? income : expense;
+});
+
+const flowSegments = computed<FlowSegment[]>(() => {
+    const total = flowTotal.value;
+
+    if (!total.isPositive()) {
+        return [];
+    }
+
+    const committed = committedExpense.value;
+    const discretionary = plannedTotals.value.expense.subtract(committed);
+
+    const segments: FlowSegment[] = [
+        buildSegment('committed', tt('Committed'), FLOW_COLOR_COMMITTED, FLOW_LABEL_ON_FILL, committed, total),
+        buildSegment('planned', tt('Planned'), FLOW_COLOR_PLANNED, FLOW_LABEL_ON_FILL, discretionary, total),
+        buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, plannedTotals.value.net, total)
+    ];
+
+    // a segment worth nothing is dropped rather than drawn at zero width, where it would still cost
+    // the bar one of its gaps and read as a sliver that means something
+    return segments.filter(segment => segment.share > 0);
+});
+
+// The marker is placed only when there is an overspend to mark and an income to mark it with: a
+// month with no income planned at all has nothing to say here that the hero figure does not.
+const incomeMarkerLeft = computed<string>(() => {
+    if (!overspent.value || !plannedTotals.value.income.isPositive() || !flowTotal.value.isPositive()) {
+        return '';
+    }
+
+    return `${(plannedTotals.value.income.toDoubleNumber() / flowTotal.value.toDoubleNumber()) * 100}%`;
+});
+
+const categoryMeters = computed<CategoryMeter[]>(() => budgetPlanStore.categoryComparisons.map(comparison => {
+    const ratio = comparison.planned.isPositive() ? comparison.actual.toDoubleNumber() / comparison.planned.toDoubleNumber() : (comparison.actual.isPositive() ? Infinity : 0);
+
+    let color = METER_COLOR_UNDER;
+    let trackColor = METER_TRACK_UNDER;
+    let icon = '';
+    let statusText: string;
+
+    if (!comparison.planned.isPositive() && comparison.actual.isPositive()) {
+        color = METER_COLOR_OVER;
+        trackColor = METER_TRACK_OVER;
+        icon = mdiAlertCircleOutline;
+        statusText = tt('Unplanned');
+    } else if (ratio > 1) {
+        color = METER_COLOR_OVER;
+        trackColor = METER_TRACK_OVER;
+        icon = mdiAlertCircleOutline;
+        statusText = tt('Over plan');
+    } else if (ratio >= NEAR_PLAN_RATIO) {
+        color = METER_COLOR_NEAR;
+        trackColor = METER_TRACK_NEAR;
+        icon = mdiAlertOutline;
+        statusText = formatPercentToLocalizedNumerals(ratio * 100, 0, '<1');
+    } else {
+        statusText = formatPercentToLocalizedNumerals(ratio * 100, 0, '<1');
+    }
+
+    return {
+        ...comparison,
+        width: `${Math.max(Math.min(ratio, 1) * 100, ratio > 0 ? 3 : 0)}%`,
+        color: color,
+        trackColor: trackColor,
+        statusText: statusText,
+        icon: icon
+    };
+}));
+
+function buildGroup(key: string, title: string, matches: (line: PlannedLine) => boolean): PlannedLineGroup {
+    const lines = allLines.value.filter(matches);
+    let total = BIG_DECIMAL_ZERO;
+
+    for (const line of lines) {
+        if (line.excluded) {
+            continue;
+        }
+
+        const converted = budgetPlanStore.convertToDefaultCurrency(line.amount, line.currency);
+
+        if (converted) {
+            total = total.add(converted);
+        }
+    }
+
+    return { key: key, title: title, lines: lines, total: total };
+}
+
+function buildSegment(key: string, label: string, color: string, labelColor: string, amount: BigDecimal, total: BigDecimal): FlowSegment {
+    const share = amount.isPositive() ? amount.toDoubleNumber() / total.toDoubleNumber() : 0;
+
+    return {
+        key: key,
+        label: label,
+        color: color,
+        labelColor: labelColor,
+        share: share,
+        displayAmount: displayAmount(amount),
+        displayShare: formatPercentToLocalizedNumerals(share * 100, 0, '<1'),
+        // a label only goes inside a segment when the segment is wide enough to hold it without
+        // being clipped; the legend and the tooltip carry the rest
+        showInlineLabel: share >= 0.25
+    };
+}
+
+function lineKey(groupKey: string, line: PlannedLine): string {
+    return `${groupKey}-${line.source}-${line.id}`;
+}
 
 function displayAmount(amount: BigDecimal): string {
     return formatAmountToLocalizedNumeralsWithCurrency(amount.truncate(), defaultCurrency.value);
@@ -282,10 +566,10 @@ function displayLineAmount(line: PlannedLine): string {
 // yearly bill does not read as if it were nothing.
 function displayOccurrences(occurrences: number): string {
     if (Number.isInteger(occurrences)) {
-        return formatNumberToLocalizedNumerals(occurrences);
+        return `×${formatNumberToLocalizedNumerals(occurrences)}`;
     }
 
-    return formatNumberToLocalizedNumerals(Math.round(occurrences * 100) / 100);
+    return `×${formatNumberToLocalizedNumerals(Math.round(occurrences * 100) / 100)}`;
 }
 
 function getCategoryName(categoryId: string): string {
@@ -296,8 +580,69 @@ function getAccountName(accountId: string): string {
     return accountsStore.allAccountsMap[accountId]?.name ?? '';
 }
 
+function toggleGroup(key: string): void {
+    collapsedGroups.value = { ...collapsedGroups.value, [key]: !collapsedGroups.value[key] };
+}
+
+// The amount edited in place is what one occurrence costs, not what the month costs - the same
+// figure the adjust dialog asks for, so the two never disagree.
+function startEditingAmount(groupKey: string, line: PlannedLine): void {
+    if (line.excluded) {
+        return;
+    }
+
+    editingLineKey.value = lineKey(groupKey, line);
+    editingAmount.value = line.unitAmount;
+}
+
+function cancelEditingAmount(): void {
+    editingLineKey.value = '';
+    editingAmount.value = 0;
+}
+
+function commitAmount(line: PlannedLine): void {
+    const key = editingLineKey.value;
+    const newAmount = editingAmount.value;
+
+    if (newAmount === line.unitAmount) {
+        cancelEditingAmount();
+        return;
+    }
+
+    savingLineKey.value = key;
+
+    const saving = line.source === PlannedLineSource.Schedule
+        ? budgetPlanStore.setScheduleAdjustment({ templateId: line.id, excluded: false, amount: newAmount })
+        : saveItemAmount(line, newAmount);
+
+    saving.then(() => {
+        savingLineKey.value = '';
+        cancelEditingAmount();
+    }).catch(error => {
+        savingLineKey.value = '';
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+function saveItemAmount(line: PlannedLine, newAmount: number): Promise<unknown> {
+    const item = budgetPlanStore.planItems.find(planItem => planItem.id === line.id);
+
+    if (!item) {
+        return Promise.resolve();
+    }
+
+    const updated = item.clone();
+    updated.amount = newAmount;
+
+    return budgetPlanStore.saveBudgetPlanItem({ item: updated });
+}
+
 function load(force: boolean): void {
     loading.value = true;
+    cancelEditingAmount();
 
     budgetPlanStore.loadBudgetPlan({ force: force }).then(() => {
         loading.value = false;
@@ -388,8 +733,6 @@ function adjustSchedule(line: PlannedLine): void {
     });
 }
 
-// Skipping is one click rather than a dialog, because a subscription paused for a month is the
-// commonest thing a plan has to say and the amount is not in question when it is said.
 function toggleExcluded(line: PlannedLine): void {
     budgetPlanStore.setScheduleAdjustment({
         templateId: line.id,
@@ -418,6 +761,109 @@ onMounted(() => {
 </script>
 
 <style>
+.budget-plan-month {
+    min-width: 130px;
+    text-align: center;
+}
+
+.budget-plan-hero {
+    font-size: 48px;
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}
+
+/* One bar, its parts separated by the surface showing through rather than by a border drawn
+   around each of them. */
+.budget-flow-bar-wrapper {
+    position: relative;
+    margin-top: 8px;
+}
+
+.budget-flow-income-marker {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-inline-start: -1px;
+    background: rgb(var(--v-theme-on-surface));
+    border-radius: 1px;
+}
+
+.budget-flow-bar {
+    display: flex;
+    gap: 2px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(var(--v-theme-on-surface), 0.06);
+}
+
+.budget-flow-segment {
+    height: 100%;
+    flex-basis: 0;
+    flex-shrink: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: flex-grow 0.35s ease;
+    cursor: default;
+}
+
+.budget-flow-segment:first-child {
+    border-start-start-radius: 4px;
+    border-end-start-radius: 4px;
+}
+
+.budget-flow-segment:last-child {
+    border-start-end-radius: 4px;
+    border-end-end-radius: 4px;
+}
+
+.budget-flow-inline-label {
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    padding: 0 6px;
+}
+
+.budget-flow-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+    margin-top: 10px;
+}
+
+.budget-flow-legend-item {
+    display: flex;
+    align-items: center;
+}
+
+.budget-flow-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-inline-end: 6px;
+}
+
+.budget-meter-column {
+    width: 210px;
+}
+
+.budget-meter {
+    flex: 1 1 auto;
+    min-width: 70px;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.budget-meter-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.35s ease;
+}
+
 .budget-plan-table .budget-plan-operation-column {
     width: 1%;
     white-space: nowrap;
@@ -434,13 +880,47 @@ onMounted(() => {
     visibility: visible;
 }
 
+.budget-plan-table .budget-plan-group-row {
+    cursor: pointer;
+    user-select: none;
+}
+
 .budget-plan-table .budget-plan-group-row > td {
-    padding-top: 12px;
+    padding-top: 14px;
     letter-spacing: 0.5px;
 }
 
-.budget-plan-month {
-    min-width: 130px;
-    text-align: center;
+.budget-plan-table .budget-plan-amount-cell {
+    min-width: 160px;
+}
+
+.budget-plan-amount-button {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.budget-plan-amount-button:hover:not(:disabled) {
+    background: rgba(var(--v-theme-on-surface), 0.06);
+}
+
+.budget-plan-amount-button:disabled {
+    cursor: default;
+}
+
+.budget-plan-amount-pencil {
+    opacity: 0;
+}
+
+.budget-plan-line-row:hover .budget-plan-amount-button:not(:disabled) .budget-plan-amount-pencil {
+    opacity: 0.5;
+}
+
+.budget-plan-amount-input {
+    min-width: 150px;
 }
 </style>

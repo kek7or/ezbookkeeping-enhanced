@@ -382,6 +382,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         actualTotals,
         categoryComparisons,
         // functions
+        convertToDefaultCurrency,
         setMonth,
         loadBudgetPlan,
         saveBudgetPlanItem,
