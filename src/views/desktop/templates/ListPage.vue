@@ -47,7 +47,7 @@
                             <th>{{ tt('Frequency') }}</th>
                             <th class="text-end">{{ tt('Amount') }}</th>
                         </template>
-                        <th class="text-end">{{ tt('Operation') }}</th>
+                        <th class="text-end template-operation-column">{{ tt('Operation') }}</th>
                     </tr>
                     </thead>
 
@@ -98,9 +98,10 @@
                                     <td class="text-end text-no-wrap">{{ getDisplayAmount(element) }}</td>
                                 </template>
 
-                                <td class="text-end">
+                                <td class="text-end template-operation-column">
                                     <div class="d-flex align-center justify-end">
-                                        <template v-if="hoveredTemplateId === element.id && !loading">
+                                        <div class="template-operation-buttons d-flex align-center"
+                                             :class="{ 'template-operation-buttons-shown': hoveredTemplateId === element.id && !loading }">
                                             <v-btn class="px-2 ms-2" color="default"
                                                    density="comfortable" variant="text"
                                                    :prepend-icon="element.hidden ? mdiEyeOutline : mdiEyeOffOutline"
@@ -133,7 +134,7 @@
                                                 </template>
                                                 {{ tt('Delete') }}
                                             </v-btn>
-                                        </template>
+                                        </div>
 
                                         <span class="ms-2">
                                             <v-icon :class="!loading && !updating && availableTemplateCount > 1 ? 'drag-handle' : 'disabled'"
@@ -506,6 +507,19 @@ init();
 </script>
 
 <style>
+.transaction-templates-table .template-operation-column {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.transaction-templates-table .template-operation-buttons {
+    visibility: hidden;
+}
+
+.transaction-templates-table .template-operation-buttons-shown {
+    visibility: visible;
+}
+
 .transaction-templates-table tr:not(:last-child) > td > div {
     padding-bottom: 1px;
 }
