@@ -40,19 +40,20 @@
                 <v-table class="transaction-templates-table table-striped" :hover="!loading">
                     <thead>
                     <tr>
-                        <th>
-                            <div class="d-flex align-center">
-                                <span>{{ tt('Template Name') }}</span>
-                                <v-spacer/>
-                                <span>{{ tt('Operation') }}</span>
-                            </div>
-                        </th>
+                        <th>{{ tt('Template Name') }}</th>
+                        <template v-if="isScheduleList">
+                            <th>{{ tt('Category') }}</th>
+                            <th>{{ tt('Account') }}</th>
+                            <th>{{ tt('Frequency') }}</th>
+                            <th class="text-end">{{ tt('Amount') }}</th>
+                        </template>
+                        <th class="text-end">{{ tt('Operation') }}</th>
                     </tr>
                     </thead>
 
                     <tbody v-if="loading && noAvailableTemplate">
                     <tr :key="itemIdx" v-for="itemIdx in [ 1, 2, 3 ]">
-                        <td class="px-0">
+                        <td class="px-0" :colspan="columnCount">
                             <v-skeleton-loader type="text" :loading="true"></v-skeleton-loader>
                         </td>
                     </tr>
@@ -60,9 +61,9 @@
 
                     <tbody v-if="!loading && noAvailableTemplate">
                     <tr>
-                        <td v-if="templateType === TemplateType.Normal.type">{{ tt('No available template. Once you add templates, you can quickly add a new transaction using the dropdown menu of the Add button on the transaction list page') }}</td>
-                        <td v-else-if="templateType === TemplateType.Schedule.type">{{ tt('No available scheduled transactions') }}</td>
-                        <td v-else>{{ tt('No available template') }}</td>
+                        <td :colspan="columnCount" v-if="templateType === TemplateType.Normal.type">{{ tt('No available template. Once you add templates, you can quickly add a new transaction using the dropdown menu of the Add button on the transaction list page') }}</td>
+                        <td :colspan="columnCount" v-else-if="templateType === TemplateType.Schedule.type">{{ tt('No available scheduled transactions') }}</td>
+                        <td :colspan="columnCount" v-else>{{ tt('No available template') }}</td>
                     </tr>
                     </tbody>
 
@@ -78,18 +79,25 @@
                                 @mouseenter="hoveredTemplateId = element.id" @mouseleave="hoveredTemplateId = ''">
                                 <td>
                                     <div class="d-flex align-center">
-                                        <div class="d-flex align-center">
-                                            <v-badge class="right-bottom-icon" color="secondary"
-                                                     location="bottom right" offset-x="8" :icon="mdiEyeOffOutline"
-                                                     v-if="element.hidden">
-                                                <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline"/>
-                                            </v-badge>
-                                            <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline" v-else-if="!element.hidden"/>
-                                            <span class="transaction-template-name">{{ element.name }}</span>
-                                        </div>
+                                        <v-badge class="right-bottom-icon" color="secondary"
+                                                 location="bottom right" offset-x="8" :icon="mdiEyeOffOutline"
+                                                 v-if="element.hidden">
+                                            <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline"/>
+                                        </v-badge>
+                                        <v-icon size="20" start :icon="templateType === TemplateType.Schedule.type ? mdiClockTimeNineOutline : mdiTextBoxOutline" v-else-if="!element.hidden"/>
+                                        <span class="transaction-template-name">{{ element.name }}</span>
+                                    </div>
+                                </td>
 
-                                        <v-spacer/>
+                                <template v-if="isScheduleList">
+                                    <td class="text-truncate">{{ getDisplayCategoryName(element) }}</td>
+                                    <td class="text-truncate">{{ getDisplayAccountName(element) }}</td>
+                                    <td class="text-truncate">{{ getDisplayFrequency(element) }}</td>
+                                    <td class="text-end text-no-wrap">{{ getDisplayAmount(element) }}</td>
+                                </template>
 
+                                <td class="text-end">
+                                    <div class="d-flex align-center justify-end">
                                         <template v-if="hoveredTemplateId === element.id && !loading">
                                             <v-btn class="px-2 ms-2" color="default"
                                                    density="comfortable" variant="text"
@@ -135,6 +143,14 @@
                             </tr>
                         </template>
                     </draggable-list>
+
+                    <tfoot v-if="isScheduleList && !noAvailableTemplate && scheduleTotalRows.length">
+                    <tr class="schedule-total-row" :key="row.label" v-for="row in scheduleTotalRows">
+                        <td class="text-end font-weight-medium" :colspan="columnCount - 2">{{ row.label }}</td>
+                        <td class="text-end text-no-wrap font-weight-medium">{{ row.amount }}</td>
+                        <td></td>
+                    </tr>
+                    </tfoot>
                 </v-table>
             </v-card>
         </v-col>
@@ -156,14 +172,23 @@ import { ref, computed, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
+import { useUserStore } from '@/stores/user.ts';
+import { useAccountsStore } from '@/stores/account.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useTransactionTemplatesStore } from '@/stores/transactionTemplate.ts';
 
 import { TemplateType } from '@/core/template.ts';
+import { type WeekDayValue } from '@/core/datetime.ts';
+import { DISPLAY_HIDDEN_AMOUNT } from '@/consts/numeral.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 
+import { type BigDecimal } from '@/core/numeral.ts';
+import { parseBigDecimal } from '@/lib/numeral.ts';
 import {
+    type ScheduledCostTotal,
     isNoAvailableTemplate,
-    getAvailableTemplateCount
+    getAvailableTemplateCount,
+    sumScheduledCostByCurrency
 } from '@/lib/template.ts';
 
 import {
@@ -186,8 +211,11 @@ const props = defineProps<{
     initType: number;
 }>();
 
-const { tt } = useI18n();
+const { tt, getScheduleFrequencyDisplayName, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 
+const userStore = useUserStore();
+const accountsStore = useAccountsStore();
+const transactionCategoriesStore = useTransactionCategoriesStore();
 const transactionTemplatesStore = useTransactionTemplatesStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
@@ -207,14 +235,95 @@ const templates = computed<TransactionTemplate[]>(() => transactionTemplatesStor
 const noAvailableTemplate = computed<boolean>(() => isNoAvailableTemplate(templates.value, showHidden.value));
 const availableTemplateCount = computed<number>(() => getAvailableTemplateCount(templates.value, showHidden.value));
 
+const isScheduleList = computed<boolean>(() => templateType.value === TemplateType.Schedule.type);
+const columnCount = computed<number>(() => isScheduleList.value ? 6 : 2);
+const firstDayOfWeek = computed<WeekDayValue>(() => userStore.currentUserFirstDayOfWeek);
+
+const scheduleTotals = computed<ScheduledCostTotal[]>(() => sumScheduledCostByCurrency(templates.value, showHidden.value, getTemplateCurrency));
+
+// The footer says what a month and a year of the listed schedules come to. Expense and income are
+// named only when both are present: a page of nothing but outgoings does not need to be told which
+// it is looking at, and a page that has both must never let the two be read as one figure.
+const scheduleTotalRows = computed<{ label: string, amount: string }[]>(() => {
+    const totals = scheduleTotals.value;
+    const rows: { label: string, amount: string }[] = [];
+
+    const hasExpense = totals.some(total => !total.yearlyExpense.isZero());
+    const hasIncome = totals.some(total => !total.yearlyIncome.isZero());
+
+    for (const [label, pick, present] of [
+        [tt('Expense'), (total: ScheduledCostTotal) => total.yearlyExpense, hasExpense] as const,
+        [tt('Income'), (total: ScheduledCostTotal) => total.yearlyIncome, hasIncome] as const
+    ]) {
+        if (!present) {
+            continue;
+        }
+
+        const named = hasExpense && hasIncome;
+
+        rows.push({
+            label: named ? `${label} · ${tt('Per Month')}` : tt('Per Month'),
+            amount: formatTotals(totals, total => pick(total).divide(12))
+        });
+        rows.push({
+            label: named ? `${label} · ${tt('Per Year')}` : tt('Per Year'),
+            amount: formatTotals(totals, pick)
+        });
+    }
+
+    return rows;
+});
+
+// Totals of different currencies are joined rather than summed, because there is no honest single
+// number for them - see sumScheduledCostByCurrency.
+function formatTotals(totals: ScheduledCostTotal[], pick: (total: ScheduledCostTotal) => BigDecimal): string {
+    return totals
+        .filter(total => !pick(total).isZero())
+        .map(total => formatAmountToLocalizedNumeralsWithCurrency(pick(total).truncate(), total.currency))
+        .join(' + ');
+}
+
+function getTemplateCurrency(template: TransactionTemplate): string | undefined {
+    return accountsStore.allAccountsMap[template.sourceAccountId]?.currency;
+}
+
+function getDisplayCategoryName(template: TransactionTemplate): string {
+    return transactionCategoriesStore.allTransactionCategoriesMap[template.categoryId]?.name ?? '';
+}
+
+function getDisplayAccountName(template: TransactionTemplate): string {
+    return accountsStore.allAccountsMap[template.sourceAccountId]?.name ?? '';
+}
+
+function getDisplayFrequency(template: TransactionTemplate): string {
+    return getScheduleFrequencyDisplayName(template.scheduledFrequencyType ?? 0, template.scheduledFrequency ?? '', firstDayOfWeek.value);
+}
+
+function getDisplayAmount(template: TransactionTemplate): string {
+    const currency = getTemplateCurrency(template) ?? userStore.currentUserDefaultCurrency;
+
+    if (template.hideAmount) {
+        return formatAmountToLocalizedNumeralsWithCurrency(DISPLAY_HIDDEN_AMOUNT, currency);
+    }
+
+    return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(template.sourceAmount), currency);
+}
+
 function init(): void {
     templateType.value = props.initType;
     loading.value = true;
 
-    transactionTemplatesStore.loadAllTemplates({
-        templateType: templateType.value,
-        force: false
-    }).then(() => {
+    // The schedule list names a category, an account and an amount in that account's currency, none
+    // of which travels with the template - it carries ids. Both caches are asked for unforced, so a
+    // page reached from anywhere else in the app costs nothing.
+    Promise.all([
+        transactionTemplatesStore.loadAllTemplates({
+            templateType: templateType.value,
+            force: false
+        }),
+        transactionCategoriesStore.loadAllCategories({ force: false }),
+        accountsStore.loadAllAccounts({ force: false })
+    ]).then(() => {
         loading.value = false;
     }).catch(error => {
         loading.value = false;
