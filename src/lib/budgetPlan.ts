@@ -368,6 +368,53 @@ export function sumCategoryBudgets(nodes: CategoryBudgetNode[]): PlanTotals {
     };
 }
 
+// sumRemainingToSpend is what the plan still expects to go out: the part of every budget that has
+// not been spent yet.
+//
+// Nothing here is allowed to come out negative. A category already spent past its budget has
+// nothing further coming from the plan, but the overspend is real and is already counted in what
+// has been spent - so letting it go negative would spend one category's overrun out of another
+// category's remaining budget, and the month would look better than it is.
+//
+// Which level does the clamping is not a detail. Where a category carries an expectation of its
+// own, that expectation is a ceiling over everything beneath it, and the branch is measured whole:
+// six hundred for Food with five hundred gone leaves a hundred, however unevenly the five hundred
+// fell across the subcategories. Where it does not, there is no ceiling to measure against and the
+// subcategories are each measured alone - otherwise a grocery overspend would quietly cancel the
+// restaurant budget that is still there to be used.
+export function sumRemainingToSpend(nodes: CategoryBudgetNode[]): BigDecimal {
+    let total = BIG_DECIMAL_ZERO;
+
+    for (const node of nodes) {
+        if (node.type === TransactionType.Income) {
+            continue;
+        }
+
+        total = total.add(remainingOf(node));
+    }
+
+    return total;
+}
+
+function remainingOf(node: CategoryBudgetNode): BigDecimal {
+    if (node.expectation || !node.children.length) {
+        return positivePart(node.budget.subtract(node.actual));
+    }
+
+    // an uncapped branch is the sum of its parts, plus whatever is filed on the branch itself
+    let total = positivePart(node.plannedDirect.subtract(node.actualDirect));
+
+    for (const child of node.children) {
+        total = total.add(remainingOf(child));
+    }
+
+    return total;
+}
+
+function positivePart(amount: BigDecimal): BigDecimal {
+    return amount.isPositive() ? amount : BIG_DECIMAL_ZERO;
+}
+
 // hasCategoryBudgetActivity says whether a category is worth a row of its own: something was
 // expected of it, something is planned in it, or something has already happened in it. A category
 // that is none of those is one of the many a person keeps and does not use this month.

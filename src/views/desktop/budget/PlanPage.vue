@@ -55,12 +55,13 @@
                                 <span v-else>{{ displayAmount(overspent ? monthNet.negate() : monthNet) }}</span>
                             </div>
                             <div class="text-body-2 text-medium-emphasis">
-                                {{ tt('of {amount} coming in', { amount: displayAmount(incomeBasis) }) }}
+                                {{ tt('format.misc.budgetOfComingIn', { amount: displayAmount(incomeBasis) }) }}
                             </div>
                         </v-col>
                         <v-col cols="12" md="8">
-                            <!-- One bar, three parts of the same income: what recurs, what was
-                                 decided for this month, and what is not spoken for. -->
+                            <!-- One bar, the three parts of the money: what has gone out, what
+                                 is still to go out, and what survives the month. They do not
+                                 overlap, so they add up to what is coming in. -->
                             <div class="budget-flow-bar-wrapper" v-if="!loading && flowSegments.length">
                                 <div class="budget-flow-bar">
                                     <div class="budget-flow-segment"
@@ -105,6 +106,10 @@
                                 <div class="budget-plan-figure">
                                     <div class="text-caption text-medium-emphasis">{{ tt('Spent so far') }}</div>
                                     <div class="text-h6 font-weight-regular">{{ displayAmount(actualTotals.expense) }}</div>
+                                </div>
+                                <div class="budget-plan-figure">
+                                    <div class="text-caption text-medium-emphasis">{{ tt('Still to Come') }}</div>
+                                    <div class="text-h6 font-weight-regular">{{ displayAmount(remainingToSpend) }}</div>
                                 </div>
                                 <div class="budget-plan-figure">
                                     <div class="text-caption text-medium-emphasis">{{ tt('Earned so far') }}</div>
@@ -326,7 +331,7 @@
                                     </div>
                                     <span class="text-caption text-medium-emphasis"
                                           v-if="row.isPrimary && row.node.unallocated.isPositive()">
-                                        {{ tt('{amount} not yet in a subcategory', { amount: displayAmount(row.node.unallocated) }) }}
+                                        {{ tt('format.misc.budgetUnallocatedInBranch', { amount: displayAmount(row.node.unallocated) }) }}
                                     </span>
                                 </div>
                             </div>
@@ -492,12 +497,8 @@ interface CategorySection {
 // The three parts of one income are told apart by identity, so they take the app's own two accent
 // hues plus a neutral for the part that is not allocated at all. The status colours are left alone
 // for the meters below, where they mean over and near-over rather than "the third series".
-const FLOW_COLOR_COMMITTED = 'rgb(var(--v-theme-primary))';
-const FLOW_COLOR_PLANNED = 'rgb(var(--v-theme-teal))';
-// The third hue is a literal rather than a theme token because the theme has only the two accents.
-// It was checked against both surfaces and against the other two for colour-vision separation
-// before being used, and it clears the band in light and dark alike.
-const FLOW_COLOR_SET_ASIDE = '#5b6ee1';
+const FLOW_COLOR_SPENT = 'rgb(var(--v-theme-primary))';
+const FLOW_COLOR_STILL_TO_COME = 'rgb(var(--v-theme-teal))';
 const FLOW_COLOR_LEFT = 'rgba(var(--v-theme-on-surface), 0.14)';
 
 const FLOW_LABEL_ON_FILL = 'rgb(var(--v-theme-on-primary))';
@@ -541,11 +542,11 @@ const showAllCategories = ref<boolean>(false);
 
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
-const plannedLineTotals = computed(() => budgetPlanStore.plannedLineTotals);
 const incomeBasis = computed<BigDecimal>(() => budgetPlanStore.incomeBasis);
+const remainingToSpend = computed<BigDecimal>(() => budgetPlanStore.remainingToSpend);
+const projectedExpense = computed<BigDecimal>(() => budgetPlanStore.projectedExpense);
 const monthNet = computed<BigDecimal>(() => budgetPlanStore.monthNet);
 const actualTotals = computed(() => budgetPlanStore.actualTotals);
-const committedExpense = computed<BigDecimal>(() => budgetPlanStore.committedExpense);
 const defaultCurrency = computed<string>(() => budgetPlanStore.defaultCurrency);
 
 const overspent = computed<boolean>(() => monthNet.value.isNegative());
@@ -568,7 +569,7 @@ const lineGroups = computed<PlannedLineGroup[]>(() => [
 // the bar where the income ran out is the marker.
 const flowTotal = computed<BigDecimal>(() => {
     const income = incomeBasis.value;
-    const expense = plannedTotals.value.expense;
+    const expense = projectedExpense.value;
     return income.greaterThan(expense) ? income : expense;
 });
 
@@ -579,17 +580,12 @@ const flowSegments = computed<FlowSegment[]>(() => {
         return [];
     }
 
-    const committed = committedExpense.value;
-    const discretionary = plannedLineTotals.value.expense.subtract(committed);
-    // what a category is expected to come to over and above what is listed under it. It is money
-    // the month has spoken for without yet saying what on, which is neither committed, nor planned
-    // in particular, nor left over.
-    const setAside = plannedTotals.value.expense.subtract(plannedLineTotals.value.expense);
-
+    // The bar reads left to right the way the month runs: money already gone, money still to go,
+    // and what survives. Every part is money the income has to cover, and no part is counted twice,
+    // so the three of them are the income - which is what makes the last one believable.
     const segments: FlowSegment[] = [
-        buildSegment('committed', tt('Committed'), FLOW_COLOR_COMMITTED, FLOW_LABEL_ON_FILL, committed, total),
-        buildSegment('planned', tt('Planned'), FLOW_COLOR_PLANNED, FLOW_LABEL_ON_FILL, discretionary, total),
-        buildSegment('set-aside', tt('Set Aside'), FLOW_COLOR_SET_ASIDE, FLOW_LABEL_ON_FILL, setAside, total),
+        buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, actualTotals.value.expense, total),
+        buildSegment('still-to-come', tt('Still to Come'), FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
         buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
 

@@ -29,7 +29,8 @@ import {
     sumPlannedLinesByCategory,
     getPlannedTypesByCategory,
     buildCategoryBudgetTree,
-    sumCategoryBudgets
+    sumCategoryBudgets,
+    sumRemainingToSpend
 } from '@/lib/budgetPlan.ts';
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { getYearMonthFirstUnixTime, getYearMonthLastUnixTime, getCurrentDateTime } from '@/lib/datetime.ts';
@@ -185,9 +186,21 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         return actual.greaterThan(planned) ? actual : planned;
     });
 
-    // What is left of that income once the month has cost what it is planned to cost. This is the
-    // figure the page is really for, and it goes negative when the month plans past its income.
-    const monthNet = computed<BigDecimal>(() => incomeBasis.value.subtract(plannedTotals.value.expense));
+    // What the plan still expects to go out. The rule for which level a budget is measured at is
+    // in sumRemainingToSpend, and it is not obvious - it is worth reading there.
+    const remainingToSpend = computed<BigDecimal>(() => sumRemainingToSpend(categoryBudgetTree.value));
+
+    // projectedExpense is what the month will have cost by the end of it: what has actually gone
+    // out, plus what is still to come.
+    //
+    // This is not the same as what the month was planned to cost, and the difference matters. A
+    // month planned at 2,124 that has already spent 3,069 will not cost 2,124 - the money is gone.
+    // Measuring against the plan alone would have said there was still over 1,400 to spend.
+    const projectedExpense = computed<BigDecimal>(() => actualTotals.value.expense.add(remainingToSpend.value));
+
+    // What is left of the income once the month has cost what it is going to cost. This is the
+    // figure the page is really for, and it goes negative when the month runs past its income.
+    const monthNet = computed<BigDecimal>(() => incomeBasis.value.subtract(projectedExpense.value));
 
     function getAccountCurrency(accountId: string): string | undefined {
         return accountsStore.allAccountsMap[accountId]?.currency;
@@ -431,6 +444,8 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         committedExpense,
         actualTotals,
         incomeBasis,
+        remainingToSpend,
+        projectedExpense,
         monthNet,
         primaryCategories,
         categoryBudgetTree,

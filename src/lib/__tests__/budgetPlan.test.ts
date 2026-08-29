@@ -16,6 +16,7 @@ import {
     sumPlannedLines,
     buildCategoryBudgetTree,
     sumCategoryBudgets,
+    sumRemainingToSpend,
     hasCategoryBudgetActivity
 } from '@/lib/budgetPlan.ts';
 
@@ -377,5 +378,61 @@ describe('budgetPlan buildCategoryBudgetTree', () => {
         expect(hasCategoryBudgetActivity(findNode(tree, '11'))).toBe(true);
         expect(hasCategoryBudgetActivity(findNode(tree, '12'))).toBe(false);
         expect(hasCategoryBudgetActivity(findNode(tree, '10'))).toBe(true);
+    });
+});
+
+describe('budgetPlan sumRemainingToSpend', () => {
+    const food = createCategory('10', 'Food', CategoryType.Expense, [
+        { id: '11', name: 'Groceries' },
+        { id: '12', name: 'Restaurants' }
+    ]);
+    const salary = createCategory('20', 'Salary', CategoryType.Income, [
+        { id: '21', name: 'Pay' }
+    ]);
+
+    test('what is left of a budget is what is still to come', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 15000 }), amounts({ '11': 40000 }));
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(25000);
+    });
+
+    test('a category spent past its budget has nothing further coming, not a negative', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 50000 }), amounts({ '11': 40000 }));
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(0);
+    });
+
+    test('an overspent subcategory does not eat into a sibling that is still to be spent', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 50000 }), amounts({ '11': 40000, '12': 20000 }));
+
+        // groceries is 100 over and restaurants has its whole 200 left. The month still expects the
+        // 200 to go out - the overspend is already spent and cannot pay for it.
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(20000);
+    });
+
+    test('a ceiling on the branch measures the branch whole, however unevenly it was spent', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 50000 }), amounts({ '10': 60000, '11': 40000, '12': 20000 }));
+
+        // Food is capped at 600 and 500 of it is gone, so 100 is still to come - not the 200 that
+        // adding the subcategories up on their own would have given
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(10000);
+    });
+
+    test('income is not something the month still has to spend', () => {
+        const tree = buildCategoryBudgetTree([food, salary], {}, {}, amounts({ '21': 300000 }));
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(0);
+    });
+
+    test('a category spent with nothing planned or expected adds nothing still to come', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '12': 9500 }), {});
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(0);
+    });
+
+    test('a scheduled bill not yet paid is still to come', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 20000 }), {}, {});
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(20000);
     });
 });
