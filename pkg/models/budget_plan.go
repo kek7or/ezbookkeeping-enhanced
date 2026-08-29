@@ -104,6 +104,31 @@ type BudgetPlanCategoryExpectation struct {
 	DeletedUnixTime int64
 }
 
+// BudgetPlanStandingExpectation is what a category is expected to come to in every month, rather
+// than in one of them. Food is around three hundred and fifty most months; work meals are fifty;
+// houseware is fifty. None of that is worth retyping twelve times a year.
+//
+// It is the figure a month falls back on. Where a month has an expectation of its own for the same
+// category that one wins, so December can say six hundred for Food without disturbing the standing
+// three hundred and fifty that every other month uses. This is why the two are separate rows rather
+// than one row that gets edited: overriding a month must not destroy the standing figure, and
+// clearing the override has to leave something to fall back to.
+//
+// There is at most one standing expectation per category, enforced by the service rather than the
+// database, because the row is soft-deleted and a unique index would count the tombstones.
+type BudgetPlanStandingExpectation struct {
+	StandingId int64 `xorm:"PK"`
+	Uid        int64 `xorm:"INDEX(IDX_budget_plan_standing_uid_deleted) NOT NULL"`
+	Deleted    bool  `xorm:"INDEX(IDX_budget_plan_standing_uid_deleted) NOT NULL"`
+	CategoryId int64 `xorm:"NOT NULL"`
+	// Amount is never negative and is never zero: zero says no more than having no standing figure
+	// at all, so it is stored as the absence of a row - see SetStandingExpectation.
+	Amount          int64 `xorm:"NOT NULL"`
+	CreatedUnixTime int64
+	UpdatedUnixTime int64
+	DeletedUnixTime int64
+}
+
 // BudgetPlanGetRequest represents all parameters of a request for the plan of one month
 type BudgetPlanGetRequest struct {
 	Year  int32 `form:"year" binding:"required,min=1,max=9999"`
@@ -169,6 +194,13 @@ type BudgetPlanExpectationSetRequest struct {
 	Amount     int64 `json:"amount" binding:"min=0,max=999999999999999"`
 }
 
+// BudgetPlanStandingExpectationSetRequest represents all parameters of a request to say what one
+// category is expected to come to in every month. An amount of zero clears the standing figure.
+type BudgetPlanStandingExpectationSetRequest struct {
+	CategoryId int64 `json:"categoryId,string" binding:"required,min=1"`
+	Amount     int64 `json:"amount" binding:"min=0,max=999999999999999"`
+}
+
 // BudgetPlanItemInfoResponse represents a view-object of one planned item
 type BudgetPlanItemInfoResponse struct {
 	Id           int64           `json:"id,string"`
@@ -202,6 +234,13 @@ type BudgetPlanExpectationInfoResponse struct {
 	Amount     int64 `json:"amount"`
 }
 
+// BudgetPlanStandingExpectationInfoResponse represents a view-object of one standing expectation
+type BudgetPlanStandingExpectationInfoResponse struct {
+	Id         int64 `json:"id,string"`
+	CategoryId int64 `json:"categoryId,string"`
+	Amount     int64 `json:"amount"`
+}
+
 // BudgetPlanInfoResponse is everything stored about one month's plan. What the month costs is not
 // in here: it is worked out from these, the schedules and the ledger, by whoever is displaying it.
 type BudgetPlanInfoResponse struct {
@@ -210,6 +249,9 @@ type BudgetPlanInfoResponse struct {
 	Items        []*BudgetPlanItemInfoResponse        `json:"items"`
 	Adjustments  []*BudgetPlanAdjustmentInfoResponse  `json:"adjustments"`
 	Expectations []*BudgetPlanExpectationInfoResponse `json:"expectations"`
+	// Standing is not month-specific, and is sent with every month because every month may need to
+	// fall back on it
+	Standing []*BudgetPlanStandingExpectationInfoResponse `json:"standing"`
 }
 
 // ToBudgetPlanItemInfoResponse returns a view-object according to database model
@@ -246,6 +288,15 @@ func (e *BudgetPlanCategoryExpectation) ToBudgetPlanExpectationInfoResponse() *B
 		Id:         e.ExpectationId,
 		Year:       e.Year,
 		Month:      e.Month,
+		CategoryId: e.CategoryId,
+		Amount:     e.Amount,
+	}
+}
+
+// ToBudgetPlanStandingExpectationInfoResponse returns a view-object according to database model
+func (e *BudgetPlanStandingExpectation) ToBudgetPlanStandingExpectationInfoResponse() *BudgetPlanStandingExpectationInfoResponse {
+	return &BudgetPlanStandingExpectationInfoResponse{
+		Id:         e.StandingId,
 		CategoryId: e.CategoryId,
 		Amount:     e.Amount,
 	}

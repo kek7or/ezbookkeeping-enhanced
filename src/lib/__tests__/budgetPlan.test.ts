@@ -436,3 +436,55 @@ describe('budgetPlan sumRemainingToSpend', () => {
         expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(20000);
     });
 });
+
+describe('budgetPlan standing expectations', () => {
+    const food = createCategory('10', 'Food', CategoryType.Expense, [
+        { id: '11', name: 'Groceries' },
+        { id: '12', name: 'Restaurants' }
+    ]);
+
+    // The merge itself is the store's, so what is checked here is the tree's half of the bargain:
+    // that it says which figures are standing and that a standing figure is a ceiling like any
+    // other.
+    test('a standing figure is a ceiling exactly as a month of its own would be', () => {
+        const tree = buildCategoryBudgetTree([food], amounts({ '11': 20000 }), {}, amounts({ '10': 35000 }), undefined, new Set(['10']));
+        const branch = findNode(tree, '10');
+
+        expect(branch.budget.toSafeIntegerNumber()).toBe(35000);
+        expect(branch.unallocated.toSafeIntegerNumber()).toBe(15000);
+        expect(branch.expectationIsStanding).toBe(true);
+    });
+
+    test('a category the month has overridden is not marked as standing', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '10': 60000 }), undefined, new Set());
+
+        expect(findNode(tree, '10').expectation?.toSafeIntegerNumber()).toBe(60000);
+        expect(findNode(tree, '10').expectationIsStanding).toBe(false);
+    });
+
+    test('standing and overridden categories sit side by side', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '11': 35000, '12': 5000 }), undefined, new Set(['11']));
+
+        expect(findNode(tree, '11').expectationIsStanding).toBe(true);
+        expect(findNode(tree, '12').expectationIsStanding).toBe(false);
+        expect(findNode(tree, '10').budget.toSafeIntegerNumber()).toBe(40000);
+    });
+
+    test('a category with no figure at all is not standing', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, {}, undefined, new Set(['12']));
+
+        expect(findNode(tree, '12').expectationIsStanding).toBe(false);
+    });
+
+    test('a standing figure makes a category worth a row in a month with nothing in it', () => {
+        const tree = buildCategoryBudgetTree([food], {}, {}, amounts({ '11': 5000 }), undefined, new Set(['11']));
+
+        expect(hasCategoryBudgetActivity(findNode(tree, '11'))).toBe(true);
+    });
+
+    test('a standing figure still expects its unspent part to go out', () => {
+        const tree = buildCategoryBudgetTree([food], {}, amounts({ '11': 12000 }), amounts({ '11': 35000 }), undefined, new Set(['11']));
+
+        expect(sumRemainingToSpend(tree).toSafeIntegerNumber()).toBe(23000);
+    });
+});

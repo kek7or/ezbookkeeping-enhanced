@@ -270,6 +270,12 @@ export interface CategoryBudgetNode {
     // expectation is what was typed against this category, and null when nothing was. Zero is never
     // stored, because an expectation of zero says no more than the absence of one.
     readonly expectation: BigDecimal | null;
+    // expectationIsStanding says the figure is the one this category falls back on every month
+    // rather than something said about this month in particular. The arithmetic does not care -
+    // both are the same ceiling - but the page has to, because the two are cleared differently and
+    // a standing figure that looked like a one-off would be edited by somebody expecting it to stay
+    // put for a month.
+    readonly expectationIsStanding: boolean;
     // plannedDirect is what the lines filed on this category itself come to. planned adds the
     // children to it, so a primary's planned is what its whole branch is itemised at.
     readonly plannedDirect: BigDecimal;
@@ -303,7 +309,7 @@ export interface CategoryBudgetNode {
 // Categories named by the plan or the ledger that are not in the tree - deleted, or arriving from
 // an import - are kept as roots of their own rather than dropped, because a figure that vanishes
 // from a total is worse than one filed under a name nobody recognises.
-export function buildCategoryBudgetTree(categories: TransactionCategory[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>, orphanTypeByCategory?: Record<string, number>): CategoryBudgetNode[] {
+export function buildCategoryBudgetTree(categories: TransactionCategory[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>, orphanTypeByCategory?: Record<string, number>, standingCategoryIds?: ReadonlySet<string>): CategoryBudgetNode[] {
     const roots: CategoryBudgetNode[] = [];
     const placed = new Set<string>();
 
@@ -312,11 +318,11 @@ export function buildCategoryBudgetTree(categories: TransactionCategory[], plann
 
         for (const subCategory of (category.subCategories || [])) {
             placed.add(subCategory.id);
-            children.push(resolveNode(subCategory.id, category.id, toTransactionType(subCategory.type), [], plannedByCategory, actualByCategory, expectationByCategory));
+            children.push(resolveNode(subCategory.id, category.id, toTransactionType(subCategory.type), [], plannedByCategory, actualByCategory, expectationByCategory, standingCategoryIds));
         }
 
         placed.add(category.id);
-        roots.push(resolveNode(category.id, '0', toTransactionType(category.type), children, plannedByCategory, actualByCategory, expectationByCategory));
+        roots.push(resolveNode(category.id, '0', toTransactionType(category.type), children, plannedByCategory, actualByCategory, expectationByCategory, standingCategoryIds));
     }
 
     const orphanIds = new Set<string>();
@@ -340,7 +346,7 @@ export function buildCategoryBudgetTree(categories: TransactionCategory[], plann
         // nothing to read, and then it is taken as money going out, the safer of the two guesses.
         const type = orphanTypeByCategory?.[categoryId] ?? TransactionType.Expense;
 
-        roots.push(resolveNode(categoryId, '0', type, [], plannedByCategory, actualByCategory, expectationByCategory));
+        roots.push(resolveNode(categoryId, '0', type, [], plannedByCategory, actualByCategory, expectationByCategory, standingCategoryIds));
     }
 
     return roots;
@@ -422,7 +428,7 @@ export function hasCategoryBudgetActivity(node: CategoryBudgetNode): boolean {
     return node.expectation !== null || !node.planned.isZero() || !node.actual.isZero();
 }
 
-function resolveNode(categoryId: string, parentId: string, type: number, children: CategoryBudgetNode[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>): CategoryBudgetNode {
+function resolveNode(categoryId: string, parentId: string, type: number, children: CategoryBudgetNode[], plannedByCategory: Record<string, BigDecimal>, actualByCategory: Record<string, BigDecimal>, expectationByCategory: Record<string, BigDecimal>, standingCategoryIds?: ReadonlySet<string>): CategoryBudgetNode {
     const expectation = expectationByCategory[categoryId] ?? null;
     const plannedDirect = plannedByCategory[categoryId] ?? BIG_DECIMAL_ZERO;
     const actualDirect = actualByCategory[categoryId] ?? BIG_DECIMAL_ZERO;
@@ -446,6 +452,7 @@ function resolveNode(categoryId: string, parentId: string, type: number, childre
         parentId: parentId,
         type: type,
         expectation: expectation,
+        expectationIsStanding: !!expectation && !!standingCategoryIds?.has(categoryId),
         plannedDirect: plannedDirect,
         planned: planned,
         allocated: allocated,

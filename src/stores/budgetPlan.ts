@@ -15,7 +15,7 @@ import { KeywordMatchMode } from '@/core/text.ts';
 
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
-import { type BudgetPlanAdjustment, type BudgetPlanExpectation, BudgetPlanItem } from '@/models/budget_plan.ts';
+import { type BudgetPlanAdjustment, type BudgetPlanExpectation, type BudgetPlanStandingExpectation, BudgetPlanItem } from '@/models/budget_plan.ts';
 import type { TransactionStatisticResponseItem } from '@/models/transaction.ts';
 
 import {
@@ -51,6 +51,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const planItems = ref<BudgetPlanItem[]>([]);
     const planAdjustments = ref<BudgetPlanAdjustment[]>([]);
     const planExpectations = ref<BudgetPlanExpectation[]>([]);
+    const planStandingExpectations = ref<BudgetPlanStandingExpectation[]>([]);
     const actualItems = ref<TransactionStatisticResponseItem[]>([]);
     const planStateInvalid = ref<boolean>(true);
 
@@ -93,14 +94,32 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
     const plannedByCategory = computed<Record<string, BigDecimal>>(() => sumPlannedLinesByCategory(allLines.value, convertToDefaultCurrency));
 
+    // The standing figures come first and the month writes over them, which is the whole of the
+    // fallback rule: a month that says nothing about a category gets the standing figure, and a
+    // month that says something gets what it said. Neither row knows about the other, so overriding
+    // one month never disturbs the standing figure and clearing the override brings it straight
+    // back.
     const expectationByCategory = computed<Record<string, BigDecimal>>(() => {
         const totals: Record<string, BigDecimal> = {};
+
+        for (const standing of planStandingExpectations.value) {
+            totals[standing.categoryId] = parseBigDecimal(standing.amount);
+        }
 
         for (const expectation of planExpectations.value) {
             totals[expectation.categoryId] = parseBigDecimal(expectation.amount);
         }
 
         return totals;
+    });
+
+    // which of the figures above are the standing ones, for the page to say so on the row
+    const standingCategoryIds = computed<Set<string>>(() => {
+        const overridden = new Set<string>(planExpectations.value.map(expectation => expectation.categoryId));
+
+        return new Set<string>(planStandingExpectations.value
+            .filter(standing => !overridden.has(standing.categoryId))
+            .map(standing => standing.categoryId));
     });
 
     // Only the two spending types are planned against. A transfer moves money between two accounts
@@ -142,7 +161,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
     // The tree is where the plan, the ledger and the expectations meet, and every figure the page
     // shows below the hero comes out of it.
-    const categoryBudgetTree = computed<CategoryBudgetNode[]>(() => buildCategoryBudgetTree(primaryCategories.value, plannedByCategory.value, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(allLines.value)));
+    const categoryBudgetTree = computed<CategoryBudgetNode[]>(() => buildCategoryBudgetTree(primaryCategories.value, plannedByCategory.value, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(allLines.value), standingCategoryIds.value));
 
     // What the month is planned to cost is the tree's own total, not the sum of the lines: a
     // category expected to come to more than what is listed under it costs the more. With no
@@ -255,6 +274,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             planItems.value = BudgetPlanItem.ofMulti(planData.result.items || []);
             planAdjustments.value = planData.result.adjustments || [];
             planExpectations.value = planData.result.expectations || [];
+            planStandingExpectations.value = planData.result.standing || [];
             actualItems.value = statisticsData && statisticsData.success && statisticsData.result ? (statisticsData.result.items || []) : [];
             planStateInvalid.value = false;
         }).catch(error => {
@@ -392,6 +412,37 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
+    // Setting a standing figure leaves every month's own expectation alone, so a month that has
+    // overridden the category goes on overriding it and the rest pick the new figure up at once.
+    function setStandingExpectation({ categoryId, amount }: { categoryId: string, amount: number }): Promise<void> {
+        return services.setBudgetPlanStandingExpectation({
+            categoryId: categoryId,
+            amount: amount
+        }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success) {
+                throw new Error('Unable to set this expectation');
+            }
+
+            planStandingExpectations.value = planStandingExpectations.value.filter(standing => standing.categoryId !== categoryId);
+
+            if (data.result) {
+                planStandingExpectations.value.push(data.result);
+            }
+        }).catch(error => {
+            logger.error('failed to set budget plan standing expectation', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to set this expectation' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
     function setScheduleAdjustment({ templateId, excluded, amount }: { templateId: string, excluded: boolean, amount?: number }): Promise<void> {
         return services.setBudgetPlanAdjustment({
             year: year.value,
@@ -431,6 +482,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         planItems,
         planAdjustments,
         planExpectations,
+        planStandingExpectations,
         planStateInvalid,
         // computed states
         defaultCurrency,
@@ -457,7 +509,8 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         deleteBudgetPlanItem,
         copyPreviousMonthItems,
         setScheduleAdjustment,
-        setCategoryExpectation
+        setCategoryExpectation,
+        setStandingExpectation
     };
 });
 

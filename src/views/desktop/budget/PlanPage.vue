@@ -280,7 +280,7 @@
                     </div>
                 </template>
                 <v-card-text class="pt-0">
-                    <span class="text-body-2 text-medium-emphasis">{{ tt('Say what a category should come to without listing what it is made of. A figure on a primary category is the ceiling for the whole branch; a figure on one beneath it divides that branch up.') }}</span>
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('Say what a category should come to without listing what it is made of. A figure on a primary category is the ceiling for the whole branch; a figure on one beneath it divides that branch up. Save it for every month and it becomes what this category falls back on, which any single month can still override.') }}</span>
                 </v-card-text>
                 <v-table class="budget-plan-table budget-category-table table-striped">
                     <thead>
@@ -375,6 +375,12 @@
                                     v-else>
                                 <span v-if="row.node.expectation">{{ displayAmount(row.node.expectation) }}</span>
                                 <span class="text-medium-emphasis" v-else>{{ tt('Set a figure') }}</span>
+                                <!-- a standing figure is marked, because it is the one thing on
+                                     this page that outlives the month being looked at -->
+                                <v-icon class="ms-1 text-medium-emphasis" size="14" :icon="mdiCalendarSyncOutline"
+                                        v-if="row.node.expectationIsStanding">
+                                    <v-tooltip activator="parent">{{ tt('Expected every month') }}</v-tooltip>
+                                </v-icon>
                                 <v-icon class="budget-plan-amount-pencil ms-1" size="13" :icon="mdiPencilOutline"/>
                             </button>
                         </td>
@@ -390,7 +396,14 @@
                                 <template v-if="editingCategoryId === row.categoryId">
                                     <v-btn class="px-2" color="primary" density="comfortable" variant="text"
                                            :prepend-icon="mdiCheck" :loading="savingCategoryId === row.categoryId"
-                                           @click="commitExpectation(row.node)">{{ tt('Save') }}</v-btn>
+                                           @click="commitExpectation(row.node)">{{ tt('This Month') }}</v-btn>
+                                    <!-- saving for every month is offered beside saving for this
+                                         one, rather than hidden behind a setting elsewhere: which
+                                         of the two is meant is known while the figure is being
+                                         typed and forgotten by the time a settings page is found -->
+                                    <v-btn class="px-2" color="primary" density="comfortable" variant="text"
+                                           :prepend-icon="mdiCalendarSyncOutline" :loading="savingCategoryId === row.categoryId"
+                                           @click="commitStandingExpectation(row.node)">{{ tt('Every Month') }}</v-btn>
                                     <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                            :prepend-icon="mdiClose" @click="cancelEditingExpectation">{{ tt('Cancel') }}</v-btn>
                                 </template>
@@ -399,7 +412,7 @@
                                 <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                        :prepend-icon="mdiCloseCircleOutline" :disabled="loading"
                                        @click="clearExpectation(row.node)"
-                                       v-else-if="row.node.expectation">{{ tt('Clear') }}</v-btn>
+                                       v-else-if="row.node.expectation">{{ row.node.expectationIsStanding ? tt('Clear') : tt('Use Standing') }}</v-btn>
                             </div>
                         </td>
                     </tr>
@@ -457,6 +470,7 @@ import {
     mdiCancel,
     mdiRestore,
     mdiCloseCircleOutline,
+    mdiCalendarSyncOutline,
     mdiAlertCircleOutline,
     mdiAlertOutline
 } from '@mdi/js';
@@ -837,28 +851,46 @@ function cancelEditingExpectation(): void {
     editingExpectation.value = 0;
 }
 
+// Saving for this month writes an override even where the figure equals the standing one, because
+// the two are not the same statement: an override says this month is settled at that figure and
+// will not follow the standing figure if it later changes.
 function commitExpectation(node: CategoryBudgetNode): void {
     const newAmount = editingExpectation.value;
     const oldAmount = node.expectation ? node.expectation.toSafeIntegerNumber() : 0;
 
-    if (newAmount === oldAmount) {
+    if (newAmount === oldAmount && !node.expectationIsStanding) {
         cancelEditingExpectation();
         return;
     }
 
-    saveExpectation(node.categoryId, newAmount);
+    runSave(node.categoryId, budgetPlanStore.setCategoryExpectation({ categoryId: node.categoryId, amount: newAmount }));
 }
 
-// Clearing is saving nothing: the server takes a zero as the removal it is, so there is one path
-// through here rather than two.
+// Saving for every month also drops this month's override, so that what was just typed is what the
+// row shows. Leaving the override in place would set the standing figure and then hide it behind
+// the very month it was typed in, which reads as the button having done nothing.
+function commitStandingExpectation(node: CategoryBudgetNode): void {
+    const newAmount = editingExpectation.value;
+    const categoryId = node.categoryId;
+
+    runSave(categoryId, budgetPlanStore.setStandingExpectation({ categoryId: categoryId, amount: newAmount })
+        .then(() => node.expectationIsStanding ? Promise.resolve() : budgetPlanStore.setCategoryExpectation({ categoryId: categoryId, amount: 0 })));
+}
+
+// Clearing takes away whatever is governing this month and no more. A month that has overridden a
+// standing figure falls back to it rather than losing both, which is why the button says so.
 function clearExpectation(node: CategoryBudgetNode): void {
-    saveExpectation(node.categoryId, 0);
+    const categoryId = node.categoryId;
+
+    runSave(categoryId, node.expectationIsStanding
+        ? budgetPlanStore.setStandingExpectation({ categoryId: categoryId, amount: 0 })
+        : budgetPlanStore.setCategoryExpectation({ categoryId: categoryId, amount: 0 }));
 }
 
-function saveExpectation(categoryId: string, amount: number): void {
+function runSave(categoryId: string, saving: Promise<unknown>): void {
     savingCategoryId.value = categoryId;
 
-    budgetPlanStore.setCategoryExpectation({ categoryId: categoryId, amount: amount }).then(() => {
+    saving.then(() => {
         savingCategoryId.value = '';
         cancelEditingExpectation();
     }).catch(error => {

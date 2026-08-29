@@ -481,6 +481,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/budget_plans/items/copy.json", bindApi(api.BudgetPlans.BudgetPlanItemCopyHandler, config))
 			apiV1Route.POST("/budget_plans/adjustments/set.json", bindApi(api.BudgetPlans.BudgetPlanAdjustmentSetHandler, config))
 			apiV1Route.POST("/budget_plans/expectations/set.json", bindApi(api.BudgetPlans.BudgetPlanExpectationSetHandler, config))
+			apiV1Route.POST("/budget_plans/expectations/set_standing.json", bindApi(api.BudgetPlans.BudgetPlanStandingExpectationSetHandler, config))
 
 			// Utility Meters
 			apiV1Route.GET("/utilities/meters/list.json", bindApi(api.UtilityMeters.MeterListHandler, config))

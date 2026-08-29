@@ -89,6 +89,15 @@ export interface BudgetPlanExpectation {
     readonly amount: number;
 }
 
+// A standing expectation is the figure a category falls back on in every month that does not say
+// otherwise. See the model on the server side for why it is a row of its own rather than something
+// copied into each month.
+export interface BudgetPlanStandingExpectation {
+    readonly id: string;
+    readonly categoryId: string;
+    readonly amount: number;
+}
+
 export interface BudgetPlanGetRequest {
     readonly year: number;
     readonly month: number;
@@ -142,6 +151,12 @@ export interface BudgetPlanExpectationSetRequest {
     readonly amount: number;
 }
 
+export interface BudgetPlanStandingExpectationSetRequest {
+    readonly categoryId: string;
+    // an amount of zero clears the standing figure
+    readonly amount: number;
+}
+
 export interface BudgetPlanItemInfoResponse {
     readonly id: string;
     readonly year: number;
@@ -172,10 +187,17 @@ export interface BudgetPlanExpectationInfoResponse {
     readonly amount: number;
 }
 
+export interface BudgetPlanStandingExpectationInfoResponse {
+    readonly id: string;
+    readonly categoryId: string;
+    readonly amount: number;
+}
+
 export interface BudgetPlanInfoResponse {
     readonly year: number;
     readonly month: number;
     readonly items: BudgetPlanItemInfoResponse[];
     readonly adjustments: BudgetPlanAdjustmentInfoResponse[];
     readonly expectations: BudgetPlanExpectationInfoResponse[];
+    readonly standing: BudgetPlanStandingExpectationInfoResponse[];
 }

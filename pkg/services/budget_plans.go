@@ -76,6 +76,18 @@ func (s *BudgetPlanService) GetExpectationsByMonth(c core.Context, uid int64, ye
 	return expectations, err
 }
 
+// GetStandingExpectations returns what every category is expected to come to in every month
+func (s *BudgetPlanService) GetStandingExpectations(c core.Context, uid int64) ([]*models.BudgetPlanStandingExpectation, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var expectations []*models.BudgetPlanStandingExpectation
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).Find(&expectations)
+
+	return expectations, err
+}
+
 // GetItemByItemId returns one planned item
 func (s *BudgetPlanService) GetItemByItemId(c core.Context, uid int64, itemId int64) (*models.BudgetPlanItem, error) {
 	if uid <= 0 {
@@ -390,6 +402,67 @@ func (s *BudgetPlanService) SetExpectation(c core.Context, expectation *models.B
 	})
 }
 
+// SetStandingExpectation records what one category is expected to come to in every month, replacing
+// whatever was standing against that category before. An amount of zero is a deletion, for the same
+// reason it is one on a month: it says no more than the absence of a row.
+//
+// Whatever any particular month says about the category is left alone. A month that overrides the
+// standing figure keeps overriding it, and a month that does not will pick up the new one.
+func (s *BudgetPlanService) SetStandingExpectation(c core.Context, expectation *models.BudgetPlanStandingExpectation) error {
+	if expectation.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	if expectation.Amount < 0 {
+		return errs.ErrBudgetPlanExpectationAmountInvalid
+	}
+
+	if expectation.Amount > 0 {
+		count, err := s.getStandingExpectationCount(c, expectation.Uid)
+
+		if err != nil {
+			return err
+		} else if count >= maximumExpectationsCountOfBudgetPlanMonth {
+			return errs.ErrBudgetPlanHasTooManyExpectations
+		}
+	}
+
+	now := time.Now().Unix()
+
+	return s.UserDataDB(expectation.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		clearModel := &models.BudgetPlanStandingExpectation{
+			Deleted:         true,
+			DeletedUnixTime: now,
+		}
+
+		_, err := sess.Cols("deleted", "deleted_unix_time").
+			Where("uid=? AND deleted=? AND category_id=?", expectation.Uid, false, expectation.CategoryId).
+			Update(clearModel)
+
+		if err != nil {
+			return err
+		}
+
+		if expectation.Amount == 0 {
+			return nil
+		}
+
+		expectation.StandingId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+		if expectation.StandingId < 1 {
+			return errs.ErrSystemIsBusy
+		}
+
+		expectation.Deleted = false
+		expectation.CreatedUnixTime = now
+		expectation.UpdatedUnixTime = now
+
+		_, err = sess.Insert(expectation)
+
+		return err
+	})
+}
+
 // SetAdjustment records how one month differs from one schedule, replacing whatever was said about
 // that schedule in that month before. An adjustment that says nothing - not excluded, no amount of
 // its own - is a deletion, because carrying an empty row would make the schedule look adjusted when
@@ -433,6 +506,10 @@ func (s *BudgetPlanService) SetAdjustment(c core.Context, adjustment *models.Bud
 
 		return err
 	})
+}
+
+func (s *BudgetPlanService) getStandingExpectationCount(c core.Context, uid int64) (int64, error) {
+	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).Count(&models.BudgetPlanStandingExpectation{})
 }
 
 func (s *BudgetPlanService) getExpectationCount(c core.Context, uid int64, year int32, month int32) (int64, error) {

@@ -83,12 +83,26 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		expectationResps[i] = expectations[i].ToBudgetPlanExpectationInfoResponse()
 	}
 
+	standing, err := a.budgetPlans.GetStandingExpectations(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanGetHandler] failed to get standing expectations for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	standingResps := make([]*models.BudgetPlanStandingExpectationInfoResponse, len(standing))
+
+	for i := 0; i < len(standing); i++ {
+		standingResps[i] = standing[i].ToBudgetPlanStandingExpectationInfoResponse()
+	}
+
 	return &models.BudgetPlanInfoResponse{
 		Year:         planGetReq.Year,
 		Month:        planGetReq.Month,
 		Items:        itemResps,
 		Adjustments:  adjustmentResps,
 		Expectations: expectationResps,
+		Standing:     standingResps,
 	}, nil
 }
 
@@ -316,6 +330,43 @@ func (a *BudgetPlansApi) BudgetPlanExpectationSetHandler(c *core.WebContext) (an
 	}
 
 	return expectation.ToBudgetPlanExpectationInfoResponse(), nil
+}
+
+// BudgetPlanStandingExpectationSetHandler records what one category is expected to come to in every
+// month for the current user
+func (a *BudgetPlansApi) BudgetPlanStandingExpectationSetHandler(c *core.WebContext) (any, *errs.Error) {
+	var standingSetReq models.BudgetPlanStandingExpectationSetRequest
+	err := c.ShouldBindJSON(&standingSetReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanStandingExpectationSetHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	if err := a.verifyCategory(c, uid, standingSetReq.CategoryId); err != nil {
+		return nil, err
+	}
+
+	expectation := &models.BudgetPlanStandingExpectation{
+		Uid:        uid,
+		CategoryId: standingSetReq.CategoryId,
+		Amount:     standingSetReq.Amount,
+	}
+
+	if err := a.budgetPlans.SetStandingExpectation(c, expectation); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanStandingExpectationSetHandler] failed to set standing expectation for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanStandingExpectationSetHandler] user \"uid:%d\" has set a standing expectation on category \"id:%d\"", uid, expectation.CategoryId)
+
+	if expectation.StandingId < 1 {
+		return nil, nil
+	}
+
+	return expectation.ToBudgetPlanStandingExpectationInfoResponse(), nil
 }
 
 // verifyCategoryAndAccount refuses a plan item pointing at a category or an account that is not the

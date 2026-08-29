@@ -82,9 +82,11 @@ import type {
     BudgetPlanItemCopyRequest,
     BudgetPlanAdjustmentSetRequest,
     BudgetPlanExpectationSetRequest,
+    BudgetPlanStandingExpectationSetRequest,
     BudgetPlanItemInfoResponse,
     BudgetPlanAdjustmentInfoResponse,
     BudgetPlanExpectationInfoResponse,
+    BudgetPlanStandingExpectationInfoResponse,
     BudgetPlanInfoResponse
 } from '@/models/budget_plan.ts';
 import type {
@@ -990,6 +992,9 @@ export default {
     },
     setBudgetPlanExpectation: (req: BudgetPlanExpectationSetRequest): ApiResponsePromise<BudgetPlanExpectationInfoResponse | null> => {
         return axios.post<ApiResponse<BudgetPlanExpectationInfoResponse | null>>('v1/budget_plans/expectations/set.json', req);
+    },
+    setBudgetPlanStandingExpectation: (req: BudgetPlanStandingExpectationSetRequest): ApiResponsePromise<BudgetPlanStandingExpectationInfoResponse | null> => {
+        return axios.post<ApiResponse<BudgetPlanStandingExpectationInfoResponse | null>>('v1/budget_plans/expectations/set_standing.json', req);
     },
     setBudgetPlanAdjustment: (req: BudgetPlanAdjustmentSetRequest): ApiResponsePromise<BudgetPlanAdjustmentInfoResponse | null> => {
         return axios.post<ApiResponse<BudgetPlanAdjustmentInfoResponse | null>>('v1/budget_plans/adjustments/set.json', req);
