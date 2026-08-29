@@ -217,9 +217,24 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // Measuring against the plan alone would have said there was still over 1,400 to spend.
     const projectedExpense = computed<BigDecimal>(() => actualTotals.value.expense.add(remainingToSpend.value));
 
-    // What is left of the income once the month has cost what it is going to cost. This is the
-    // figure the page is really for, and it goes negative when the month runs past its income.
+    // Three answers to what the month keeps, and the page shows all three, because they answer
+    // different questions and are meant to disagree.
+    //
+    // savedSoFar is the month as it stands: money that has come in, less money that has gone out.
+    // Nothing foreseen enters it, so no edit to the plan can move it - only a transaction can. It
+    // is what has actually been saved at this moment, and the only one of the three that is not a
+    // forecast.
+    const savedSoFar = computed<BigDecimal>(() => actualTotals.value.income.subtract(actualTotals.value.expense));
+
+    // monthNet is where the month is heading: the income, once the month has cost what it is going
+    // to cost. It goes negative when the month runs past its income.
     const monthNet = computed<BigDecimal>(() => incomeBasis.value.subtract(projectedExpense.value));
+
+    // plannedNet is what the plan promised: the income less what the plan says the month costs. It
+    // does not move as the month is lived, which is what makes it the figure to be ahead of or
+    // behind - come in under the categories' figures and monthNet rises above this one, which is
+    // the whole reason for keeping a plan.
+    const plannedNet = computed<BigDecimal>(() => incomeBasis.value.subtract(plannedTotals.value.expense));
 
     function getAccountCurrency(accountId: string): string | undefined {
         return accountsStore.allAccountsMap[accountId]?.currency;
@@ -498,7 +513,9 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         incomeBasis,
         remainingToSpend,
         projectedExpense,
+        savedSoFar,
         monthNet,
+        plannedNet,
         primaryCategories,
         categoryBudgetTree,
         // functions

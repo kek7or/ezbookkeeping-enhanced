@@ -49,13 +49,36 @@
                 <v-card-text>
                     <v-row>
                         <v-col cols="12" md="4">
+                            <!-- The hero is what has actually been saved - money in, less money
+                                 out - because it is the one figure here that nothing merely
+                                 foreseen can flatter. What the month is heading for, and what it
+                                 was meant to head for, sit beneath it. -->
                             <div class="text-caption text-medium-emphasis">{{ overspent ? tt('Short By') : tt('Left of What You Earned') }}</div>
                             <div class="budget-plan-hero" :class="overspent ? 'text-expense' : 'text-income'">
                                 <v-skeleton-loader type="heading" :loading="true" v-if="loading"/>
-                                <span v-else>{{ displayAmount(overspent ? monthNet.negate() : monthNet) }}</span>
+                                <span v-else>{{ displayAmount(overspent ? savedSoFar.negate() : savedSoFar) }}</span>
                             </div>
                             <div class="text-body-2 text-medium-emphasis">
-                                {{ tt('format.misc.budgetOfComingIn', { amount: displayAmount(incomeBasis) }) }}
+                                {{ tt('format.misc.budgetOfEarnedSoFar', { amount: displayAmount(actualTotals.income) }) }}
+                            </div>
+
+                            <!-- The hero says what has happened; these say what it comes to. The
+                                 gap between them is what spending under the plan looks like before
+                                 the month is over, which is the whole reason to keep one. -->
+                            <div class="budget-plan-outlook mt-4" v-if="!loading">
+                                <div class="budget-plan-outlook-row">
+                                    <span class="text-body-2 text-medium-emphasis">{{ tt('On Track to Save') }}</span>
+                                    <span class="text-body-1 font-weight-medium" :class="{ 'text-expense': monthNet.isNegative() }">{{ displayAmount(monthNet) }}</span>
+                                    <v-tooltip activator="parent" location="top">{{ tt('What is left of the income once what is still to come has gone out too') }}</v-tooltip>
+                                </div>
+                                <div class="budget-plan-outlook-row">
+                                    <span class="text-body-2 text-medium-emphasis">{{ tt('Planned to Save') }}</span>
+                                    <span class="text-body-1 font-weight-medium" :class="{ 'text-expense': plannedNet.isNegative() }">{{ displayAmount(plannedNet) }}</span>
+                                    <v-tooltip activator="parent" location="top">{{ tt('What the income less the whole plan came to before the month started') }}</v-tooltip>
+                                </div>
+                                <div class="budget-plan-outlook-note text-caption" :class="planGap.ahead ? 'text-income' : 'text-expense'" v-if="planGap">
+                                    {{ tt(planGap.ahead ? 'format.misc.budgetAheadOfPlan' : 'format.misc.budgetBehindPlan', { amount: planGap.amount }) }}
+                                </div>
                             </div>
                         </v-col>
                         <v-col cols="12" md="8">
@@ -500,6 +523,13 @@ interface FlowSegment {
     showInlineLabel: boolean;
 }
 
+// PlanGap is the distance between where the month is heading and where it was meant to head,
+// already turned into something to read: which side of the plan it falls on, and by how much.
+interface PlanGap {
+    ahead: boolean;
+    amount: string;
+}
+
 interface CategoryRow {
     categoryId: string;
     node: CategoryBudgetNode;
@@ -580,11 +610,36 @@ const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
 const incomeBasis = computed<BigDecimal>(() => budgetPlanStore.incomeBasis);
 const remainingToSpend = computed<BigDecimal>(() => budgetPlanStore.remainingToSpend);
 const projectedExpense = computed<BigDecimal>(() => budgetPlanStore.projectedExpense);
+const savedSoFar = computed<BigDecimal>(() => budgetPlanStore.savedSoFar);
 const monthNet = computed<BigDecimal>(() => budgetPlanStore.monthNet);
+const plannedNet = computed<BigDecimal>(() => budgetPlanStore.plannedNet);
 const actualTotals = computed(() => budgetPlanStore.actualTotals);
 const defaultCurrency = computed<string>(() => budgetPlanStore.defaultCurrency);
 
-const overspent = computed<boolean>(() => monthNet.value.isNegative());
+// The hero has gone red when more has left than has arrived, which is a statement about what has
+// already happened. The bar's marker asks the other question - whether the month ends past its
+// income - and a month can easily be one without being the other.
+const overspent = computed<boolean>(() => savedSoFar.value.isNegative());
+const projectedOverspend = computed<boolean>(() => monthNet.value.isNegative());
+
+// How the month is running against its plan. It is only worth saying where there is a plan to run
+// against: with nothing planned, the gap is just the spending over again.
+const planGap = computed<PlanGap | null>(() => {
+    if (!plannedTotals.value.expense.isPositive()) {
+        return null;
+    }
+
+    const difference = monthNet.value.subtract(plannedNet.value);
+
+    if (difference.isZero()) {
+        return null;
+    }
+
+    return {
+        ahead: difference.isPositive(),
+        amount: displayAmount(difference.abs())
+    };
+});
 
 const displayMonth = computed<string>(() => formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime({ year: budgetPlanStore.year, month0base: budgetPlanStore.month - 1 }))));
 
@@ -621,7 +676,7 @@ const flowSegments = computed<FlowSegment[]>(() => {
     const segments: FlowSegment[] = [
         buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, actualTotals.value.expense, total),
         buildSegment('still-to-come', tt('Still to Come'), FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
-        buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
+        buildSegment('left', tt('On Track to Save'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
 
     // a segment worth nothing is dropped rather than drawn at zero width, where it would still cost
@@ -651,7 +706,7 @@ const planMarkerLeft = computed<string>(() => {
 // The marker is placed only when there is an overspend to mark and an income to mark it with: a
 // month with no income planned at all has nothing to say here that the hero figure does not.
 const incomeMarkerLeft = computed<string>(() => {
-    if (!overspent.value || !incomeBasis.value.isPositive() || !flowTotal.value.isPositive()) {
+    if (!projectedOverspend.value || !incomeBasis.value.isPositive() || !flowTotal.value.isPositive()) {
         return '';
     }
 
@@ -1105,6 +1160,21 @@ onMounted(() => {
 .budget-category-section-row > td {
     padding-top: 14px;
     letter-spacing: 0.5px;
+}
+
+/* The two forecasts under the hero: a label and a figure on one line, the figures lined up under
+   each other so the pair can be read as a comparison rather than as two sentences. */
+.budget-plan-outlook-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 280px;
+}
+
+.budget-plan-outlook-note {
+    max-width: 280px;
+    margin-top: 4px;
 }
 
 .budget-plan-hero {
