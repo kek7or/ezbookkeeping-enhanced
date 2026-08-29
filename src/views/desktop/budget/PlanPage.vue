@@ -75,8 +75,17 @@
                                         </v-tooltip>
                                     </div>
                                 </div>
+                                <!-- where the plan said the spending would stop. Passing it is
+                                     the thing worth seeing, so it is drawn across whatever segment
+                                     it falls in rather than at a segment boundary. -->
+                                <div class="budget-flow-plan-marker" :style="{ left: planMarkerLeft }"
+                                     v-if="planMarkerLeft">
+                                    <v-tooltip activator="parent" location="top">
+                                        {{ tt('Planned to Spend') }} — {{ displayAmount(plannedTotals.expense) }}
+                                    </v-tooltip>
+                                </div>
                                 <!-- where the income runs out. It is only drawn when the month
-                                     plans past it, because otherwise it sits on the bar's own end
+                                     spends past it, because otherwise it sits on the bar's own end
                                      and marks nothing. -->
                                 <div class="budget-flow-income-marker" :style="{ left: incomeMarkerLeft }"
                                      v-if="incomeMarkerLeft">
@@ -92,6 +101,11 @@
                                     <span class="budget-flow-swatch" :style="{ background: segment.color }"></span>
                                     <span class="text-body-2">{{ segment.label }}</span>
                                     <span class="text-body-2 text-medium-emphasis ms-2">{{ segment.displayAmount }}</span>
+                                </div>
+                                <div class="budget-flow-legend-item" v-if="planMarkerLeft">
+                                    <span class="budget-flow-marker-swatch"></span>
+                                    <span class="text-body-2">{{ tt('Planned to Spend') }}</span>
+                                    <span class="text-body-2 text-medium-emphasis ms-2">{{ displayAmount(plannedTotals.expense) }}</span>
                                 </div>
                             </div>
 
@@ -594,6 +608,25 @@ const flowSegments = computed<FlowSegment[]>(() => {
     return segments.filter(segment => segment.share > 0);
 });
 
+// The plan marker says where the spending was meant to stop. It is left off when it would land on
+// one of the bar's own ends, where a line marks nothing: a month with nothing planned, and a month
+// whose plan is the whole width of the bar because nothing has outrun it.
+const planMarkerLeft = computed<string>(() => {
+    const planned = plannedTotals.value.expense;
+
+    if (!planned.isPositive() || !flowTotal.value.isPositive()) {
+        return '';
+    }
+
+    const share = planned.toDoubleNumber() / flowTotal.value.toDoubleNumber();
+
+    if (share >= 0.995) {
+        return '';
+    }
+
+    return `${share * 100}%`;
+});
+
 // The marker is placed only when there is an overspend to mark and an income to mark it with: a
 // month with no income planned at all has nothing to say here that the hero figure does not.
 const incomeMarkerLeft = computed<string>(() => {
@@ -1057,6 +1090,55 @@ onMounted(() => {
     margin-inline-start: -1px;
     background: rgb(var(--v-theme-on-surface));
     border-radius: 1px;
+}
+
+/* The plan marker is dashed and the income marker is solid, so the two are told apart by their
+   shape rather than by which of them happens to be there. */
+.budget-flow-plan-marker {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    width: 2px;
+    margin-inline-start: -1px;
+    background: repeating-linear-gradient(to bottom,
+        rgb(var(--v-theme-on-surface)) 0,
+        rgb(var(--v-theme-on-surface)) 3px,
+        transparent 3px,
+        transparent 6px);
+}
+
+/* a caret at the top, so the line is found without being looked for */
+.budget-flow-plan-marker::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    /* centred by offsetting half the caret less half the line, which stays centred in either
+       writing direction where a percentage plus a translate would not */
+    inset-inline-start: -3px;
+    border-inline-start: 4px solid transparent;
+    border-inline-end: 4px solid transparent;
+    border-top: 5px solid rgb(var(--v-theme-on-surface));
+}
+
+.budget-flow-marker-swatch {
+    position: relative;
+    width: 10px;
+    height: 12px;
+    margin-inline-end: 6px;
+}
+
+.budget-flow-marker-swatch::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 4px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: repeating-linear-gradient(to bottom,
+        rgb(var(--v-theme-on-surface)) 0,
+        rgb(var(--v-theme-on-surface)) 3px,
+        transparent 3px,
+        transparent 6px);
 }
 
 .budget-flow-bar {
