@@ -330,10 +330,10 @@
                                 <v-btn class="budget-category-twisty" density="compact" variant="text"
                                        color="default" size="24" :icon="true"
                                        :aria-label="getCategoryName(row.categoryId)"
-                                       :aria-expanded="!collapsedCategories[row.categoryId]"
+                                       :aria-expanded="!!expandedCategories[row.categoryId]"
                                        @click="toggleCategory(row.categoryId)"
                                        v-if="row.isPrimary && row.hasChildren">
-                                    <v-icon size="18" :icon="collapsedCategories[row.categoryId] ? mdiChevronRight : mdiChevronDown"/>
+                                    <v-icon size="18" :icon="expandedCategories[row.categoryId] ? mdiChevronDown : mdiChevronRight"/>
                                 </v-btn>
                                 <span class="budget-category-twisty" v-else-if="row.isPrimary"></span>
                                 <span class="budget-category-indent" v-else></span>
@@ -560,8 +560,15 @@ const hoveredLineKey = ref<string>('');
 const editingLineKey = ref<string>('');
 const savingLineKey = ref<string>('');
 const editingAmount = ref<number>(0);
-const collapsedGroups = ref<Record<string, boolean>>({});
-const collapsedCategories = ref<Record<string, boolean>>({});
+// The schedules start folded away. They are the longest group and the least worth reading line by
+// line - what recurs is settled, and the group's own subtotal is the part of it a month is planned
+// against. Income and what was planned by hand stay open, being short and being what is edited.
+const collapsedGroups = ref<Record<string, boolean>>({ scheduled: true });
+// Which primaries are open, not which are shut. A category tree is mostly branches nobody is
+// looking at, so the table opens as a list of primaries and a branch is unfolded when it is the one
+// being worked on. Holding it this way round means closed needs no bookkeeping: a category nobody
+// has touched, in a month nobody has opened, is shut because it is absent from here.
+const expandedCategories = ref<Record<string, boolean>>({});
 const hoveredCategoryId = ref<string>('');
 const editingCategoryId = ref<string>('');
 const savingCategoryId = ref<string>('');
@@ -666,7 +673,7 @@ const categoryRows = computed<CategoryRow[]>(() => {
 
         rows.push(buildCategoryRow(node, true, node.children.length > 0));
 
-        if (collapsedCategories.value[node.categoryId]) {
+        if (!expandedCategories.value[node.categoryId]) {
             continue;
         }
 
@@ -836,7 +843,7 @@ function toggleGroup(key: string): void {
 }
 
 function toggleCategory(categoryId: string): void {
-    collapsedCategories.value = { ...collapsedCategories.value, [categoryId]: !collapsedCategories.value[categoryId] };
+    expandedCategories.value = { ...expandedCategories.value, [categoryId]: !expandedCategories.value[categoryId] };
 }
 
 // An expectation is typed in the default currency, because it is a figure about a category rather
