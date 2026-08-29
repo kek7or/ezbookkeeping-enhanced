@@ -49,13 +49,13 @@
                 <v-card-text>
                     <v-row>
                         <v-col cols="12" md="4">
-                            <div class="text-caption text-medium-emphasis">{{ overspent ? tt('Over Plan By') : tt('Left Over') }}</div>
+                            <div class="text-caption text-medium-emphasis">{{ overspent ? tt('Short By') : tt('Left of What You Earned') }}</div>
                             <div class="budget-plan-hero" :class="overspent ? 'text-expense' : 'text-income'">
                                 <v-skeleton-loader type="heading" :loading="true" v-if="loading"/>
-                                <span v-else>{{ displayAmount(overspent ? plannedTotals.net.negate() : plannedTotals.net) }}</span>
+                                <span v-else>{{ displayAmount(overspent ? monthNet.negate() : monthNet) }}</span>
                             </div>
                             <div class="text-body-2 text-medium-emphasis">
-                                {{ tt('of {amount} planned income', { amount: displayAmount(plannedTotals.income) }) }}
+                                {{ tt('of {amount} coming in', { amount: displayAmount(incomeBasis) }) }}
                             </div>
                         </v-col>
                         <v-col cols="12" md="8">
@@ -80,7 +80,7 @@
                                 <div class="budget-flow-income-marker" :style="{ left: incomeMarkerLeft }"
                                      v-if="incomeMarkerLeft">
                                     <v-tooltip activator="parent" location="top">
-                                        {{ tt('Planned Income') }} — {{ displayAmount(plannedTotals.income) }}
+                                        {{ tt('Coming In') }} — {{ displayAmount(incomeBasis) }}
                                     </v-tooltip>
                                 </div>
                             </div>
@@ -94,14 +94,21 @@
                                 </div>
                             </div>
 
-                            <div class="d-flex flex-wrap mt-3" v-if="!loading">
-                                <div class="me-8">
-                                    <span class="text-caption text-medium-emphasis">{{ tt('Spent so far') }}</span>
-                                    <span class="text-body-1 ms-2">{{ displayAmount(actualTotals.expense) }}</span>
+                            <!-- The three figures the hero is worked out from, in the order the
+                                 month is read: what it will cost, what it has cost so far, and what
+                                 has come in. -->
+                            <div class="budget-plan-figures mt-4" v-if="!loading">
+                                <div class="budget-plan-figure">
+                                    <div class="text-caption text-medium-emphasis">{{ tt('Planned to Spend') }}</div>
+                                    <div class="text-h6 font-weight-regular">{{ displayAmount(plannedTotals.expense) }}</div>
                                 </div>
-                                <div class="me-8">
-                                    <span class="text-caption text-medium-emphasis">{{ tt('Received so far') }}</span>
-                                    <span class="text-body-1 ms-2">{{ displayAmount(actualTotals.income) }}</span>
+                                <div class="budget-plan-figure">
+                                    <div class="text-caption text-medium-emphasis">{{ tt('Spent so far') }}</div>
+                                    <div class="text-h6 font-weight-regular">{{ displayAmount(actualTotals.expense) }}</div>
+                                </div>
+                                <div class="budget-plan-figure">
+                                    <div class="text-caption text-medium-emphasis">{{ tt('Earned so far') }}</div>
+                                    <div class="text-h6 font-weight-regular">{{ displayAmount(actualTotals.income) }}</div>
                                 </div>
                             </div>
                         </v-col>
@@ -275,7 +282,7 @@
                         </td>
                     </tr>
                     </tbody>
-                    <tbody v-else-if="!categoryRows.length">
+                    <tbody v-else-if="!categorySections.length">
                     <tr>
                         <td colspan="7" class="py-6 text-center">
                             <div class="text-body-1">{{ tt('Nothing planned and nothing spent in this month.') }}</div>
@@ -283,10 +290,18 @@
                         </td>
                     </tr>
                     </tbody>
-                    <tbody v-else>
+                    <template v-else>
+                    <tbody :key="section.key" v-for="section in categorySections">
+                    <!-- What is earned and what is spent are both worth a figure, but they are not
+                         read the same way, so they are never mixed into one run of rows. -->
+                    <tr class="budget-category-section-row" v-if="categorySections.length > 1">
+                        <td colspan="7">
+                            <span class="text-uppercase text-caption font-weight-medium">{{ section.title }}</span>
+                        </td>
+                    </tr>
                     <tr :key="row.categoryId"
                         :class="row.isPrimary ? 'budget-category-primary-row' : ''"
-                        v-for="row in categoryRows"
+                        v-for="row in section.rows"
                         @mouseenter="hoveredCategoryId = row.categoryId"
                         @mouseleave="hoveredCategoryId = ''">
                         <td>
@@ -349,7 +364,7 @@
                         <!-- a negative remainder is only bad news on the way out: an income
                              category past what was expected of it has earned more, not overspent -->
                         <td class="text-end text-no-wrap"
-                            :class="!row.isIncome && row.node.remaining.isNegative() ? 'text-expense' : ''">{{ displayAmount(row.node.remaining) }}</td>
+                            :class="!row.isIncome && row.node.remaining.isNegative() ? 'text-expense' : ''">{{ row.remainingText }}</td>
                         <td class="text-end budget-plan-operation-column">
                             <div class="budget-plan-operation-buttons"
                                  :class="{ 'budget-plan-operation-buttons-shown': hoveredCategoryId === row.categoryId || editingCategoryId === row.categoryId }">
@@ -370,6 +385,7 @@
                         </td>
                     </tr>
                     </tbody>
+                    </template>
                 </v-table>
             </v-card>
         </v-col>
@@ -461,7 +477,16 @@ interface CategoryRow {
     color: string;
     trackColor: string;
     statusText: string;
+    // remainingText rather than an amount, because a category with nothing to measure against has
+    // no remainder to state and a zero there would read as one
+    remainingText: string;
     icon: string;
+}
+
+interface CategorySection {
+    key: string;
+    title: string;
+    rows: CategoryRow[];
 }
 
 // The three parts of one income are told apart by identity, so they take the app's own two accent
@@ -517,11 +542,13 @@ const showAllCategories = ref<boolean>(false);
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
 const plannedLineTotals = computed(() => budgetPlanStore.plannedLineTotals);
+const incomeBasis = computed<BigDecimal>(() => budgetPlanStore.incomeBasis);
+const monthNet = computed<BigDecimal>(() => budgetPlanStore.monthNet);
 const actualTotals = computed(() => budgetPlanStore.actualTotals);
 const committedExpense = computed<BigDecimal>(() => budgetPlanStore.committedExpense);
 const defaultCurrency = computed<string>(() => budgetPlanStore.defaultCurrency);
 
-const overspent = computed<boolean>(() => plannedTotals.value.net.isNegative());
+const overspent = computed<boolean>(() => monthNet.value.isNegative());
 
 const displayMonth = computed<string>(() => formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime({ year: budgetPlanStore.year, month0base: budgetPlanStore.month - 1 }))));
 
@@ -540,7 +567,7 @@ const lineGroups = computed<PlannedLineGroup[]>(() => [
 // would make the parts sum to more than the whole. It is the hero figure above, and the point on
 // the bar where the income ran out is the marker.
 const flowTotal = computed<BigDecimal>(() => {
-    const income = plannedTotals.value.income;
+    const income = incomeBasis.value;
     const expense = plannedTotals.value.expense;
     return income.greaterThan(expense) ? income : expense;
 });
@@ -563,7 +590,7 @@ const flowSegments = computed<FlowSegment[]>(() => {
         buildSegment('committed', tt('Committed'), FLOW_COLOR_COMMITTED, FLOW_LABEL_ON_FILL, committed, total),
         buildSegment('planned', tt('Planned'), FLOW_COLOR_PLANNED, FLOW_LABEL_ON_FILL, discretionary, total),
         buildSegment('set-aside', tt('Set Aside'), FLOW_COLOR_SET_ASIDE, FLOW_LABEL_ON_FILL, setAside, total),
-        buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, plannedTotals.value.net, total)
+        buildSegment('left', tt('Left Over'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
 
     // a segment worth nothing is dropped rather than drawn at zero width, where it would still cost
@@ -574,11 +601,11 @@ const flowSegments = computed<FlowSegment[]>(() => {
 // The marker is placed only when there is an overspend to mark and an income to mark it with: a
 // month with no income planned at all has nothing to say here that the hero figure does not.
 const incomeMarkerLeft = computed<string>(() => {
-    if (!overspent.value || !plannedTotals.value.income.isPositive() || !flowTotal.value.isPositive()) {
+    if (!overspent.value || !incomeBasis.value.isPositive() || !flowTotal.value.isPositive()) {
         return '';
     }
 
-    return `${(plannedTotals.value.income.toDoubleNumber() / flowTotal.value.toDoubleNumber()) * 100}%`;
+    return `${(incomeBasis.value.toDoubleNumber() / flowTotal.value.toDoubleNumber()) * 100}%`;
 });
 
 // A primary is shown when anything under it is planned, spent or expected; a secondary only when it
@@ -608,6 +635,24 @@ const categoryRows = computed<CategoryRow[]>(() => {
     return rows;
 });
 
+// Spending first: it is what the page is mostly for. A section with no rows is left out entirely
+// rather than shown empty, which is also what keeps the heading off a table that has only one.
+const categorySections = computed<CategorySection[]>(() => {
+    const spending = categoryRows.value.filter(row => !row.isIncome);
+    const earning = categoryRows.value.filter(row => row.isIncome);
+    const sections: CategorySection[] = [];
+
+    if (spending.length) {
+        sections.push({ key: 'spending', title: tt('Spending'), rows: spending });
+    }
+
+    if (earning.length) {
+        sections.push({ key: 'earning', title: tt('Earning'), rows: earning });
+    }
+
+    return sections;
+});
+
 // A category hidden from the rest of the app stays hidden here too, unless something is planned or
 // spent in it - in which case leaving it out would make the totals not add up.
 function isCategoryShown(node: CategoryBudgetNode): boolean {
@@ -624,6 +669,10 @@ function buildCategoryRow(node: CategoryBudgetNode, isPrimary: boolean, hasChild
     const ratio = node.budget.isPositive() ? node.actual.toDoubleNumber() / node.budget.toDoubleNumber() : (node.actual.isPositive() ? Infinity : 0);
 
     const isIncome = node.type === TransactionType.Income;
+    // an income category with nothing expected of it has nothing to measure against: the money
+    // simply arrived. A bar filled to the end and a remainder of minus the whole salary would both
+    // be saying something false about it.
+    const unmeasured = isIncome && !node.budget.isPositive();
 
     let color = METER_COLOR_UNDER;
     let trackColor = METER_TRACK_UNDER;
@@ -632,8 +681,10 @@ function buildCategoryRow(node: CategoryBudgetNode, isPrimary: boolean, hasChild
 
     // Only spending is warned about. Earning more than was expected, or from somewhere that was not
     // planned for at all, is not a problem to flag - and the status colours mean a problem.
-    if (isIncome) {
-        statusText = node.budget.isPositive() ? formatPercentToLocalizedNumerals(ratio * 100, 0, '<1') : tt('Unplanned');
+    if (unmeasured) {
+        statusText = tt('Received');
+    } else if (isIncome) {
+        statusText = formatPercentToLocalizedNumerals(Math.min(ratio, 1) * 100, 0, '<1');
     } else if (!node.budget.isPositive() && node.actual.isPositive()) {
         color = METER_COLOR_OVER;
         trackColor = METER_TRACK_OVER;
@@ -653,16 +704,19 @@ function buildCategoryRow(node: CategoryBudgetNode, isPrimary: boolean, hasChild
         statusText = formatPercentToLocalizedNumerals(ratio * 100, 0, '<1');
     }
 
+    const meterRatio = unmeasured ? 0 : ratio;
+
     return {
         categoryId: node.categoryId,
         node: node,
         isPrimary: isPrimary,
         isIncome: isIncome,
         hasChildren: hasChildren,
-        width: `${Math.max(Math.min(ratio, 1) * 100, ratio > 0 ? 3 : 0)}%`,
+        width: `${Math.max(Math.min(meterRatio, 1) * 100, meterRatio > 0 ? 3 : 0)}%`,
         color: color,
         trackColor: trackColor,
         statusText: statusText,
+        remainingText: unmeasured ? '—' : displayAmount(node.remaining),
         icon: icon
     };
 }
@@ -968,6 +1022,21 @@ onMounted(() => {
 .budget-plan-month {
     min-width: 130px;
     text-align: center;
+}
+
+.budget-plan-figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 40px;
+}
+
+.budget-plan-figure {
+    min-width: 120px;
+}
+
+.budget-category-section-row > td {
+    padding-top: 14px;
+    letter-spacing: 0.5px;
 }
 
 .budget-plan-hero {

@@ -170,6 +170,25 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         };
     });
 
+    // incomeBasis is the income the month actually has, foreseen or not.
+    //
+    // Measuring a plan against planned income alone is wrong for the commonest case there is: a
+    // salary is not a scheduled transaction, it simply arrives, so a person who has never set up an
+    // income schedule has a planned income of nothing and every month they plan reads as an
+    // overspend of the entire plan. Money already in the account is income the month has whether or
+    // not anything foresaw it, so the larger of the two is taken - which also means a bonus lifts
+    // the figure rather than being ignored for having been unplanned.
+    const incomeBasis = computed<BigDecimal>(() => {
+        const planned = plannedTotals.value.income;
+        const actual = actualTotals.value.income;
+
+        return actual.greaterThan(planned) ? actual : planned;
+    });
+
+    // What is left of that income once the month has cost what it is planned to cost. This is the
+    // figure the page is really for, and it goes negative when the month plans past its income.
+    const monthNet = computed<BigDecimal>(() => incomeBasis.value.subtract(plannedTotals.value.expense));
+
     function getAccountCurrency(accountId: string): string | undefined {
         return accountsStore.allAccountsMap[accountId]?.currency;
     }
@@ -411,6 +430,8 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         plannedLineTotals,
         committedExpense,
         actualTotals,
+        incomeBasis,
+        monthNet,
         primaryCategories,
         categoryBudgetTree,
         // functions
