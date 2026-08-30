@@ -503,6 +503,34 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
+    // Stopping a month withdraws the statement that it was planned and nothing else. What is planned
+    // in the month stays where it is, which is why nothing here is cleared out: start the month
+    // again and the same plan is back.
+    function stopPlanningMonth(): Promise<void> {
+        return services.stopBudgetPlanMonth({
+            year: year.value,
+            month: month.value
+        }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error('Unable to stop planning this month');
+            }
+
+            monthIsPlanned.value = false;
+        }).catch(error => {
+            logger.error('failed to stop planning the month', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to stop planning this month' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
     function setScheduleAdjustment({ templateId, excluded, amount }: { templateId: string, excluded: boolean, amount?: number }): Promise<void> {
         return services.setBudgetPlanAdjustment({
             year: year.value,
@@ -570,6 +598,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         setMonth,
         loadBudgetPlan,
         startPlanningMonth,
+        stopPlanningMonth,
         saveBudgetPlanItem,
         deleteBudgetPlanItem,
         copyPreviousMonthItems,

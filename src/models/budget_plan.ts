@@ -110,6 +110,13 @@ export interface BudgetPlanMonthStartRequest {
     readonly month: number;
 }
 
+// Stopping a month withdraws only the statement that it was planned. What is planned in it is kept
+// and comes back if the month is started again.
+export interface BudgetPlanMonthStopRequest {
+    readonly year: number;
+    readonly month: number;
+}
+
 export interface BudgetPlanItemCreateRequest {
     readonly year: number;
     readonly month: number;

@@ -476,6 +476,7 @@ func startWebServer(c *core.CliContext) error {
 			// Budget Plans
 			apiV1Route.GET("/budget_plans/get.json", bindApi(api.BudgetPlans.BudgetPlanGetHandler, config))
 			apiV1Route.POST("/budget_plans/months/start.json", bindApi(api.BudgetPlans.BudgetPlanMonthStartHandler, config))
+			apiV1Route.POST("/budget_plans/months/stop.json", bindApi(api.BudgetPlans.BudgetPlanMonthStopHandler, config))
 			apiV1Route.POST("/budget_plans/items/add.json", bindApi(api.BudgetPlans.BudgetPlanItemCreateHandler, config))
 			apiV1Route.POST("/budget_plans/items/modify.json", bindApi(api.BudgetPlans.BudgetPlanItemModifyHandler, config))
 			apiV1Route.POST("/budget_plans/items/delete.json", bindApi(api.BudgetPlans.BudgetPlanItemDeleteHandler, config))

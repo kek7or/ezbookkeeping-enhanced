@@ -661,6 +661,36 @@ func (s *BudgetPlanService) SetAdjustment(c core.Context, adjustment *models.Bud
 //
 // It takes the session rather than opening its own, because a month must not end up marked as
 // planned by a write that then fails.
+// StopMonth takes a month back out of the plan, for a month started by mistake or one nobody wants
+// planned any more.
+//
+// Whatever is planned in the month is left where it is rather than deleted. The month row says only
+// that somebody meant to plan the month, so withdrawing it withdraws that and nothing else - and
+// starting the month again brings back what was in it. Emptying the month is done by removing what
+// is in it, which is a different act and is asked for a line at a time.
+//
+// Stopping a month that is not planned does nothing rather than failing, the same way starting one
+// already started does: the request asks for the month not to be planned, and it is not.
+func (s *BudgetPlanService) StopMonth(c core.Context, uid int64, year int32, month int32) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	now := time.Now().Unix()
+	updateModel := &models.BudgetPlanMonth{
+		Deleted:         true,
+		DeletedUnixTime: now,
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		_, err := sess.Cols("deleted", "deleted_unix_time").
+			Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).
+			Update(updateModel)
+
+		return err
+	})
+}
+
 func (s *BudgetPlanService) ensureMonth(sess *xorm.Session, uid int64, year int32, month int32) error {
 	exists, err := sess.Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Limit(1).Exist(&models.BudgetPlanMonth{})
 

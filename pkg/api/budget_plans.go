@@ -139,6 +139,30 @@ func (a *BudgetPlansApi) BudgetPlanMonthStartHandler(c *core.WebContext) (any, *
 	return true, nil
 }
 
+// BudgetPlanMonthStopHandler takes a month back out of the plan for the current user. Whatever is
+// planned in the month is kept, and comes back if the month is started again.
+func (a *BudgetPlansApi) BudgetPlanMonthStopHandler(c *core.WebContext) (any, *errs.Error) {
+	var monthStopReq models.BudgetPlanMonthStopRequest
+	err := c.ShouldBindJSON(&monthStopReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanMonthStopHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	err = a.budgetPlans.StopMonth(c, uid, monthStopReq.Year, monthStopReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanMonthStopHandler] failed to stop plan month for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanMonthStopHandler] user \"uid:%d\" has stopped planning %d-%d", uid, monthStopReq.Year, monthStopReq.Month)
+
+	return true, nil
+}
+
 // BudgetPlanItemCreateHandler plans one more thing for a month for the current user
 func (a *BudgetPlansApi) BudgetPlanItemCreateHandler(c *core.WebContext) (any, *errs.Error) {
 	var itemCreateReq models.BudgetPlanItemCreateRequest

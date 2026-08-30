@@ -175,6 +175,13 @@ type BudgetPlanMonthStartRequest struct {
 	Month int32 `json:"month" binding:"required,min=1,max=12"`
 }
 
+// BudgetPlanMonthStopRequest represents all parameters of a request to take a month back out of the
+// plan. What is planned in the month is kept - see StopMonth.
+type BudgetPlanMonthStopRequest struct {
+	Year  int32 `json:"year" binding:"required,min=1,max=9999"`
+	Month int32 `json:"month" binding:"required,min=1,max=12"`
+}
+
 // BudgetPlanItemCreateRequest represents all parameters of a plan item creation request
 type BudgetPlanItemCreateRequest struct {
 	Year       int32           `json:"year" binding:"required,min=1,max=9999"`

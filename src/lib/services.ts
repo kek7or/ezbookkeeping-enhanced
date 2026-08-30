@@ -77,6 +77,7 @@ import type {
 import type {
     BudgetPlanGetRequest,
     BudgetPlanMonthStartRequest,
+    BudgetPlanMonthStopRequest,
     BudgetPlanItemCreateRequest,
     BudgetPlanItemModifyRequest,
     BudgetPlanItemDeleteRequest,
@@ -981,6 +982,9 @@ export default {
     },
     startBudgetPlanMonth: (req: BudgetPlanMonthStartRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/budget_plans/months/start.json', req);
+    },
+    stopBudgetPlanMonth: (req: BudgetPlanMonthStopRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/months/stop.json', req);
     },
     addBudgetPlanItem: (req: BudgetPlanItemCreateRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
         return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/items/add.json', req);

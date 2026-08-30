@@ -40,6 +40,13 @@
                                                  :prepend-icon="mdiCalendarTodayOutline"
                                                  :title="tt('Go to This Month')"
                                                  @click="goToThisMonth"></v-list-item>
+                                    <!-- for a month started by mistake. It withdraws the month and
+                                         not what is in it, so it is not the destructive thing it
+                                         looks like - hence no red. -->
+                                    <v-list-item :disabled="loading || !planActive"
+                                                 :prepend-icon="mdiCalendarRemoveOutline"
+                                                 :title="tt('Stop Planning This Month')"
+                                                 @click="stopPlanningMonth"></v-list-item>
                                 </v-list>
                             </v-menu>
                         </v-btn>
@@ -500,6 +507,7 @@ import {
     mdiCalendarTodayOutline,
     mdiCalendarBlankOutline,
     mdiCalendarPlus,
+    mdiCalendarRemoveOutline,
     mdiClockTimeNineOutline,
     mdiPencilOutline,
     mdiDeleteOutline,
@@ -1092,6 +1100,22 @@ function startPlanningMonth(): void {
         if (!error.processed) {
             snackbar.value?.showError(error);
         }
+    });
+}
+
+// The confirmation says what is kept, because "stop planning this month" reads like it throws the
+// month away and it does not.
+function stopPlanningMonth(): void {
+    confirmDialog.value?.open('Are you sure you want to take this month out of the plan? Anything planned in it is kept, and comes back if you start the month again.').then(() => {
+        budgetPlanStore.stopPlanningMonth().then(() => {
+            snackbar.value?.showMessage('You have taken this month out of the plan');
+        }).catch(error => {
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
+    }).catch(() => {
+        // dismissed
     });
 }
 
