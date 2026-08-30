@@ -7,6 +7,7 @@ import (
 	"github.com/mayswind/ezbookkeeping/pkg/datastore"
 	"github.com/mayswind/ezbookkeeping/pkg/log"
 	"github.com/mayswind/ezbookkeeping/pkg/models"
+	"github.com/mayswind/ezbookkeeping/pkg/services"
 )
 
 // Database represents the database command
@@ -39,6 +40,18 @@ func updateDatabaseStructure(c *core.CliContext) error {
 	}
 
 	log.CliInfof(c, "[database.updateDatabaseStructure] all tables maintained successfully")
+
+	backfilled, err := services.BudgetPlans.BackfillPlannedMonths(c)
+
+	if err != nil {
+		log.CliErrorf(c, "[database.updateDatabaseStructure] backfill planned budget months failed, because %s", err.Error())
+		return err
+	}
+
+	if backfilled > 0 {
+		log.CliInfof(c, "[database.updateDatabaseStructure] marked %d month(s) as planned that were planned before there was a row to say so", backfilled)
+	}
+
 	return nil
 }
 
@@ -236,6 +249,14 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 	}
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] debt entry table maintained successfully")
+
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetPlanMonth))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] budget plan month table maintained successfully")
 
 	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetPlanItem))
 

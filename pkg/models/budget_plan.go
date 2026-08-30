@@ -1,14 +1,46 @@
 package models
 
-// A budget plan is a month, and it is deliberately not stored as one.
+// A budget plan is a month, and almost nothing about it is stored.
 //
 // Everything a month already commits is known: the schedules say what recurs and the ledger says
 // what has happened. Copying those into a plan would be writing down an answer that goes stale the
 // moment a subscription changes price, and then there would be two places to correct it. So the
-// plan holds only what cannot be derived - the one-off the user knows is coming, and the month
-// where a schedule is not going to behave as it usually does - and everything else is worked out
-// from the schedules and the transactions each time it is asked for. That is also what makes the
-// whole page recompute the instant anything changes: there is nothing cached to invalidate.
+// plan holds only what cannot be derived - the one-off the user knows is coming, the month where a
+// schedule is not going to behave as it usually does, and the bare fact that the month was planned
+// at all - and everything else is worked out from the schedules and the transactions each time it
+// is asked for. That is also what makes the whole page recompute the instant anything changes:
+// there is nothing cached to invalidate.
+
+// BudgetPlanMonth says that a month was planned. It carries nothing else - no total, no name, no
+// settings - because everything a month is planned to cost is worked out from the rows that follow
+// and from the schedules and the ledger.
+//
+// It exists because whether somebody meant to plan a month is the one thing about that month which
+// cannot be derived. Without it every month there has ever been or will be shows a plan: the
+// standing expectations apply to every month by construction, and the schedules to every month they
+// run in. A confident plan drawn across a month from before the user had ever opened the page, with
+// real spending from the ledger set against it, is a comparison against a figure nobody ever chose.
+//
+// The row is written the first time anything is planned for the month, so nobody has to ask for it
+// in the ordinary course of planning, and can be written on its own to start a month before there
+// is anything in it. No month is exempt: a month two years out can be filled in from the standing
+// figures and the schedules as readily as a month two years back, and doing so reads as a decision
+// about a month nobody has decided anything about. A month is planned when somebody says so.
+//
+// There is meant to be one row per month, which nothing enforces. Two concurrent first writes can
+// both insert one, and it does not matter: the row has no contents, so a duplicate says exactly
+// what the first one says.
+type BudgetPlanMonth struct {
+	MonthId int64 `xorm:"PK"`
+	Uid     int64 `xorm:"INDEX(IDX_budget_plan_month_uid_deleted_year_month) NOT NULL"`
+	// Deleted is a soft delete, as everywhere else. Nothing removes a planned month today; the
+	// column is here so that unplanning one later does not throw away what was planned in it.
+	Deleted         bool  `xorm:"INDEX(IDX_budget_plan_month_uid_deleted_year_month) NOT NULL"`
+	Year            int32 `xorm:"INDEX(IDX_budget_plan_month_uid_deleted_year_month) NOT NULL"`
+	Month           int32 `xorm:"INDEX(IDX_budget_plan_month_uid_deleted_year_month) NOT NULL"`
+	CreatedUnixTime int64
+	DeletedUnixTime int64
+}
 
 // BudgetPlanItem is one thing planned for a month that no schedule would ever produce - a flight, a
 // birthday, the dentist. It is not a transaction: no money has moved, no account balance reflects
@@ -135,6 +167,14 @@ type BudgetPlanGetRequest struct {
 	Month int32 `form:"month" binding:"required,min=1,max=12"`
 }
 
+// BudgetPlanMonthStartRequest represents all parameters of a request to start planning a month
+// that nothing has been planned for yet. Ordinary planning starts a month on its own, so this is
+// only for going back to a month that was never planned and filling it in now.
+type BudgetPlanMonthStartRequest struct {
+	Year  int32 `json:"year" binding:"required,min=1,max=9999"`
+	Month int32 `json:"month" binding:"required,min=1,max=12"`
+}
+
 // BudgetPlanItemCreateRequest represents all parameters of a plan item creation request
 type BudgetPlanItemCreateRequest struct {
 	Year       int32           `json:"year" binding:"required,min=1,max=9999"`
@@ -244,8 +284,12 @@ type BudgetPlanStandingExpectationInfoResponse struct {
 // BudgetPlanInfoResponse is everything stored about one month's plan. What the month costs is not
 // in here: it is worked out from these, the schedules and the ledger, by whoever is displaying it.
 type BudgetPlanInfoResponse struct {
-	Year         int32                                `json:"year"`
-	Month        int32                                `json:"month"`
+	Year  int32 `json:"year"`
+	Month int32 `json:"month"`
+	// Planned says this month was planned rather than merely being a month the standing figures and
+	// the schedules happen to reach. It is what tells a month nobody ever planned apart from one
+	// that was planned and came to nothing.
+	Planned      bool                                 `json:"planned"`
 	Items        []*BudgetPlanItemInfoResponse        `json:"items"`
 	Adjustments  []*BudgetPlanAdjustmentInfoResponse  `json:"adjustments"`
 	Expectations []*BudgetPlanExpectationInfoResponse `json:"expectations"`

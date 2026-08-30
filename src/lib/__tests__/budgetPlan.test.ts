@@ -128,6 +128,26 @@ describe('getScheduleOccurrencesInMonth', () => {
         expect(getScheduleOccurrencesInMonth(claude, 2026, 8)).toBe(1);
     });
 
+    // having no day to enumerate, a day-less schedule has to be asked outright whether it runs in
+    // the month at all - otherwise a subscription taken out last week is charged against every month
+    // there has ever been
+    test('should plan nothing for a day-less schedule outside the dates it runs between', () => {
+        const claude = createSchedule(ScheduledTemplateFrequencyType.Monthly.type, '', { startDate: '2026-03-15', endDate: '2026-06-10' });
+
+        expect(getScheduleOccurrencesInMonth(claude, 2019, 1)).toBe(0);
+        expect(getScheduleOccurrencesInMonth(claude, 2026, 2)).toBe(0);
+        expect(getScheduleOccurrencesInMonth(claude, 2026, 3)).toBe(1);
+        expect(getScheduleOccurrencesInMonth(claude, 2026, 6)).toBe(1);
+        expect(getScheduleOccurrencesInMonth(claude, 2026, 7)).toBe(0);
+    });
+
+    test('should spread a day-less yearly schedule over the year only while it runs', () => {
+        const domain = createSchedule(ScheduledTemplateFrequencyType.Yearly.type, '', { startDate: '2026-03-01' });
+
+        expect(getScheduleOccurrencesInMonth(domain, 2025, 12)).toBe(0);
+        expect(getScheduleOccurrencesInMonth(domain, 2026, 4)).toBeCloseTo(1 / 12);
+    });
+
     // an annual bill with no date is best met by setting a twelfth of it aside every month
     test('should spread a day-less yearly schedule evenly over the year', () => {
         const domain = createSchedule(ScheduledTemplateFrequencyType.Yearly.type, '');

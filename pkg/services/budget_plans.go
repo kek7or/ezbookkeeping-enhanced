@@ -40,6 +40,138 @@ var (
 	}
 )
 
+// IsMonthPlanned says whether this month was ever planned, as opposed to being a month the
+// standing figures and the schedules merely reach. See the model for why the answer cannot be
+// worked out from the rest of the plan.
+func (s *BudgetPlanService) IsMonthPlanned(c core.Context, uid int64, year int32, month int32) (bool, error) {
+	if uid <= 0 {
+		return false, errs.ErrUserIdInvalid
+	}
+
+	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Limit(1).Exist(&models.BudgetPlanMonth{})
+}
+
+// StartMonth marks a month as planned without planning anything in it yet, which is how a month
+// that was never planned at the time is filled in afterwards. Planning anything at all marks the
+// month on its own, so this is not on the ordinary path.
+//
+// Starting a month already started does nothing rather than failing: the request asks for the month
+// to be planned, and it is.
+func (s *BudgetPlanService) StartMonth(c core.Context, uid int64, year int32, month int32) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		return s.ensureMonth(sess, uid, year, month)
+	})
+}
+
+// plannedMonthKey is one month that has something planned in it, as read back out of the rows that
+// carry a month on them.
+type plannedMonthKey struct {
+	Uid   int64
+	Year  int32
+	Month int32
+}
+
+// BackfillPlannedMonths writes the missing month row for every month that already has something
+// planned in it.
+//
+// The month row is written by whatever plans the first thing in a month, which does nothing for the
+// months planned before there was a month row to write. Those months would go on looking planned
+// only until the calendar moved past them, and would then be shown as months nobody ever planned -
+// over the top of the expectations and items still sitting in them.
+//
+// It is safe to run at every start and is meant to be: it looks for months that have content and no
+// row, and once there are none it finds none.
+func (s *BudgetPlanService) BackfillPlannedMonths(c core.Context) (int, error) {
+	const plannedMonthsQuery = "SELECT uid, year, month FROM budget_plan_item WHERE deleted=? " +
+		"UNION SELECT uid, year, month FROM budget_plan_schedule_adjustment WHERE deleted=? " +
+		"UNION SELECT uid, year, month FROM budget_plan_category_expectation WHERE deleted=?"
+
+	backfilled := 0
+
+	for i := 0; i < s.UserDataDBCount(); i++ {
+		db := s.UserDataDBByIndex(i)
+
+		var planned []*plannedMonthKey
+		err := db.NewSession(c).SQL(plannedMonthsQuery, false, false, false).Find(&planned)
+
+		if err != nil {
+			return backfilled, err
+		}
+
+		if len(planned) < 1 {
+			continue
+		}
+
+		var existing []*models.BudgetPlanMonth
+		err = db.NewSession(c).Cols("uid", "year", "month").Where("deleted=?", false).Find(&existing)
+
+		if err != nil {
+			return backfilled, err
+		}
+
+		alreadyMarked := make(map[plannedMonthKey]bool, len(existing))
+
+		for j := 0; j < len(existing); j++ {
+			alreadyMarked[plannedMonthKey{Uid: existing[j].Uid, Year: existing[j].Year, Month: existing[j].Month}] = true
+		}
+
+		now := time.Now().Unix()
+		missing := make([]*models.BudgetPlanMonth, 0, len(planned))
+
+		for j := 0; j < len(planned); j++ {
+			key := *planned[j]
+
+			if alreadyMarked[key] {
+				continue
+			}
+
+			// the union can hand the same month back once per table it appears in
+			alreadyMarked[key] = true
+
+			monthId := s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+			if monthId < 1 {
+				return backfilled, errs.ErrSystemIsBusy
+			}
+
+			missing = append(missing, &models.BudgetPlanMonth{
+				MonthId:         monthId,
+				Uid:             key.Uid,
+				Deleted:         false,
+				Year:            key.Year,
+				Month:           key.Month,
+				CreatedUnixTime: now,
+			})
+		}
+
+		if len(missing) < 1 {
+			continue
+		}
+
+		err = db.DoTransaction(c, func(sess *xorm.Session) error {
+			for k := 0; k < len(missing); k++ {
+				if _, err := sess.Insert(missing[k]); err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			return backfilled, err
+		}
+
+		backfilled += len(missing)
+	}
+
+	return backfilled, nil
+}
+
 // GetItemsByMonth returns everything planned by hand for one month
 func (s *BudgetPlanService) GetItemsByMonth(c core.Context, uid int64, year int32, month int32) ([]*models.BudgetPlanItem, error) {
 	if uid <= 0 {
@@ -142,6 +274,10 @@ func (s *BudgetPlanService) CreateItem(c core.Context, item *models.BudgetPlanIt
 	item.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(item.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if err := s.ensureMonth(sess, item.Uid, item.Year, item.Month); err != nil {
+			return err
+		}
+
 		_, err := sess.Insert(item)
 		return err
 	})
@@ -321,6 +457,10 @@ func (s *BudgetPlanService) CopyMonth(c core.Context, uid int64, fromYear int32,
 	}
 
 	err = s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if err := s.ensureMonth(sess, uid, toYear, toMonth); err != nil {
+			return err
+		}
+
 		for i := 0; i < len(newItems); i++ {
 			if _, err := sess.Insert(newItems[i]); err != nil {
 				return err
@@ -384,6 +524,10 @@ func (s *BudgetPlanService) SetExpectation(c core.Context, expectation *models.B
 
 		if expectation.Amount == 0 {
 			return nil
+		}
+
+		if err := s.ensureMonth(sess, expectation.Uid, expectation.Year, expectation.Month); err != nil {
+			return err
 		}
 
 		expectation.ExpectationId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
@@ -492,6 +636,10 @@ func (s *BudgetPlanService) SetAdjustment(c core.Context, adjustment *models.Bud
 			return nil
 		}
 
+		if err := s.ensureMonth(sess, adjustment.Uid, adjustment.Year, adjustment.Month); err != nil {
+			return err
+		}
+
 		adjustment.AdjustmentId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
 
 		if adjustment.AdjustmentId < 1 {
@@ -506,6 +654,40 @@ func (s *BudgetPlanService) SetAdjustment(c core.Context, adjustment *models.Bud
 
 		return err
 	})
+}
+
+// ensureMonth marks the month as planned if it is not already, and is called from inside every
+// write that plans something, so that planning is all anyone has to do to start a month.
+//
+// It takes the session rather than opening its own, because a month must not end up marked as
+// planned by a write that then fails.
+func (s *BudgetPlanService) ensureMonth(sess *xorm.Session, uid int64, year int32, month int32) error {
+	exists, err := sess.Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Limit(1).Exist(&models.BudgetPlanMonth{})
+
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		return nil
+	}
+
+	monthId := s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+	if monthId < 1 {
+		return errs.ErrSystemIsBusy
+	}
+
+	_, err = sess.Insert(&models.BudgetPlanMonth{
+		MonthId:         monthId,
+		Uid:             uid,
+		Deleted:         false,
+		Year:            year,
+		Month:           month,
+		CreatedUnixTime: time.Now().Unix(),
+	})
+
+	return err
 }
 
 func (s *BudgetPlanService) getStandingExpectationCount(c core.Context, uid int64) (int64, error) {

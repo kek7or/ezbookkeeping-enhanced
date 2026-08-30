@@ -96,14 +96,47 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		standingResps[i] = standing[i].ToBudgetPlanStandingExpectationInfoResponse()
 	}
 
+	planned, err := a.budgetPlans.IsMonthPlanned(c, uid, planGetReq.Year, planGetReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanGetHandler] failed to check whether the month was planned for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
 	return &models.BudgetPlanInfoResponse{
 		Year:         planGetReq.Year,
 		Month:        planGetReq.Month,
+		Planned:      planned,
 		Items:        itemResps,
 		Adjustments:  adjustmentResps,
 		Expectations: expectationResps,
 		Standing:     standingResps,
 	}, nil
+}
+
+// BudgetPlanMonthStartHandler marks a month as planned for the current user without anything being
+// planned in it yet. Planning anything marks the month on its own, so this is only for going back
+// to a month that was never planned and filling it in now.
+func (a *BudgetPlansApi) BudgetPlanMonthStartHandler(c *core.WebContext) (any, *errs.Error) {
+	var monthStartReq models.BudgetPlanMonthStartRequest
+	err := c.ShouldBindJSON(&monthStartReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanMonthStartHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	err = a.budgetPlans.StartMonth(c, uid, monthStartReq.Year, monthStartReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanMonthStartHandler] failed to start plan month for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanMonthStartHandler] user \"uid:%d\" has started planning %d-%d", uid, monthStartReq.Year, monthStartReq.Month)
+
+	return true, nil
 }
 
 // BudgetPlanItemCreateHandler plans one more thing for a month for the current user

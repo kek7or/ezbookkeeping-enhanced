@@ -26,13 +26,13 @@
                         </v-btn>
                         <v-spacer/>
                         <v-btn class="ms-3" color="primary" variant="tonal" :prepend-icon="mdiPlus"
-                               :disabled="loading" @click="addItem">{{ tt('Plan Something') }}</v-btn>
+                               :disabled="loading || !planActive" @click="addItem">{{ tt('Plan Something') }}</v-btn>
                         <v-btn density="comfortable" color="default" variant="text" class="ms-2"
                                :disabled="loading" :icon="true">
                             <v-icon :icon="mdiDotsVertical"/>
                             <v-menu activator="parent">
                                 <v-list>
-                                    <v-list-item :disabled="loading"
+                                    <v-list-item :disabled="loading || !planActive"
                                                  :prepend-icon="mdiContentCopy"
                                                  :title="tt('Copy Previous Month')"
                                                  @click="copyPreviousMonth"></v-list-item>
@@ -46,7 +46,7 @@
                     </div>
                 </template>
 
-                <v-card-text>
+                <v-card-text v-if="loading || planActive">
                     <v-row>
                         <v-col cols="12" md="4">
                             <!-- The hero is what has actually been saved - money in, less money
@@ -156,10 +156,23 @@
                         </v-col>
                     </v-row>
                 </v-card-text>
+
+                <!-- Any month at all can be filled in from the standing figures and the
+                     schedules, whether or not anybody has planned it - which would show a
+                     confident plan that was never made, in a month nobody has decided anything
+                     about. A month says nothing until it is started. -->
+                <v-card-text class="py-8 text-center" v-else>
+                    <v-icon class="mb-2" size="32" :icon="mdiCalendarBlankOutline" color="secondary"/>
+                    <div class="text-body-1">{{ tt('No plan for this month') }}</div>
+                    <div class="text-body-2 text-medium-emphasis mb-3">{{ tt('Nothing has been planned here. Start the month and your schedules and standing figures fill it in, ready to be corrected.') }}</div>
+                    <v-btn color="primary" variant="tonal" :prepend-icon="mdiCalendarPlus"
+                           :disabled="starting" :loading="starting"
+                           @click="startPlanningMonth">{{ tt('Start Planning This Month') }}</v-btn>
+                </v-card-text>
             </v-card>
         </v-col>
 
-        <v-col cols="12">
+        <v-col cols="12" v-if="loading || planActive">
             <v-card :title="tt('The Plan')">
                 <v-card-text class="pt-0">
                     <span class="text-body-2 text-medium-emphasis">{{ tt('Click any amount to change it. Everything above recalculates as you type.') }}</span>
@@ -290,7 +303,7 @@
             </v-card>
         </v-col>
 
-        <v-col cols="12">
+        <v-col cols="12" v-if="loading || planActive">
             <v-card>
                 <template #title>
                     <div class="title-and-toolbar d-flex align-center">
@@ -486,6 +499,7 @@ import {
     mdiContentCopy,
     mdiCalendarTodayOutline,
     mdiCalendarBlankOutline,
+    mdiCalendarPlus,
     mdiClockTimeNineOutline,
     mdiPencilOutline,
     mdiDeleteOutline,
@@ -586,6 +600,7 @@ const editPlanItemDialog = useTemplateRef<EditPlanItemDialogType>('editPlanItemD
 const adjustScheduleDialog = useTemplateRef<AdjustScheduleDialogType>('adjustScheduleDialog');
 
 const loading = ref<boolean>(true);
+const starting = ref<boolean>(false);
 const hoveredLineKey = ref<string>('');
 const editingLineKey = ref<string>('');
 const savingLineKey = ref<string>('');
@@ -604,6 +619,10 @@ const editingCategoryId = ref<string>('');
 const savingCategoryId = ref<string>('');
 const editingExpectation = ref<number>(0);
 const showAllCategories = ref<boolean>(false);
+
+// Whether this month has a plan to show at all. See the store for why a past month that was never
+// planned shows nothing rather than a plan assembled out of the standing figures and the schedules.
+const planActive = computed<boolean>(() => budgetPlanStore.planActive);
 
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
@@ -1056,6 +1075,24 @@ function stepMonth(offset: number): void {
 
     budgetPlanStore.setMonth(year, month);
     load(false);
+}
+
+// Starting a month plans it and nothing else, which is enough for the page to show what the
+// schedules and the standing figures make of it - so an old month comes up already filled in with
+// what it would have been planned at, ready to be corrected.
+function startPlanningMonth(): void {
+    starting.value = true;
+
+    budgetPlanStore.startPlanningMonth().then(() => {
+        starting.value = false;
+        snackbar.value?.showMessage('You have started planning this month');
+    }).catch(error => {
+        starting.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
 }
 
 function goToThisMonth(): void {

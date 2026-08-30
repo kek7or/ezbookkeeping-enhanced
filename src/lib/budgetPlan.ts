@@ -61,12 +61,28 @@ export interface PlanTotals {
 // A recurrence with no day named is the exception, because there is no day to ask about. Such a
 // schedule is spread evenly over the year: a monthly one comes out at exactly one occurrence a
 // month, and a yearly one at a twelfth of itself, which is the figure worth planning against anyway
-// - the annual bill is best met by setting aside a twelfth of it every month.
+// - the annual bill is best met by setting aside a twelfth of it every month. It still counts for
+// nothing outside the months the schedule runs in, which has to be asked outright: having no day to
+// enumerate, it would otherwise charge itself against every month there has ever been.
 export function getScheduleOccurrencesInMonth(template: TransactionTemplate, year: number, month: number): number {
     const frequencyType = template.scheduledFrequencyType;
     const values = parseFrequencyValues(template.scheduledFrequency);
 
     if (frequencyType === undefined || frequencyType === ScheduledTemplateFrequencyType.Disabled.type) {
+        return 0;
+    }
+
+    const daysInMonth = getDaysInMonth(year, month);
+    const startDayNumber = toDayNumber(template.scheduledStartDate);
+    const endDayNumber = toDayNumber(template.scheduledEndDate);
+    const firstDayOfMonth = year * 10000 + month * 100 + 1;
+    const lastDayOfMonth = year * 10000 + month * 100 + daysInMonth;
+
+    if (startDayNumber !== null && startDayNumber > lastDayOfMonth) {
+        return 0;
+    }
+
+    if (endDayNumber !== null && endDayNumber < firstDayOfMonth) {
         return 0;
     }
 
@@ -77,10 +93,6 @@ export function getScheduleOccurrencesInMonth(template: TransactionTemplate, yea
 
         return getScheduleOccurrencesPerYear(frequencyType, template.scheduledFrequency) / MONTHS_PER_YEAR;
     }
-
-    const daysInMonth = getDaysInMonth(year, month);
-    const startDayNumber = toDayNumber(template.scheduledStartDate);
-    const endDayNumber = toDayNumber(template.scheduledEndDate);
 
     let occurrences = 0;
 

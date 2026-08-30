@@ -76,6 +76,7 @@ import type {
 } from '@/models/debt.ts';
 import type {
     BudgetPlanGetRequest,
+    BudgetPlanMonthStartRequest,
     BudgetPlanItemCreateRequest,
     BudgetPlanItemModifyRequest,
     BudgetPlanItemDeleteRequest,
@@ -977,6 +978,9 @@ export default {
     },
     getBudgetPlan: (req: BudgetPlanGetRequest): ApiResponsePromise<BudgetPlanInfoResponse> => {
         return axios.get<ApiResponse<BudgetPlanInfoResponse>>(`v1/budget_plans/get.json?year=${req.year}&month=${req.month}`);
+    },
+    startBudgetPlanMonth: (req: BudgetPlanMonthStartRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/months/start.json', req);
     },
     addBudgetPlanItem: (req: BudgetPlanItemCreateRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
         return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/items/add.json', req);

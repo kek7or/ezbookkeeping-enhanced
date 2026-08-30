@@ -52,6 +52,9 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const planAdjustments = ref<BudgetPlanAdjustment[]>([]);
     const planExpectations = ref<BudgetPlanExpectation[]>([]);
     const planStandingExpectations = ref<BudgetPlanStandingExpectation[]>([]);
+    // whether this month was planned, as opposed to being one the standing figures and the
+    // schedules merely reach - the server's answer, see the model there
+    const monthIsPlanned = ref<boolean>(false);
     const actualItems = ref<TransactionStatisticResponseItem[]>([]);
     const planStateInvalid = ref<boolean>(true);
 
@@ -121,6 +124,17 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             .filter(standing => !overridden.has(standing.categoryId))
             .map(standing => standing.categoryId));
     });
+
+    // planActive is whether this month has a plan worth showing, and it is exactly whether the month
+    // was planned. No month is exempt, in either direction.
+    //
+    // The standing figures apply to every month by construction and the schedules to every month
+    // they run in, so any month at all can be filled in from them - a month from before any of it
+    // existed, or one two years out that nobody has thought about yet. A page assembled that way
+    // shows a confident plan that was never made: behind, with real spending set against a figure
+    // nobody chose, and ahead, reading as a decision about a month nobody has decided anything
+    // about. A month is planned when somebody says so, and until then there is nothing to show.
+    const planActive = computed<boolean>(() => monthIsPlanned.value);
 
     // Only the two spending types are planned against. A transfer moves money between two accounts
     // of one ledger and is neither earned nor spent, so there is nothing about it to expect.
@@ -290,6 +304,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             planAdjustments.value = planData.result.adjustments || [];
             planExpectations.value = planData.result.expectations || [];
             planStandingExpectations.value = planData.result.standing || [];
+            monthIsPlanned.value = !!planData.result.planned;
             actualItems.value = statisticsData && statisticsData.success && statisticsData.result ? (statisticsData.result.items || []) : [];
             planStateInvalid.value = false;
         }).catch(error => {
@@ -320,6 +335,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
             if (isNew) {
                 planItems.value.push(saved);
+                monthIsPlanned.value = true;
             } else {
                 const index = planItems.value.findIndex(existing => existing.id === saved.id);
 
@@ -413,6 +429,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
             if (data.result) {
                 planExpectations.value.push(data.result);
+                monthIsPlanned.value = true;
             }
         }).catch(error => {
             logger.error('failed to set budget plan expectation', error);
@@ -458,6 +475,34 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
+    // Starting a month plans it without planning anything in it, which is the only way into a past
+    // month that was never planned. Everything else here starts the month on its own by planning
+    // something, so this is not on the ordinary path.
+    function startPlanningMonth(): Promise<void> {
+        return services.startBudgetPlanMonth({
+            year: year.value,
+            month: month.value
+        }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error('Unable to start planning this month');
+            }
+
+            monthIsPlanned.value = true;
+        }).catch(error => {
+            logger.error('failed to start planning the month', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to start planning this month' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
     function setScheduleAdjustment({ templateId, excluded, amount }: { templateId: string, excluded: boolean, amount?: number }): Promise<void> {
         return services.setBudgetPlanAdjustment({
             year: year.value,
@@ -476,6 +521,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
             if (data.result) {
                 planAdjustments.value.push(data.result);
+                monthIsPlanned.value = true;
             }
         }).catch(error => {
             logger.error('failed to set budget plan adjustment', error);
@@ -500,6 +546,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         planStandingExpectations,
         planStateInvalid,
         // computed states
+        planActive,
         defaultCurrency,
         scheduleLines,
         itemLines,
@@ -522,6 +569,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         convertToDefaultCurrency,
         setMonth,
         loadBudgetPlan,
+        startPlanningMonth,
         saveBudgetPlanItem,
         deleteBudgetPlanItem,
         copyPreviousMonthItems,

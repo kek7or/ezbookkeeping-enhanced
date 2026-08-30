@@ -103,6 +103,13 @@ export interface BudgetPlanGetRequest {
     readonly month: number;
 }
 
+// Starting a month is only for going back to one that was never planned: planning anything at all
+// marks the month on its own.
+export interface BudgetPlanMonthStartRequest {
+    readonly year: number;
+    readonly month: number;
+}
+
 export interface BudgetPlanItemCreateRequest {
     readonly year: number;
     readonly month: number;
@@ -196,6 +203,9 @@ export interface BudgetPlanStandingExpectationInfoResponse {
 export interface BudgetPlanInfoResponse {
     readonly year: number;
     readonly month: number;
+    // whether this month was planned, as opposed to being one the standing figures and the
+    // schedules merely reach - see the model on the server side
+    readonly planned: boolean;
     readonly items: BudgetPlanItemInfoResponse[];
     readonly adjustments: BudgetPlanAdjustmentInfoResponse[];
     readonly expectations: BudgetPlanExpectationInfoResponse[];
