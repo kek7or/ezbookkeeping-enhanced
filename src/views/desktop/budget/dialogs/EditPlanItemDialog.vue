@@ -10,10 +10,14 @@
                 </p>
                 <v-row>
                     <v-col cols="12" md="6">
-                        <v-btn-toggle class="w-100" density="comfortable" variant="outlined" divided mandatory
+                        <!-- toggle-buttons is what the rest of the app puts on a toggle that
+                             holds words: the theme sizes these buttons as squares, on the
+                             assumption that what is in one is an icon. -->
+                        <v-btn-toggle class="toggle-buttons budget-plan-type-toggle w-100"
+                                      density="comfortable" variant="outlined" color="primary" divided mandatory
                                       :disabled="submitting" v-model="type">
-                            <v-btn class="w-50" :value="TransactionType.Expense">{{ tt('Expense') }}</v-btn>
-                            <v-btn class="w-50" :value="TransactionType.Income">{{ tt('Income') }}</v-btn>
+                            <v-btn :value="TransactionType.Expense">{{ tt('Expense') }}</v-btn>
+                            <v-btn :value="TransactionType.Income">{{ tt('Income') }}</v-btn>
                         </v-btn-toggle>
                     </v-col>
                     <v-col cols="12" md="6">
@@ -92,7 +96,7 @@ import AmountInput from '@/components/desktop/AmountInput.vue';
 import TwoColumnSelect from '@/components/desktop/TwoColumnSelect.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
-import { ref, computed, useTemplateRef } from 'vue';
+import { ref, computed, watch, useTemplateRef } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -151,6 +155,23 @@ const availableCategories = computed<Record<string, unknown>[]>(() => {
 });
 
 const selectedAccountCurrency = computed<string>(() => accountsStore.allAccountsMap[accountId.value]?.currency ?? budgetPlanStore.defaultCurrency);
+
+// Switching the type drops a category that belongs to the other one. Left alone it would sit in
+// the value while the select showed nothing chosen, and save as an income item filed under an
+// expense category - which is the disagreement availableCategories exists to prevent. A category
+// that survives the switch, which is none of them today, would be left where it is.
+watch(type, () => {
+    if (!categoryId.value) {
+        return;
+    }
+
+    const stillAvailable = availableCategories.value.some(category => category['id'] === categoryId.value
+        || ((category['subCategories'] as Record<string, unknown>[] | undefined) || []).some(subCategory => subCategory['id'] === categoryId.value));
+
+    if (!stillAvailable) {
+        categoryId.value = '';
+    }
+});
 
 const isInputValid = computed<boolean>(() => !!name.value.trim() && !!categoryId.value && !!accountId.value && amount.value !== 0);
 
@@ -221,3 +242,14 @@ defineExpose({
     open
 });
 </script>
+
+<style scoped>
+/* Two halves of one row, standing level with the amount field beside it. Both sizes are
+   overridden rather than merely set, because the square the theme wants is an !important one. */
+.budget-plan-type-toggle.v-btn-toggle > .v-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    inline-size: auto !important;
+    block-size: 56px !important;
+}
+</style>
