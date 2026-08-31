@@ -96,6 +96,19 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		standingResps[i] = standing[i].ToBudgetPlanStandingExpectationInfoResponse()
 	}
 
+	wishes, err := a.budgetPlans.GetWishes(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanGetHandler] failed to get wishes for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	wishResps := make([]*models.BudgetPlanItemInfoResponse, len(wishes))
+
+	for i := 0; i < len(wishes); i++ {
+		wishResps[i] = wishes[i].ToBudgetPlanItemInfoResponse()
+	}
+
 	planned, err := a.budgetPlans.IsMonthPlanned(c, uid, planGetReq.Year, planGetReq.Month)
 
 	if err != nil {
@@ -110,6 +123,7 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		Items:        itemResps,
 		Adjustments:  adjustmentResps,
 		Expectations: expectationResps,
+		Wishes:       wishResps,
 		Standing:     standingResps,
 	}, nil
 }
@@ -159,6 +173,139 @@ func (a *BudgetPlansApi) BudgetPlanMonthStopHandler(c *core.WebContext) (any, *e
 	}
 
 	log.Infof(c, "[budget_plans.BudgetPlanMonthStopHandler] user \"uid:%d\" has stopped planning %d-%d", uid, monthStopReq.Year, monthStopReq.Month)
+
+	return true, nil
+}
+
+// BudgetPlanWishCreateHandler adds something to the current user's wishlist. It is planned for
+// nothing and counts towards nothing until it is assigned to a month.
+func (a *BudgetPlansApi) BudgetPlanWishCreateHandler(c *core.WebContext) (any, *errs.Error) {
+	var wishCreateReq models.BudgetPlanWishCreateRequest
+	err := c.ShouldBindJSON(&wishCreateReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishCreateHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	if err := a.verifyOptionalCategoryAndAccount(c, uid, wishCreateReq.CategoryId, wishCreateReq.AccountId); err != nil {
+		return nil, err
+	}
+
+	wish := &models.BudgetPlanItem{
+		Uid:        uid,
+		CategoryId: wishCreateReq.CategoryId,
+		AccountId:  wishCreateReq.AccountId,
+		Amount:     wishCreateReq.Amount,
+		Name:       wishCreateReq.Name,
+		Comment:    wishCreateReq.Comment,
+	}
+
+	if err := a.budgetPlans.CreateWish(c, wish); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishCreateHandler] failed to create wish for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishCreateHandler] user \"uid:%d\" has wished for \"id:%d\"", uid, wish.ItemId)
+
+	return wish.ToBudgetPlanItemInfoResponse(), nil
+}
+
+// BudgetPlanWishModifyHandler saves a change to something on the current user's wishlist
+func (a *BudgetPlansApi) BudgetPlanWishModifyHandler(c *core.WebContext) (any, *errs.Error) {
+	var wishModifyReq models.BudgetPlanWishModifyRequest
+	err := c.ShouldBindJSON(&wishModifyReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishModifyHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	if err := a.verifyOptionalCategoryAndAccount(c, uid, wishModifyReq.CategoryId, wishModifyReq.AccountId); err != nil {
+		return nil, err
+	}
+
+	wish, err := a.budgetPlans.GetItemByItemId(c, uid, wishModifyReq.Id)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishModifyHandler] failed to get wish \"id:%d\" for user \"uid:%d\", because %s", wishModifyReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	if !wish.Wished {
+		return nil, errs.ErrBudgetPlanWishNotFound
+	}
+
+	newWish := &models.BudgetPlanItem{
+		ItemId:     wishModifyReq.Id,
+		Uid:        uid,
+		CategoryId: wishModifyReq.CategoryId,
+		AccountId:  wishModifyReq.AccountId,
+		Amount:     wishModifyReq.Amount,
+		Name:       wishModifyReq.Name,
+		Comment:    wishModifyReq.Comment,
+	}
+
+	if err := a.budgetPlans.ModifyWish(c, newWish); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishModifyHandler] failed to modify wish \"id:%d\" for user \"uid:%d\", because %s", wishModifyReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishModifyHandler] user \"uid:%d\" has modified wish \"id:%d\"", uid, wishModifyReq.Id)
+
+	newWish.Wished = true
+
+	return newWish.ToBudgetPlanItemInfoResponse(), nil
+}
+
+// BudgetPlanWishAssignHandler puts one wish into one month's budget for the current user, which is
+// the act of deciding to buy the thing. It stops being a wish and is planned for that month.
+func (a *BudgetPlansApi) BudgetPlanWishAssignHandler(c *core.WebContext) (any, *errs.Error) {
+	var assignReq models.BudgetPlanWishAssignRequest
+	err := c.ShouldBindJSON(&assignReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishAssignHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	err = a.budgetPlans.AssignWish(c, uid, assignReq.Id, assignReq.Year, assignReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishAssignHandler] failed to assign wish \"id:%d\" for user \"uid:%d\", because %s", assignReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishAssignHandler] user \"uid:%d\" has assigned wish \"id:%d\" to %d-%d", uid, assignReq.Id, assignReq.Year, assignReq.Month)
+
+	return true, nil
+}
+
+// BudgetPlanWishUnassignHandler takes something back off a month and returns it to the current
+// user's wishlist. The month it leaves stays planned.
+func (a *BudgetPlansApi) BudgetPlanWishUnassignHandler(c *core.WebContext) (any, *errs.Error) {
+	var unassignReq models.BudgetPlanWishUnassignRequest
+	err := c.ShouldBindJSON(&unassignReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishUnassignHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	err = a.budgetPlans.UnassignWish(c, uid, unassignReq.Id)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishUnassignHandler] failed to unassign item \"id:%d\" for user \"uid:%d\", because %s", unassignReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishUnassignHandler] user \"uid:%d\" has returned item \"id:%d\" to the wishlist", uid, unassignReq.Id)
 
 	return true, nil
 }
@@ -442,6 +589,32 @@ func (a *BudgetPlansApi) verifyCategoryAndAccount(c *core.WebContext, uid int64,
 
 	if account == nil {
 		return errs.ErrAccountNotFound
+	}
+
+	return nil
+}
+
+// verifyOptionalCategoryAndAccount is verifyCategoryAndAccount for a wish, where naming neither is
+// allowed. What is named still has to be the user's own; what is not named is not checked, there
+// being nothing to check.
+func (a *BudgetPlansApi) verifyOptionalCategoryAndAccount(c *core.WebContext, uid int64, categoryId int64, accountId int64) *errs.Error {
+	if categoryId > 0 {
+		if err := a.verifyCategory(c, uid, categoryId); err != nil {
+			return err
+		}
+	}
+
+	if accountId > 0 {
+		account, err := a.accounts.GetAccountByAccountId(c, uid, accountId)
+
+		if err != nil {
+			log.Errorf(c, "[budget_plans.verifyOptionalCategoryAndAccount] failed to get account \"id:%d\" for user \"uid:%d\", because %s", accountId, uid, err.Error())
+			return errs.Or(err, errs.ErrOperationFailed)
+		}
+
+		if account == nil {
+			return errs.ErrAccountNotFound
+		}
 	}
 
 	return nil

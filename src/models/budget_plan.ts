@@ -1,11 +1,22 @@
+import { TransactionType } from '@/core/transaction.ts';
+
 // A budget plan is a month, and only what cannot be derived is stored - see the model on the server
 // side. The classes here are the two things that are: what was planned by hand, and how a month
 // differs from a schedule.
 
+function emptyIfZero(id: string): string {
+    return !id || id === '0' ? '' : id;
+}
+
+// One class covers both a planned item and a wish, because they are the same row on the server: a
+// wish is one with no month chosen yet. See the model there for why assigning a wish to a month is
+// a change to that row rather than a new one.
 export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public id: string;
     public year: number;
     public month: number;
+    // wished says this is on the wishlist and in no month's budget
+    public wished: boolean;
     public type: number;
     public categoryId: string;
     public accountId: string;
@@ -14,10 +25,11 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public comment: string;
     public displayOrder: number;
 
-    private constructor(id: string, year: number, month: number, type: number, categoryId: string, accountId: string, amount: number, name: string, comment: string, displayOrder: number) {
+    private constructor(id: string, year: number, month: number, wished: boolean, type: number, categoryId: string, accountId: string, amount: number, name: string, comment: string, displayOrder: number) {
         this.id = id;
         this.year = year;
         this.month = month;
+        this.wished = wished;
         this.type = type;
         this.categoryId = categoryId;
         this.accountId = accountId;
@@ -52,12 +64,40 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
         };
     }
 
+    // A wish asks for less than a planned item does, so the two requests are not the same shape:
+    // there is no month, no type - a wishlist is things somebody wants to buy - and the category and
+    // the account may be left unnamed.
+    public toWishCreateRequest(): BudgetPlanWishCreateRequest {
+        return {
+            categoryId: this.categoryId || undefined,
+            accountId: this.accountId || undefined,
+            amount: this.amount,
+            name: this.name,
+            comment: this.comment
+        };
+    }
+
+    public toWishModifyRequest(): BudgetPlanWishModifyRequest {
+        return {
+            id: this.id,
+            categoryId: this.categoryId || undefined,
+            accountId: this.accountId || undefined,
+            amount: this.amount,
+            name: this.name,
+            comment: this.comment
+        };
+    }
+
     public clone(): BudgetPlanItem {
-        return new BudgetPlanItem(this.id, this.year, this.month, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.displayOrder);
+        return new BudgetPlanItem(this.id, this.year, this.month, this.wished, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.displayOrder);
     }
 
     public static of(response: BudgetPlanItemInfoResponse): BudgetPlanItem {
-        return new BudgetPlanItem(response.id, response.year, response.month, response.type, response.categoryId, response.accountId, response.amount, response.name, response.comment, response.displayOrder);
+        // A wish may name no category and no account, which the server sends as the zero id - and
+        // "0" is a perfectly true string, so left alone it would read as a category that is merely
+        // missing rather than one that was never named. Emptied here, once, rather than guarded
+        // against everywhere it is read.
+        return new BudgetPlanItem(response.id, response.year, response.month, !!response.wished, response.type, emptyIfZero(response.categoryId), emptyIfZero(response.accountId), response.amount, response.name, response.comment, response.displayOrder);
     }
 
     public static ofMulti(responses: BudgetPlanItemInfoResponse[]): BudgetPlanItem[] {
@@ -65,7 +105,13 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     }
 
     public static createNew(year: number, month: number, type: number): BudgetPlanItem {
-        return new BudgetPlanItem('', year, month, type, '', '', 0, '', '', 0);
+        return new BudgetPlanItem('', year, month, false, type, '', '', 0, '', '', 0);
+    }
+
+    // A new wish belongs to no month and is always an expense, both of which are decided here
+    // rather than asked for
+    public static createNewWish(): BudgetPlanItem {
+        return new BudgetPlanItem('', 0, 0, true, TransactionType.Expense, '', '', 0, '', '', 0);
     }
 }
 
@@ -138,6 +184,36 @@ export interface BudgetPlanItemModifyRequest {
     readonly comment: string;
 }
 
+export interface BudgetPlanWishCreateRequest {
+    // both are optional: a wish is written down before it is thought through
+    readonly categoryId?: string;
+    readonly accountId?: string;
+    readonly amount: number;
+    readonly name: string;
+    readonly comment: string;
+}
+
+export interface BudgetPlanWishModifyRequest {
+    readonly id: string;
+    readonly categoryId?: string;
+    readonly accountId?: string;
+    readonly amount: number;
+    readonly name: string;
+    readonly comment: string;
+}
+
+// Assigning is the act of deciding to buy the thing: it stops being a wish and is planned for the
+// month it is assigned to.
+export interface BudgetPlanWishAssignRequest {
+    readonly id: string;
+    readonly year: number;
+    readonly month: number;
+}
+
+export interface BudgetPlanWishUnassignRequest {
+    readonly id: string;
+}
+
 export interface BudgetPlanItemDeleteRequest {
     readonly id: string;
 }
@@ -175,6 +251,7 @@ export interface BudgetPlanItemInfoResponse {
     readonly id: string;
     readonly year: number;
     readonly month: number;
+    readonly wished: boolean;
     readonly type: number;
     readonly categoryId: string;
     readonly accountId: string;
@@ -217,4 +294,7 @@ export interface BudgetPlanInfoResponse {
     readonly adjustments: BudgetPlanAdjustmentInfoResponse[];
     readonly expectations: BudgetPlanExpectationInfoResponse[];
     readonly standing: BudgetPlanStandingExpectationInfoResponse[];
+    // the wishlist belongs to no month and is sent with every one, because a wish is tried against
+    // whichever month is being looked at
+    readonly wishes: BudgetPlanItemInfoResponse[];
 }

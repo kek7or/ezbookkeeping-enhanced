@@ -14,4 +14,6 @@ var (
 	ErrBudgetPlanHasTooManyItems          = NewNormalError(NormalSubcategoryBudgetPlan, 7, http.StatusBadRequest, "this month already has too many planned items")
 	ErrBudgetPlanExpectationAmountInvalid = NewNormalError(NormalSubcategoryBudgetPlan, 8, http.StatusBadRequest, "a category expectation cannot be negative")
 	ErrBudgetPlanHasTooManyExpectations   = NewNormalError(NormalSubcategoryBudgetPlan, 9, http.StatusBadRequest, "this month already has too many category expectations")
+	ErrBudgetPlanWishNotFound             = NewNormalError(NormalSubcategoryBudgetPlan, 10, http.StatusBadRequest, "wish not found")
+	ErrBudgetPlanHasTooManyWishes         = NewNormalError(NormalSubcategoryBudgetPlan, 11, http.StatusBadRequest, "the wishlist already has too many things on it")
 )

@@ -285,6 +285,12 @@
                                             <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                                    :prepend-icon="mdiPencilOutline" :disabled="loading"
                                                    @click="editItem(line)">{{ tt('Edit') }}</v-btn>
+                                            <!-- for a purchase decided on and then thought better
+                                                 of. It keeps the thing and gives up only the
+                                                 month, which is why it is not a deletion. -->
+                                            <v-btn class="px-2" color="default" density="comfortable" variant="text"
+                                                   :prepend-icon="mdiHeartOutline" :disabled="loading"
+                                                   @click="returnToWishlist(line)">{{ tt('Back to Wishlist') }}</v-btn>
                                             <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                                    :prepend-icon="mdiDeleteOutline" :disabled="loading"
                                                    @click="removeItem(line)">{{ tt('Delete') }}</v-btn>
@@ -464,6 +470,126 @@
                 </v-table>
             </v-card>
         </v-col>
+
+        <!-- The wishlist is not part of the month and sits below everything that is. A wish counts
+             towards nothing until it is put into a month; ticking one only asks what it would do,
+             which is the question the whole card exists to answer. -->
+        <v-col cols="12">
+            <v-card>
+                <template #title>
+                    <div class="title-and-toolbar d-flex align-center">
+                        <span>{{ tt('Wishlist') }}</span>
+                        <v-spacer/>
+                        <v-btn color="primary" variant="tonal" :prepend-icon="mdiPlus"
+                               :disabled="loading" @click="addWish">{{ tt('Add to Wishlist') }}</v-btn>
+                    </div>
+                </template>
+                <v-card-text class="pt-0">
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('Things you want but have not decided on. Tick one to see what it would do to this month, and put it in the month once you have decided.') }}</span>
+                </v-card-text>
+
+                <v-table class="budget-wish-table table-striped" :hover="!loading">
+                    <thead>
+                    <tr>
+                        <th class="budget-wish-tick-column"></th>
+                        <th>{{ tt('Name') }}</th>
+                        <th>{{ tt('Category') }}</th>
+                        <th class="text-end">{{ tt('Amount') }}</th>
+                        <th class="text-end budget-plan-operation-column">{{ tt('Operation') }}</th>
+                    </tr>
+                    </thead>
+
+                    <tbody v-if="loading">
+                    <tr :key="wishIdx" v-for="wishIdx in [ 1, 2 ]">
+                        <td class="px-0" colspan="5">
+                            <v-skeleton-loader type="text" :loading="true"></v-skeleton-loader>
+                        </td>
+                    </tr>
+                    </tbody>
+
+                    <tbody v-else-if="!wishes.length">
+                    <tr>
+                        <td colspan="5" class="py-6 text-center">
+                            <v-icon class="mb-2" size="32" :icon="mdiHeartOutline" color="secondary"/>
+                            <div class="text-body-1">{{ tt('Nothing on the wishlist yet') }}</div>
+                            <div class="text-body-2 text-medium-emphasis mb-3">{{ tt('A sofa, a bike, a laptop - anything you are weighing up. Nothing here costs the month a penny until you say so.') }}</div>
+                            <v-btn color="primary" variant="tonal" :prepend-icon="mdiPlus" @click="addWish">{{ tt('Add to Wishlist') }}</v-btn>
+                        </td>
+                    </tr>
+                    </tbody>
+
+                    <tbody v-else>
+                    <tr :key="wish.id" v-for="wish in wishes"
+                        @mouseenter="hoveredWishId = wish.id" @mouseleave="hoveredWishId = ''">
+                        <td class="budget-wish-tick-column">
+                            <v-checkbox density="compact" color="primary" :hide-details="true"
+                                        :disabled="loading"
+                                        :model-value="isWishPreviewed(wish.id)"
+                                        @update:model-value="toggleWish(wish)"/>
+                        </td>
+                        <td>
+                            <span class="text-body-1">{{ wish.name }}</span>
+                            <div class="text-caption text-medium-emphasis" v-if="wish.comment">{{ wish.comment }}</div>
+                        </td>
+                        <td>
+                            <span class="text-body-2" v-if="wish.categoryId">{{ categoryName(wish.categoryId) }}</span>
+                            <span class="text-body-2 text-disabled" v-else>{{ tt('Uncategorised') }}</span>
+                        </td>
+                        <td class="text-end">{{ displayWishAmount(wish) }}</td>
+                        <!-- The buttons are always laid out and only shown on hover, so the width
+                             they need is held whether or not they can be seen. Adding them to the
+                             row on hover makes the table re-measure every column, which walks the
+                             amounts sideways under the pointer. -->
+                        <td class="text-end budget-plan-operation-column">
+                            <div class="d-flex align-center justify-end">
+                                <div class="budget-wish-operation-buttons"
+                                     :class="{ 'budget-wish-operation-buttons-shown': hoveredWishId === wish.id && !loading }">
+                                    <v-btn class="px-2" density="comfortable" color="primary" variant="text"
+                                           :prepend-icon="mdiCalendarPlus" :disabled="loading || assigningWishId === wish.id"
+                                           :loading="assigningWishId === wish.id"
+                                           @click="assignWish(wish)">{{ tt('Put in This Month') }}</v-btn>
+                                    <v-btn class="px-2" density="comfortable" color="default" variant="text"
+                                           :prepend-icon="mdiPencilOutline" :disabled="loading"
+                                           @click="editWish(wish)">{{ tt('Edit') }}</v-btn>
+                                    <v-btn class="px-2" density="comfortable" color="default" variant="text"
+                                           :prepend-icon="mdiDeleteOutline" :disabled="loading"
+                                           @click="removeWish(wish)">{{ tt('Delete') }}</v-btn>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    </tbody>
+
+                    <!-- Nobody buys one thing. What each would do on its own is a question with no
+                         use - it is the price again - so the wishlist answers about the things
+                         picked together, which is how they would actually be bought.
+                         What they cost the month is not always what they are priced at: a category
+                         with a figure set against it has already made room for what goes under it,
+                         so anything picked that fits inside that room costs nothing further. The
+                         difference between the two is said outright rather than left to be noticed. -->
+                    <tfoot v-if="!loading && wishes.length">
+                    <tr class="budget-wish-summary-row">
+                        <td class="budget-wish-tick-column"></td>
+                        <td colspan="2">
+                            <span class="text-body-2" v-if="!pickedWishCount">{{ tt('Tick what you are thinking of buying') }}</span>
+                            <span class="text-body-2" v-else>{{ tt('format.misc.budgetWishesPicked', { count: pickedWishCount }) }}</span>
+                            <div class="text-caption text-medium-emphasis" v-if="pickedWishBudgeted">
+                                {{ tt('format.misc.budgetWishesAlreadyBudgeted', { amount: pickedWishBudgeted }) }}
+                            </div>
+                        </td>
+                        <td class="text-end">
+                            <span class="text-body-1 font-weight-medium" v-if="pickedWishCount">{{ displayAmount(pickedWishTotal) }}</span>
+                        </td>
+                        <td class="text-end budget-plan-operation-column">
+                            <div class="text-caption text-medium-emphasis">{{ tt('You Would Still Save') }}</div>
+                            <div class="text-body-1 font-weight-medium text-no-wrap"
+                                 :class="{ 'text-expense': monthNet.isNegative() }">{{ displayAmount(monthNet) }}</div>
+                        </td>
+                    </tr>
+                    </tfoot>
+                </v-table>
+            </v-card>
+        </v-col>
     </v-row>
 
     <edit-plan-item-dialog ref="editPlanItemDialog" />
@@ -491,7 +617,7 @@ import type { BigDecimal } from '@/core/numeral.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import { type PlannedLine, PlannedLineSource, hasCategoryBudgetActivity } from '@/lib/budgetPlan.ts';
-import { BIG_DECIMAL_ZERO } from '@/lib/numeral.ts';
+import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { parseDateTimeFromUnixTime, getYearMonthFirstUnixTime } from '@/lib/datetime.ts';
 
 import {
@@ -508,6 +634,7 @@ import {
     mdiCalendarBlankOutline,
     mdiCalendarPlus,
     mdiCalendarRemoveOutline,
+    mdiHeartOutline,
     mdiClockTimeNineOutline,
     mdiPencilOutline,
     mdiDeleteOutline,
@@ -627,10 +754,28 @@ const editingCategoryId = ref<string>('');
 const savingCategoryId = ref<string>('');
 const editingExpectation = ref<number>(0);
 const showAllCategories = ref<boolean>(false);
+const hoveredWishId = ref<string>('');
+const assigningWishId = ref<string>('');
 
 // Whether this month has a plan to show at all. See the store for why a past month that was never
 // planned shows nothing rather than a plan assembled out of the standing figures and the schedules.
 const planActive = computed<boolean>(() => budgetPlanStore.planActive);
+
+const wishes = computed<BudgetPlanItem[]>(() => budgetPlanStore.planWishes);
+const pickedWishCount = computed<number>(() => budgetPlanStore.pickedWishCount);
+const pickedWishTotal = computed<BigDecimal>(() => budgetPlanStore.pickedWishTotal);
+
+// The part of what is picked that the month had already made room for. It is only said when there
+// is some, because "nothing of this is already budgeted for" is not worth a line.
+const pickedWishBudgeted = computed<string>(() => {
+    const budgeted = pickedWishTotal.value.subtract(budgetPlanStore.pickedWishCost);
+
+    if (!budgeted.isPositive()) {
+        return '';
+    }
+
+    return displayAmount(budgeted);
+});
 
 const allLines = computed<PlannedLine[]>(() => budgetPlanStore.allLines);
 const plannedTotals = computed(() => budgetPlanStore.plannedTotals);
@@ -1063,6 +1208,91 @@ function load(force: boolean): void {
     });
 }
 
+// Sending a planned item back to the wishlist keeps the thing and gives up only the month. The
+// month it leaves stays planned - one item taken out of a month is not a statement that the month
+// was never planned.
+function returnToWishlist(line: PlannedLine): void {
+    const item = budgetPlanStore.planItems.find(existing => existing.id === line.id);
+
+    if (!item) {
+        return;
+    }
+
+    budgetPlanStore.unassignWishFromMonth({ item: item }).then(() => {
+        snackbar.value?.showMessage('You have returned this to the wishlist');
+    }).catch(error => {
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+function isWishPreviewed(wishId: string): boolean {
+    return budgetPlanStore.isWishPreviewed(wishId);
+}
+
+function toggleWish(wish: BudgetPlanItem): void {
+    budgetPlanStore.toggleWishPreview(wish.id);
+}
+
+// A wish is read in the currency of the account it names, and in the user's own where it names
+// none - the same rule the line built from it follows.
+function displayWishAmount(wish: BudgetPlanItem): string {
+    const currency = accountsStore.allAccountsMap[wish.accountId]?.currency ?? defaultCurrency.value;
+    return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(wish.amount).truncate(), currency);
+}
+
+function categoryName(categoryId: string): string {
+    return transactionCategoriesStore.allTransactionCategoriesMap[categoryId]?.name ?? tt('Unknown Category');
+}
+
+function addWish(): void {
+    editPlanItemDialog.value?.open(BudgetPlanItem.createNewWish()).then(() => {
+        snackbar.value?.showMessage('You have added this to the wishlist');
+    }).catch(() => {
+        // dismissed
+    });
+}
+
+function editWish(wish: BudgetPlanItem): void {
+    editPlanItemDialog.value?.open(wish.clone()).then(() => {
+        snackbar.value?.showMessage('You have saved this wish');
+    }).catch(() => {
+        // dismissed
+    });
+}
+
+// Putting a wish in the month is the decision to buy it: it leaves the wishlist and is planned for
+// the month, which is why the whole plan is read back afterwards.
+function assignWish(wish: BudgetPlanItem): void {
+    assigningWishId.value = wish.id;
+
+    budgetPlanStore.assignWishToMonth({ wish: wish }).then(() => {
+        assigningWishId.value = '';
+        snackbar.value?.showMessage('You have put this into the month');
+    }).catch(error => {
+        assigningWishId.value = '';
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
+}
+
+function removeWish(wish: BudgetPlanItem): void {
+    confirmDialog.value?.open('Are you sure you want to remove this from the wishlist?').then(() => {
+        budgetPlanStore.deleteBudgetPlanWish({ wish: wish }).then(() => {
+            snackbar.value?.showMessage('You have removed this from the wishlist');
+        }).catch(error => {
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
+    }).catch(() => {
+        // dismissed
+    });
+}
+
 function reload(): void {
     load(true);
 }
@@ -1203,6 +1433,37 @@ onMounted(() => {
 </script>
 
 <style>
+.budget-wish-table .budget-plan-operation-column {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.budget-wish-table .budget-wish-operation-buttons {
+    visibility: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.budget-wish-table .budget-wish-operation-buttons-shown {
+    visibility: visible;
+}
+
+.budget-wish-table .budget-wish-summary-row > td {
+    border-top: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+    padding-top: 12px;
+    padding-bottom: 12px;
+}
+
+.budget-wish-tick-column {
+    width: 48px;
+    padding-inline-end: 0 !important;
+}
+
+.budget-wish-table :deep(.v-selection-control) {
+    justify-content: center;
+}
+
 .budget-plan-month {
     min-width: 130px;
     text-align: center;

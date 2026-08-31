@@ -25,6 +25,7 @@ import {
     PlannedLineSource,
     buildScheduleLines,
     buildItemLines,
+    buildWishLines,
     sumPlannedLines,
     sumPlannedLinesByCategory,
     getPlannedTypesByCategory,
@@ -55,6 +56,11 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // whether this month was planned, as opposed to being one the standing figures and the
     // schedules merely reach - the server's answer, see the model there
     const monthIsPlanned = ref<boolean>(false);
+    const planWishes = ref<BudgetPlanItem[]>([]);
+    // Which wishes are being tried against the month. This is view state and is deliberately not
+    // stored anywhere: a tick is a question - what would this do to the month - and a question
+    // answered is not a decision. Deciding is assigning the wish to the month, which is a write.
+    const previewedWishIds = ref<string[]>([]);
     const actualItems = ref<TransactionStatisticResponseItem[]>([]);
     const planStateInvalid = ref<boolean>(true);
 
@@ -80,7 +86,29 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
     const itemLines = computed<PlannedLine[]>(() => buildItemLines(planItems.value, getAccountCurrency));
 
-    const allLines = computed<PlannedLine[]>(() => scheduleLines.value.concat(itemLines.value));
+    // Every wish, as the line it would be if it were planned. Nothing counts these until they are
+    // ticked; they are built for all of them because each row has to show what it would do.
+    const wishLines = computed<PlannedLine[]>(() => buildWishLines(planWishes.value, getAccountCurrency, defaultCurrency.value));
+
+    const wishLinesById = computed<Record<string, PlannedLine>>(() => {
+        const map: Record<string, PlannedLine> = {};
+
+        for (const line of wishLines.value) {
+            map[line.id] = line;
+        }
+
+        return map;
+    });
+
+    const previewedWishLines = computed<PlannedLine[]>(() => previewedWishIds.value
+        .map(wishId => wishLinesById.value[wishId])
+        .filter((line): line is PlannedLine => !!line));
+
+    // A ticked wish joins the plan here, at the one place everything else is derived from, so every
+    // figure on the page answers with it included - the hero, the bar, the plan marker, the category
+    // tree. Nothing downstream needs to know a wish is among them, which is what makes the answer
+    // trustworthy: it is the same arithmetic the month gets.
+    const allLines = computed<PlannedLine[]>(() => scheduleLines.value.concat(itemLines.value).concat(previewedWishLines.value));
 
     const incomeLines = computed<PlannedLine[]>(() => allLines.value.filter(line => line.type === TransactionType.Income));
     const expenseLines = computed<PlannedLine[]>(() => allLines.value.filter(line => line.type !== TransactionType.Income));
@@ -250,6 +278,65 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // the whole reason for keeping a plan.
     const plannedNet = computed<BigDecimal>(() => incomeBasis.value.subtract(plannedTotals.value.expense));
 
+    // netForLines is what the month keeps, given a set of planned lines. It is the same chain the
+    // page reads - the category tree, its totals, the income the month actually has - pulled out so
+    // that it can be asked about a month that does not exist: this one, with one more thing in it.
+    //
+    // Subtracting the wish from monthNet would be quicker and wrong. An expectation covers what is
+    // planned under its category rather than adding to it, so a 400 sofa under a category already
+    // expected to come to 600 costs the month nothing it was not already costing. Only running the
+    // tree again gets that right, and getting it wrong would flatter exactly the categories somebody
+    // took the trouble to set a figure on.
+    function netForLines(lines: PlannedLine[]): BigDecimal {
+        const byCategory = sumPlannedLinesByCategory(lines, convertToDefaultCurrency);
+        const tree = buildCategoryBudgetTree(primaryCategories.value, byCategory, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(lines), standingCategoryIds.value);
+        const totals = sumCategoryBudgets(tree);
+        const income = actualTotals.value.income.greaterThan(totals.income) ? actualTotals.value.income : totals.income;
+
+        return income.subtract(actualTotals.value.expense.add(sumRemainingToSpend(tree)));
+    }
+
+    // The month as it would be with nothing picked. monthNet already answers with the picked wishes
+    // in it, so the two together are what picking them costs.
+    const netWithoutPickedWishes = computed<BigDecimal>(() => netForLines(scheduleLines.value.concat(itemLines.value)));
+
+    // What the picked things are priced at, added up. This is the figure on the tags.
+    const pickedWishTotal = computed<BigDecimal>(() => {
+        let total = BIG_DECIMAL_ZERO;
+
+        for (const line of previewedWishLines.value) {
+            const converted = convertToDefaultCurrency(line.amount, line.currency);
+
+            if (converted) {
+                total = total.add(converted);
+            }
+        }
+
+        return total;
+    });
+
+    // What buying them actually costs the month, which is not always what they are priced at. A
+    // category with a figure set against it has already made room for what is filed under it, so
+    // anything picked that fits inside that room costs the month nothing further. The difference
+    // between this and pickedWishTotal is the part already budgeted for, and it is worth saying.
+    const pickedWishCost = computed<BigDecimal>(() => netWithoutPickedWishes.value.subtract(monthNet.value));
+
+    const pickedWishCount = computed<number>(() => previewedWishLines.value.length);
+
+    function isWishPreviewed(wishId: string): boolean {
+        return previewedWishIds.value.includes(wishId);
+    }
+
+    function toggleWishPreview(wishId: string): void {
+        const index = previewedWishIds.value.indexOf(wishId);
+
+        if (index >= 0) {
+            previewedWishIds.value.splice(index, 1);
+        } else {
+            previewedWishIds.value.push(wishId);
+        }
+    }
+
     function getAccountCurrency(accountId: string): string | undefined {
         return accountsStore.allAccountsMap[accountId]?.currency;
     }
@@ -266,6 +353,9 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         year.value = newYear;
         month.value = newMonth;
         planStateInvalid.value = true;
+        // a wish tried against August is not being tried against September - the question was about
+        // the month, and the month has changed
+        previewedWishIds.value = [];
     }
 
     function loadBudgetPlan({ force }: { force: boolean }): Promise<void> {
@@ -301,6 +391,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             }
 
             planItems.value = BudgetPlanItem.ofMulti(planData.result.items || []);
+            planWishes.value = BudgetPlanItem.ofMulti(planData.result.wishes || []);
             planAdjustments.value = planData.result.adjustments || [];
             planExpectations.value = planData.result.expectations || [];
             planStandingExpectations.value = planData.result.standing || [];
@@ -475,6 +566,120 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
+    function saveBudgetPlanWish({ wish }: { wish: BudgetPlanItem }): Promise<BudgetPlanItem> {
+        const isNew = !wish.id;
+        const request = isNew ? services.addBudgetPlanWish(wish.toWishCreateRequest()) : services.modifyBudgetPlanWish(wish.toWishModifyRequest());
+
+        return request.then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error(isNew ? 'Unable to add this wish' : 'Unable to save this wish');
+            }
+
+            const saved = BudgetPlanItem.of(data.result);
+
+            if (isNew) {
+                planWishes.value.push(saved);
+            } else {
+                const index = planWishes.value.findIndex(existing => existing.id === saved.id);
+
+                if (index >= 0) {
+                    planWishes.value.splice(index, 1, saved);
+                }
+            }
+
+            return saved;
+        }).catch(error => {
+            logger.error('failed to save budget plan wish', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: isNew ? 'Unable to add this wish' : 'Unable to save this wish' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
+    function deleteBudgetPlanWish({ wish }: { wish: BudgetPlanItem }): Promise<void> {
+        return services.deleteBudgetPlanItem({ id: wish.id }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error('Unable to remove this wish');
+            }
+
+            planWishes.value = planWishes.value.filter(existing => existing.id !== wish.id);
+            previewedWishIds.value = previewedWishIds.value.filter(wishId => wishId !== wish.id);
+        }).catch(error => {
+            logger.error('failed to delete budget plan wish', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to remove this wish' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
+    // Assigning a wish to the month is the decision to buy it, and the whole plan is reloaded after
+    // it rather than moved about here: the row has changed what it is, the month it lands in has
+    // been planned by its landing there, and reading the month back is cheaper to be sure of than
+    // reproducing both of those by hand.
+    function assignWishToMonth({ wish }: { wish: BudgetPlanItem }): Promise<void> {
+        return services.assignBudgetPlanWish({
+            id: wish.id,
+            year: year.value,
+            month: month.value
+        }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error('Unable to put this into the month');
+            }
+
+            previewedWishIds.value = previewedWishIds.value.filter(wishId => wishId !== wish.id);
+
+            return loadBudgetPlan({ force: false });
+        }).catch(error => {
+            logger.error('failed to assign budget plan wish', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to put this into the month' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
+    function unassignWishFromMonth({ item }: { item: BudgetPlanItem }): Promise<void> {
+        return services.unassignBudgetPlanWish({ id: item.id }).then(response => {
+            const data = response.data;
+
+            if (!data || !data.success || !data.result) {
+                throw new Error('Unable to return this to the wishlist');
+            }
+
+            return loadBudgetPlan({ force: false });
+        }).catch(error => {
+            logger.error('failed to unassign budget plan wish', error);
+
+            if (error.response && error.response.data && error.response.data.errorMessage) {
+                return Promise.reject({ error: error.response.data });
+            } else if (!error.processed) {
+                return Promise.reject({ message: 'Unable to return this to the wishlist' });
+            }
+
+            return Promise.reject(error);
+        });
+    }
+
     // Starting a month plans it without planning anything in it, which is the only way into a past
     // month that was never planned. Everything else here starts the month on its own by planning
     // something, so this is not on the ordinary path.
@@ -572,6 +777,8 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         planAdjustments,
         planExpectations,
         planStandingExpectations,
+        planWishes,
+        previewedWishIds,
         planStateInvalid,
         // computed states
         planActive,
@@ -593,7 +800,13 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         plannedNet,
         primaryCategories,
         categoryBudgetTree,
+        wishLines,
+        pickedWishCount,
+        pickedWishTotal,
+        pickedWishCost,
         // functions
+        isWishPreviewed,
+        toggleWishPreview,
         convertToDefaultCurrency,
         setMonth,
         loadBudgetPlan,
@@ -602,6 +815,10 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         saveBudgetPlanItem,
         deleteBudgetPlanItem,
         copyPreviousMonthItems,
+        saveBudgetPlanWish,
+        deleteBudgetPlanWish,
+        assignWishToMonth,
+        unassignWishFromMonth,
         setScheduleAdjustment,
         setCategoryExpectation,
         setStandingExpectation

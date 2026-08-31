@@ -49,22 +49,44 @@ type BudgetPlanMonth struct {
 //
 // It carries its own Name because a category is not a description: three separate things planned
 // under "Other Expense" have to be tellable apart in the list.
+//
+// The same row is also how a wish is kept - something wanted rather than something planned - because
+// the two are the same thing at different moments. A sofa on the wishlist and a sofa planned for
+// October differ in whether a month has been chosen for it, not in what it is, and assigning one to
+// a month must not lose the name it was given or the comment explaining it. So a wish is this row
+// with Wished set and no month, and assigning it clears the flag and fills the month in. Nothing is
+// copied and nothing is left behind.
 type BudgetPlanItem struct {
 	ItemId int64 `xorm:"PK"`
-	Uid    int64 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
+	Uid    int64 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) INDEX(IDX_budget_plan_item_uid_deleted_wished) NOT NULL"`
 	// Deleted is a soft delete, as everywhere else, so that a plan item removed by mistake is
 	// recoverable from the data export
-	Deleted bool `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
+	Deleted bool `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) INDEX(IDX_budget_plan_item_uid_deleted_wished) NOT NULL"`
+	// Wished says this is on the wishlist rather than in any month's budget: wanted, not planned. A
+	// wish counts towards nothing and appears in no month's total - it is there to be tried against
+	// a month and see what it would do - until it is assigned to one, which is the act of deciding
+	// to buy it and is what stops it being a wish.
+	//
+	// It carries a default because it is added to a table that already exists, and a NOT NULL column
+	// without one cannot be added to a populated table.
+	Wished bool `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_wished) NOT NULL DEFAULT 0"`
 	// Year and Month are the month this is planned for, kept as two numbers rather than a timestamp
-	// because a plan belongs to a calendar month and to no particular instant inside it
+	// because a plan belongs to a calendar month and to no particular instant inside it. Both are
+	// zero while the row is a wish, which has not been given a month yet - that being the whole
+	// difference between wanting a thing and planning for it.
 	Year  int32 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
 	Month int32 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
 	// Type is income or expense. A transfer is neither spent nor earned and has no place in a plan
-	// of what a month costs, so it is rejected rather than stored and ignored.
-	Type       TransactionType `xorm:"NOT NULL"`
-	CategoryId int64           `xorm:"NOT NULL"`
+	// of what a month costs, so it is rejected rather than stored and ignored. A wish is always an
+	// expense: a wishlist is things somebody wants to buy.
+	Type TransactionType `xorm:"NOT NULL"`
+	// CategoryId is zero on a wish that has not been filed under anything. A wish is jotted down in
+	// a hurry - the point is to get the figure written before it is forgotten - so it is allowed to
+	// name nothing, and such a wish moves the month's totals without appearing in the category tree.
+	CategoryId int64 `xorm:"NOT NULL"`
 	// AccountId is which account this is expected to move through, and is what gives the amount its
-	// currency - the same way a scheduled template takes its currency from its account
+	// currency - the same way a scheduled template takes its currency from its account. It is zero
+	// on a wish that names no account, whose amount is then read in the user's own currency.
 	AccountId       int64  `xorm:"NOT NULL"`
 	Amount          int64  `xorm:"NOT NULL"`
 	Name            string `xorm:"VARCHAR(64) NOT NULL"`
@@ -205,6 +227,44 @@ type BudgetPlanItemModifyRequest struct {
 	Comment    string          `json:"comment" binding:"max=255"`
 }
 
+// BudgetPlanWishCreateRequest represents all parameters of a request to add something to the
+// wishlist. It asks for less than planning something does: a wish is jotted down before it is
+// thought through, and demanding a category and an account for a thing somebody has only just
+// thought of is how a wishlist stops being used.
+type BudgetPlanWishCreateRequest struct {
+	// CategoryId and AccountId are optional, and zero means none was named
+	CategoryId int64  `json:"categoryId,string" binding:"omitempty,min=1"`
+	AccountId  int64  `json:"accountId,string" binding:"omitempty,min=1"`
+	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name       string `json:"name" binding:"required,notBlank,max=64"`
+	Comment    string `json:"comment" binding:"max=255"`
+}
+
+// BudgetPlanWishModifyRequest represents all parameters of a request to change something on the
+// wishlist
+type BudgetPlanWishModifyRequest struct {
+	Id         int64  `json:"id,string" binding:"required,min=1"`
+	CategoryId int64  `json:"categoryId,string" binding:"omitempty,min=1"`
+	AccountId  int64  `json:"accountId,string" binding:"omitempty,min=1"`
+	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name       string `json:"name" binding:"required,notBlank,max=64"`
+	Comment    string `json:"comment" binding:"max=255"`
+}
+
+// BudgetPlanWishAssignRequest represents all parameters of a request to put one wish into one
+// month's budget, which is the act of deciding to buy it
+type BudgetPlanWishAssignRequest struct {
+	Id    int64 `json:"id,string" binding:"required,min=1"`
+	Year  int32 `json:"year" binding:"required,min=1,max=9999"`
+	Month int32 `json:"month" binding:"required,min=1,max=12"`
+}
+
+// BudgetPlanWishUnassignRequest represents all parameters of a request to take something back off a
+// month and return it to the wishlist, for a purchase decided on and then thought better of
+type BudgetPlanWishUnassignRequest struct {
+	Id int64 `json:"id,string" binding:"required,min=1"`
+}
+
 // BudgetPlanItemDeleteRequest represents all parameters of a plan item deletion request
 type BudgetPlanItemDeleteRequest struct {
 	Id int64 `json:"id,string" binding:"required,min=1"`
@@ -253,6 +313,7 @@ type BudgetPlanItemInfoResponse struct {
 	Id           int64           `json:"id,string"`
 	Year         int32           `json:"year"`
 	Month        int32           `json:"month"`
+	Wished       bool            `json:"wished"`
 	Type         TransactionType `json:"type"`
 	CategoryId   int64           `json:"categoryId,string"`
 	AccountId    int64           `json:"accountId,string"`
@@ -300,6 +361,10 @@ type BudgetPlanInfoResponse struct {
 	Items        []*BudgetPlanItemInfoResponse        `json:"items"`
 	Adjustments  []*BudgetPlanAdjustmentInfoResponse  `json:"adjustments"`
 	Expectations []*BudgetPlanExpectationInfoResponse `json:"expectations"`
+	// Wishes belong to no month and are sent with every one, because a wish is tried against
+	// whichever month is being looked at. They are kept in a list of their own rather than mixed
+	// into Items so that nothing which totals a month can reach them by accident.
+	Wishes []*BudgetPlanItemInfoResponse `json:"wishes"`
 	// Standing is not month-specific, and is sent with every month because every month may need to
 	// fall back on it
 	Standing []*BudgetPlanStandingExpectationInfoResponse `json:"standing"`
@@ -311,6 +376,7 @@ func (i *BudgetPlanItem) ToBudgetPlanItemInfoResponse() *BudgetPlanItemInfoRespo
 		Id:           i.ItemId,
 		Year:         i.Year,
 		Month:        i.Month,
+		Wished:       i.Wished,
 		Type:         i.Type,
 		CategoryId:   i.CategoryId,
 		AccountId:    i.AccountId,

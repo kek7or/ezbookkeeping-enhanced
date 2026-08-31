@@ -198,6 +198,38 @@ export function buildItemLines(items: BudgetPlanItem[], getCurrency: (accountId:
     return lines;
 }
 
+// buildWishLines turns the wishlist into the same shape everything else on the page has, so that a
+// wish can be added to the month and totalled with the rest without anything downstream knowing it
+// was ever a wish. That is the whole point of the exercise: the figure a wish produces has to be
+// the figure it would produce if it were planned, or trying it against the month proves nothing.
+//
+// It is more forgiving than buildItemLines about what a wish names. An item with no account is
+// dropped there, having no currency to be read in; a wish with no account is read in the user's own
+// currency instead, because a wish is jotted down before it is thought through and must not vanish
+// for having been written down in a hurry.
+export function buildWishLines(wishes: BudgetPlanItem[], getCurrency: (accountId: string) => string | undefined, defaultCurrency: string): PlannedLine[] {
+    const lines: PlannedLine[] = [];
+
+    for (const wish of wishes) {
+        lines.push({
+            source: PlannedLineSource.Item,
+            id: wish.id,
+            name: wish.name,
+            type: wish.type,
+            categoryId: wish.categoryId,
+            accountId: wish.accountId,
+            currency: getCurrency(wish.accountId) ?? defaultCurrency,
+            occurrences: 1,
+            unitAmount: wish.amount,
+            amount: parseBigDecimal(wish.amount),
+            excluded: false,
+            adjusted: false
+        });
+    }
+
+    return lines;
+}
+
 // sumPlannedLines totals what the month is planned to cost, in one currency.
 //
 // Every line is converted into that currency first, unlike the schedules page which refuses to

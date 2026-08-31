@@ -82,6 +82,10 @@ import type {
     BudgetPlanItemModifyRequest,
     BudgetPlanItemDeleteRequest,
     BudgetPlanItemCopyRequest,
+    BudgetPlanWishCreateRequest,
+    BudgetPlanWishModifyRequest,
+    BudgetPlanWishAssignRequest,
+    BudgetPlanWishUnassignRequest,
     BudgetPlanAdjustmentSetRequest,
     BudgetPlanExpectationSetRequest,
     BudgetPlanStandingExpectationSetRequest,
@@ -997,6 +1001,18 @@ export default {
     },
     copyBudgetPlanItems: (req: BudgetPlanItemCopyRequest): ApiResponsePromise<number> => {
         return axios.post<ApiResponse<number>>('v1/budget_plans/items/copy.json', req);
+    },
+    addBudgetPlanWish: (req: BudgetPlanWishCreateRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
+        return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/wishes/add.json', req);
+    },
+    modifyBudgetPlanWish: (req: BudgetPlanWishModifyRequest): ApiResponsePromise<BudgetPlanItemInfoResponse> => {
+        return axios.post<ApiResponse<BudgetPlanItemInfoResponse>>('v1/budget_plans/wishes/modify.json', req);
+    },
+    assignBudgetPlanWish: (req: BudgetPlanWishAssignRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/assign.json', req);
+    },
+    unassignBudgetPlanWish: (req: BudgetPlanWishUnassignRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/unassign.json', req);
     },
     setBudgetPlanExpectation: (req: BudgetPlanExpectationSetRequest): ApiResponsePromise<BudgetPlanExpectationInfoResponse | null> => {
         return axios.post<ApiResponse<BudgetPlanExpectationInfoResponse | null>>('v1/budget_plans/expectations/set.json', req);

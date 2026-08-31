@@ -13,6 +13,7 @@ import {
     getScheduleOccurrencesInMonth,
     buildScheduleLines,
     buildItemLines,
+    buildWishLines,
     sumPlannedLines,
     buildCategoryBudgetTree,
     sumCategoryBudgets,
@@ -217,7 +218,7 @@ describe('sumPlannedLines', () => {
             createSchedule(ScheduledTemplateFrequencyType.Monthly.type, '28', { amount: 300000, type: TransactionType.Income, name: 'Salary', id: '1' }),
             createSchedule(ScheduledTemplateFrequencyType.Monthly.type, '1', { amount: 94930, name: 'Apartment payment', id: '2' })
         ], {}, 2026, 8, currencyOf).concat(buildItemLines([
-            BudgetPlanItem.of({ id: '10', year: 2026, month: 8, type: TransactionType.Expense, categoryId: '11', accountId: '1001', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
+            BudgetPlanItem.of({ id: '10', year: 2026, month: 8, wished: false, type: TransactionType.Expense, categoryId: '11', accountId: '1001', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
         ], currencyOf));
 
         const totals = sumPlannedLines(lines, amount => amount);
@@ -227,9 +228,30 @@ describe('sumPlannedLines', () => {
         expect(inEuros(totals.net)).toBe(300000 - 94930 - 45000);
     });
 
+    // a wish is jotted down before it is thought through, so it must survive naming no account -
+    // unlike a planned item, which is dropped for the same omission
+    test('should price a wish with no account in the user own currency', () => {
+        const lines = buildWishLines([
+            BudgetPlanItem.of({ id: '20', year: 0, month: 0, wished: true, type: TransactionType.Expense, categoryId: '', accountId: '', amount: 80000, name: 'Sofa', comment: '', displayOrder: 1 })
+        ], currencyOf, 'EUR');
+
+        expect(lines.length).toBe(1);
+        expect(lines[0]?.currency).toBe('EUR');
+        expect(inEuros(lines[0]?.amount as BigDecimal)).toBe(80000);
+        expect(lines[0]?.categoryId).toBe('');
+    });
+
+    test('should read a wish in the currency of the account it does name', () => {
+        const lines = buildWishLines([
+            BudgetPlanItem.of({ id: '21', year: 0, month: 0, wished: true, type: TransactionType.Expense, categoryId: '11', accountId: '1001', amount: 120000, name: 'PC', comment: '', displayOrder: 1 })
+        ], currencyOf, 'USD');
+
+        expect(lines[0]?.currency).toBe('EUR');
+    });
+
     test('should drop a line it cannot price rather than counting it as nothing', () => {
         const lines = buildItemLines([
-            BudgetPlanItem.of({ id: '10', year: 2026, month: 8, type: TransactionType.Expense, categoryId: '11', accountId: '9999', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
+            BudgetPlanItem.of({ id: '10', year: 2026, month: 8, wished: false, type: TransactionType.Expense, categoryId: '11', accountId: '9999', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
         ], currencyOf);
 
         expect(lines.length).toBe(0);

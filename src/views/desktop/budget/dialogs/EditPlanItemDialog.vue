@@ -2,14 +2,16 @@
     <v-dialog width="700" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
-                <h4 class="text-h4 text-wrap">{{ isNew ? tt('Plan Something') : tt('Edit Planned Item') }}</h4>
+                <h4 class="text-h4 text-wrap">{{ dialogTitle }}</h4>
             </template>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('Something expected this month that no schedule would produce. Nothing is written to the ledger.') }}
+                    {{ wished ? tt('Something you want but have not decided on. It belongs to no month and counts towards nothing until you put it in one.') : tt('Something expected this month that no schedule would produce. Nothing is written to the ledger.') }}
                 </p>
                 <v-row>
-                    <v-col cols="12" md="6">
+                    <!-- a wishlist is things somebody wants to buy, so there is no income to
+                         choose and nothing to ask about -->
+                    <v-col cols="12" md="6" v-if="!wished">
                         <!-- toggle-buttons is what the rest of the app puts on a toggle that
                              holds words: the theme sizes these buttons as squares, on the
                              assumption that what is in one is an icon. -->
@@ -20,7 +22,7 @@
                             <v-btn :value="TransactionType.Income">{{ tt('Income') }}</v-btn>
                         </v-btn-toggle>
                     </v-col>
-                    <v-col cols="12" md="6">
+                    <v-col cols="12" :md="wished ? 12 : 6">
                         <amount-input :currency="selectedAccountCurrency"
                                       :show-currency="true"
                                       :persistent-placeholder="true"
@@ -46,7 +48,7 @@
                                            secondary-hidden-field="hidden"
                                            :disabled="submitting"
                                            :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                           :label="tt('Category')" :placeholder="tt('Category')"
+                                           :label="tt('Category')" :placeholder="wished ? tt('Optional') : tt('Category')"
                                            :items="availableCategories"
                                            v-model="categoryId">
                         </two-column-select>
@@ -61,7 +63,7 @@
                                            secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                            :disabled="submitting"
                                            :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
-                                           :label="tt('Account')" :placeholder="tt('Account')"
+                                           :label="tt('Account')" :placeholder="wished ? tt('Optional') : tt('Account')"
                                            :items="allVisibleCategorizedAccounts"
                                            v-model="accountId">
                         </two-column-select>
@@ -127,6 +129,7 @@ const submitting = ref<boolean>(false);
 const itemId = ref<string>('');
 const itemYear = ref<number>(0);
 const itemMonth = ref<number>(0);
+const wished = ref<boolean>(false);
 const type = ref<number>(TransactionType.Expense);
 const categoryId = ref<string>('');
 const accountId = ref<string>('');
@@ -138,6 +141,14 @@ let resolveFunc: ((item: BudgetPlanItem) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
 const isNew = computed<boolean>(() => !itemId.value);
+
+const dialogTitle = computed<string>(() => {
+    if (wished.value) {
+        return isNew.value ? tt('Add to Wishlist') : tt('Edit Wish');
+    }
+
+    return isNew.value ? tt('Plan Something') : tt('Edit Planned Item');
+});
 
 // The two selects take a bare list of records rather than the models the stores hold, so both are
 // widened once here instead of at every binding.
@@ -173,7 +184,15 @@ watch(type, () => {
     }
 });
 
-const isInputValid = computed<boolean>(() => !!name.value.trim() && !!categoryId.value && !!accountId.value && amount.value !== 0);
+const isInputValid = computed<boolean>(() => {
+    if (!name.value.trim() || amount.value === 0) {
+        return false;
+    }
+
+    // a planned item is compared against the ledger and has to name what the ledger names; a wish is
+    // compared against nothing yet, so it may name neither
+    return wished.value || (!!categoryId.value && !!accountId.value);
+});
 
 function open(item: BudgetPlanItem): Promise<BudgetPlanItem> {
     showState.value = true;
@@ -181,6 +200,7 @@ function open(item: BudgetPlanItem): Promise<BudgetPlanItem> {
     itemId.value = item.id;
     itemYear.value = item.year;
     itemMonth.value = item.month;
+    wished.value = item.wished;
     type.value = item.type;
     categoryId.value = item.categoryId;
     accountId.value = item.accountId;
@@ -205,6 +225,7 @@ function save(): void {
         id: itemId.value,
         year: itemYear.value,
         month: itemMonth.value,
+        wished: wished.value,
         type: type.value,
         categoryId: categoryId.value,
         accountId: accountId.value,
@@ -214,7 +235,11 @@ function save(): void {
         displayOrder: 0
     });
 
-    budgetPlanStore.saveBudgetPlanItem({ item: item }).then(saved => {
+    const saving = wished.value
+        ? budgetPlanStore.saveBudgetPlanWish({ wish: item })
+        : budgetPlanStore.saveBudgetPlanItem({ item: item });
+
+    saving.then(saved => {
         submitting.value = false;
         showState.value = false;
 

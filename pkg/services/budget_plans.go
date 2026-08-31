@@ -22,6 +22,10 @@ const maximumItemsCountOfBudgetPlanMonth = 200
 // how many categories a person keeps, and it is set well above any workable number of them.
 const maximumExpectationsCountOfBudgetPlanMonth = 500
 
+// maximumWishesCount is a ceiling on the wishlist. It is a list of things somebody is weighing up,
+// and a list too long to read through is one nothing is ever weighed against.
+const maximumWishesCount = 200
+
 // BudgetPlanService represents the service of what a month is planned to cost
 type BudgetPlanService struct {
 	ServiceUsingDB
@@ -179,9 +183,22 @@ func (s *BudgetPlanService) GetItemsByMonth(c core.Context, uid int64, year int3
 	}
 
 	var items []*models.BudgetPlanItem
-	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).OrderBy("display_order asc").Find(&items)
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=? AND year=? AND month=?", uid, false, false, year, month).OrderBy("display_order asc").Find(&items)
 
 	return items, err
+}
+
+// GetWishes returns the wishlist, which belongs to no month. A wish is tried against whichever
+// month is being looked at, so there is nothing to filter it by.
+func (s *BudgetPlanService) GetWishes(c core.Context, uid int64) ([]*models.BudgetPlanItem, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var wishes []*models.BudgetPlanItem
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=?", uid, false, true).OrderBy("display_order asc").Find(&wishes)
+
+	return wishes, err
 }
 
 // GetAdjustmentsByMonth returns every way one month differs from the schedules
@@ -283,6 +300,166 @@ func (s *BudgetPlanService) CreateItem(c core.Context, item *models.BudgetPlanIt
 	})
 }
 
+// CreateWish adds something to the wishlist. It is not planned for anything: no month, no
+// commitment, and nothing counts it until it is assigned to a month.
+func (s *BudgetPlanService) CreateWish(c core.Context, wish *models.BudgetPlanItem) error {
+	if wish.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	count, err := s.getWishCount(c, wish.Uid)
+
+	if err != nil {
+		return err
+	} else if count >= maximumWishesCount {
+		return errs.ErrBudgetPlanHasTooManyWishes
+	}
+
+	maxOrder, err := s.getMaxWishDisplayOrder(c, wish.Uid)
+
+	if err != nil {
+		return err
+	}
+
+	wish.ItemId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+	if wish.ItemId < 1 {
+		return errs.ErrSystemIsBusy
+	}
+
+	wish.Deleted = false
+	wish.Wished = true
+	wish.Year = 0
+	wish.Month = 0
+	wish.Type = models.TRANSACTION_TYPE_EXPENSE
+	wish.DisplayOrder = maxOrder + 1
+	wish.CreatedUnixTime = time.Now().Unix()
+	wish.UpdatedUnixTime = time.Now().Unix()
+
+	// a wish is wanted and not planned, so it does not start the month - there is no month for it
+	// to start
+	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		_, err := sess.Insert(wish)
+		return err
+	})
+}
+
+// ModifyWish changes something on the wishlist. Whether it is a wish is not among the things that
+// can change: that is what assigning and unassigning are for.
+func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanItem) error {
+	if wish.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	wish.UpdatedUnixTime = time.Now().Unix()
+
+	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		updatedRows, err := sess.ID(wish.ItemId).Cols("category_id", "account_id", "amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrBudgetPlanWishNotFound
+		}
+
+		return nil
+	})
+}
+
+// AssignWish puts one wish into one month's budget, which is the act of deciding to buy the thing.
+// The row stops being a wish and becomes what it always was going to be - something planned for a
+// month - keeping its name, its comment and its amount, because nothing about the thing itself has
+// changed. Only the decision has.
+//
+// The month it lands in is planned by its landing there, the same as if the item had been added to
+// that month directly.
+func (s *BudgetPlanService) AssignWish(c core.Context, uid int64, itemId int64, year int32, month int32) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	count, err := s.getItemCount(c, uid, year, month)
+
+	if err != nil {
+		return err
+	} else if count >= maximumItemsCountOfBudgetPlanMonth {
+		return errs.ErrBudgetPlanHasTooManyItems
+	}
+
+	maxOrder, err := s.getMaxDisplayOrder(c, uid, year, month)
+
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	updateModel := &models.BudgetPlanItem{
+		Wished:          false,
+		Year:            year,
+		Month:           month,
+		DisplayOrder:    maxOrder + 1,
+		UpdatedUnixTime: now,
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		if err := s.ensureMonth(sess, uid, year, month); err != nil {
+			return err
+		}
+
+		updatedRows, err := sess.ID(itemId).Cols("wished", "year", "month", "display_order", "updated_unix_time").
+			Where("uid=? AND deleted=? AND wished=?", uid, false, true).Update(updateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrBudgetPlanWishNotFound
+		}
+
+		return nil
+	})
+}
+
+// UnassignWish takes something back off a month and returns it to the wishlist, for a purchase
+// decided on and then thought better of. It keeps everything about the thing and gives up only the
+// month.
+//
+// The month it leaves stays planned. Somebody planned it, and taking one thing back out of a month
+// is not a statement that the month was never planned - the same as removing a planned item, which
+// does not unplan the month either.
+func (s *BudgetPlanService) UnassignWish(c core.Context, uid int64, itemId int64) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	maxOrder, err := s.getMaxWishDisplayOrder(c, uid)
+
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	updateModel := &models.BudgetPlanItem{
+		Wished:          true,
+		Year:            0,
+		Month:           0,
+		DisplayOrder:    maxOrder + 1,
+		UpdatedUnixTime: now,
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		updatedRows, err := sess.ID(itemId).Cols("wished", "year", "month", "display_order", "updated_unix_time").
+			Where("uid=? AND deleted=? AND wished=?", uid, false, false).Update(updateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrBudgetPlanItemNotFound
+		}
+
+		return nil
+	})
+}
+
 // ModifyItem changes what was planned. The month it belongs to is not among the things that can
 // change: moving a plan item to another month is adding it there and removing it here, and doing it
 // as a move would let it slip past the per-month limit.
@@ -294,7 +471,7 @@ func (s *BudgetPlanService) ModifyItem(c core.Context, item *models.BudgetPlanIt
 	item.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(item.Uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(item.ItemId).Cols("type", "category_id", "account_id", "amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=?", item.Uid, false).Update(item)
+		updatedRows, err := sess.ID(item.ItemId).Cols("type", "category_id", "account_id", "amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", item.Uid, false, false).Update(item)
 
 		if err != nil {
 			return err
@@ -720,6 +897,21 @@ func (s *BudgetPlanService) ensureMonth(sess *xorm.Session, uid int64, year int3
 	return err
 }
 
+func (s *BudgetPlanService) getMaxWishDisplayOrder(c core.Context, uid int64) (int32, error) {
+	wish := &models.BudgetPlanItem{}
+	has, err := s.UserDataDB(uid).NewSession(c).Cols("display_order").Where("uid=? AND deleted=? AND wished=?", uid, false, true).OrderBy("display_order desc").Limit(1).Get(wish)
+
+	if err != nil {
+		return 0, err
+	}
+
+	if has {
+		return wish.DisplayOrder, nil
+	}
+
+	return 0, nil
+}
+
 func (s *BudgetPlanService) getStandingExpectationCount(c core.Context, uid int64) (int64, error) {
 	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).Count(&models.BudgetPlanStandingExpectation{})
 }
@@ -729,12 +921,16 @@ func (s *BudgetPlanService) getExpectationCount(c core.Context, uid int64, year 
 }
 
 func (s *BudgetPlanService) getItemCount(c core.Context, uid int64, year int32, month int32) (int64, error) {
-	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).Count(&models.BudgetPlanItem{})
+	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=? AND year=? AND month=?", uid, false, false, year, month).Count(&models.BudgetPlanItem{})
+}
+
+func (s *BudgetPlanService) getWishCount(c core.Context, uid int64) (int64, error) {
+	return s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=?", uid, false, true).Count(&models.BudgetPlanItem{})
 }
 
 func (s *BudgetPlanService) getMaxDisplayOrder(c core.Context, uid int64, year int32, month int32) (int32, error) {
 	item := &models.BudgetPlanItem{}
-	has, err := s.UserDataDB(uid).NewSession(c).Cols("display_order").Where("uid=? AND deleted=? AND year=? AND month=?", uid, false, year, month).OrderBy("display_order desc").Limit(1).Get(item)
+	has, err := s.UserDataDB(uid).NewSession(c).Cols("display_order").Where("uid=? AND deleted=? AND wished=? AND year=? AND month=?", uid, false, false, year, month).OrderBy("display_order desc").Limit(1).Get(item)
 
 	if err != nil {
 		return 0, err
