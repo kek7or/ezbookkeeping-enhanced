@@ -509,6 +509,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/transaction/templates/hide.json", bindApi(api.TransactionTemplates.TemplateHideHandler, config))
 			apiV1Route.POST("/transaction/templates/move.json", bindApi(api.TransactionTemplates.TemplateMoveHandler, config))
 			apiV1Route.POST("/transaction/templates/delete.json", bindApi(api.TransactionTemplates.TemplateDeleteHandler, config))
+			apiV1Route.POST("/transaction/templates/create_transaction.json", bindApi(api.TransactionTemplates.TemplateCreateTransactionHandler, config))
 
 			// Insights Explorers
 			apiV1Route.GET("/insights/explorers/list.json", bindApi(api.InsightsExplorers.InsightsExplorerListHandler, config))

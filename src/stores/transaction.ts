@@ -1841,6 +1841,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
         setTransactionSuitableDestinationAmount,
         updateTransactionListInvalidState,
         updateTransactionReconciliationStatementInvalidState,
+        updateStoreInvalidState,
         resetTransactions,
         clearTransactions,
         initTransactionListFilter,

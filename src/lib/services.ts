@@ -184,6 +184,8 @@ import type {
     TransactionTemplateHideRequest,
     TransactionTemplateMoveRequest,
     TransactionTemplateDeleteRequest,
+    TransactionTemplateCreateTransactionRequest,
+    TransactionTemplateCreateTransactionResponse,
     TransactionTemplateInfoResponse
 } from '@/models/transaction_template.ts';
 import type {
@@ -902,6 +904,9 @@ export default {
     },
     deleteTransactionTemplate: (req: TransactionTemplateDeleteRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/transaction/templates/delete.json', req);
+    },
+    createTransactionFromTemplate: (req: TransactionTemplateCreateTransactionRequest): ApiResponsePromise<TransactionTemplateCreateTransactionResponse> => {
+        return axios.post<ApiResponse<TransactionTemplateCreateTransactionResponse>>('v1/transaction/templates/create_transaction.json', req);
     },
     getAllExplorations: (): ApiResponsePromise<InsightsExplorerInfoResponse[]> => {
         return axios.get<ApiResponse<InsightsExplorerInfoResponse[]>>('v1/insights/explorers/list.json');

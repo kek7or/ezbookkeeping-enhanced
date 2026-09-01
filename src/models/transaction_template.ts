@@ -215,6 +215,18 @@ export interface TransactionTemplateDeleteRequest {
     readonly id: string;
 }
 
+export interface TransactionTemplateCreateTransactionRequest {
+    readonly id: string;
+}
+
+export interface TransactionTemplateCreateTransactionResponse {
+    readonly id: string;
+    // time is the occurrence the schedule was due at, which is not necessarily today - a schedule
+    // due on the first and posted by hand on the third lands on the first
+    readonly time: number;
+    readonly utcOffset: number;
+}
+
 export interface TransactionTemplateInfoResponse extends TransactionInfoResponse {
     readonly templateType: number;
     readonly name: string;

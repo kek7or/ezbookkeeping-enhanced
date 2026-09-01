@@ -148,6 +148,21 @@ type TransactionTemplateDeleteRequest struct {
 	Id int64 `json:"id,string" binding:"required,min=1"`
 }
 
+// TransactionTemplateCreateTransactionRequest represents all parameters of the request to post the
+// most recently due occurrence of a scheduled transaction template by hand
+type TransactionTemplateCreateTransactionRequest struct {
+	Id int64 `json:"id,string" binding:"required,min=1"`
+}
+
+// TransactionTemplateCreateTransactionResponse names the transaction that was posted and, more to
+// the point, the date it was posted on - which is the date the schedule was due rather than today,
+// and so is the one thing the caller cannot work out for itself
+type TransactionTemplateCreateTransactionResponse struct {
+	Id        int64 `json:"id,string"`
+	Time      int64 `json:"time"`
+	UtcOffset int16 `json:"utcOffset"`
+}
+
 type TransactionTemplateInfoResponse struct {
 	*TransactionInfoResponse
 	TemplateType           TransactionTemplateType           `json:"templateType"`

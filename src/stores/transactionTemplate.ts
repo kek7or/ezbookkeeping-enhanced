@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
 
+import { useTransactionsStore } from './transaction.ts';
+
 import { type BeforeResolveFunction, itemAndIndex, entries } from '@/core/base.ts';
 
 import { TransactionType } from '@/core/transaction.ts';
@@ -8,6 +10,7 @@ import { TransactionType } from '@/core/transaction.ts';
 import {
     type TransactionTemplateInfoResponse,
     type TransactionTemplateNewDisplayOrderRequest,
+    type TransactionTemplateCreateTransactionResponse,
     TransactionTemplate
 } from '@/models/transaction_template.ts';
 
@@ -17,6 +20,8 @@ import logger from '@/lib/logger.ts';
 import services, { type ApiResponsePromise } from '@/lib/services.ts';
 
 export const useTransactionTemplatesStore = defineStore('transactionTemplates', () =>{
+    const transactionsStore = useTransactionsStore();
+
     const allTransactionTemplates = ref<Record<number, TransactionTemplate[]>>({});
     const allTransactionTemplatesMap = ref<Record<number, Record<string, TransactionTemplate>>>({});
     const transactionTemplateListStatesInvalid = ref<Record<number, boolean>>({});
@@ -432,6 +437,47 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
         });
     }
 
+    // Posting a schedule by hand is how an occurrence the cron job missed - because the server was
+    // down over the minute it was due - gets into the ledger afterwards. The server decides the date,
+    // which is the date the schedule was due rather than today, and returns it so it can be shown.
+    function createTransactionFromTemplate({ template }: { template: TransactionTemplate }): Promise<TransactionTemplateCreateTransactionResponse> {
+        return new Promise((resolve, reject) => {
+            services.createTransactionFromTemplate({
+                id: template.id
+            }).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to add transaction from this scheduled transaction' });
+                    return;
+                }
+
+                // the new transaction belongs to no list this store holds, but it has changed an
+                // account balance and every figure worked out from the ledger
+                transactionsStore.updateStoreInvalidState({
+                    transactionList: true,
+                    reconciliationStatement: true,
+                    accountList: true,
+                    overview: true,
+                    statistics: true,
+                    explorer: true
+                });
+
+                resolve(data.result);
+            }).catch(error => {
+                logger.error('failed to create transaction from template', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to add transaction from this scheduled transaction' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     return {
         // states
         allTransactionTemplates,
@@ -450,6 +496,7 @@ export const useTransactionTemplatesStore = defineStore('transactionTemplates', 
         changeTemplateDisplayOrder,
         updateTemplateDisplayOrders,
         hideTemplate,
-        deleteTemplate
+        deleteTemplate,
+        createTransactionFromTemplate
     };
 });

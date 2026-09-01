@@ -1287,6 +1287,134 @@ func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, t
 	return updatedLineItems, nil
 }
 
+// maximumScheduledTransactionLookbackDays bounds the walk back through the calendar that finds a
+// scheduled template's most recent occurrence. A yearly schedule needs a full leap year of days
+// before it comes round, and nothing recurs less often than that, so a template that matches no day
+// inside this window matches none at all.
+const maximumScheduledTransactionLookbackDays = 400
+
+// isScheduledTemplateDueAt reports whether a scheduled template recurs on the day of the given
+// time, which is the time one occurrence would carry in the template's own timezone.
+//
+// The frequency is read against that time rather than against the server's clock, so a template on
+// the last day of the month resolves against the month it is being posted for. The two differ
+// whenever the server and the template sit in timezones that are not on the same date, and whenever
+// an occurrence is posted by hand for a day that has already passed.
+//
+// A frequency type that names no day - one switched off, or an every-N-days schedule with no
+// interval to count - is due on no day at all. The caller decides whether that is worth a warning.
+func isScheduledTemplateDueAt(template *models.TransactionTemplate, frequencyValues []int64, transactionTime time.Time) bool {
+	switch template.ScheduledFrequencyType {
+	case models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_DAILY:
+		return true
+	case models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY:
+		return utils.ToSet(frequencyValues)[int64(transactionTime.Weekday())]
+	case models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY:
+		maxDayInMonth := int64(utils.GetMaxDayOfMonth(transactionTime.Year(), transactionTime.Month()))
+		daysOfMonth := make([]int64, 0, len(frequencyValues))
+
+		// A negative day counts back from the end of the month, so that "the last day" lands on the
+		// 28th of February and the 31st of March without the template having to say so.
+		for i := 0; i < len(frequencyValues); i++ {
+			dayOfMonth := frequencyValues[i]
+
+			if dayOfMonth < 0 {
+				dayOfMonth = maxDayInMonth + dayOfMonth + 1
+			}
+
+			daysOfMonth = append(daysOfMonth, dayOfMonth)
+		}
+
+		return utils.ToSet(daysOfMonth)[int64(transactionTime.Day())]
+	case models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_YEARLY:
+		return utils.ToSet(frequencyValues)[int64(transactionTime.Month())*100+int64(transactionTime.Day())]
+	case models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS:
+		if template.ScheduledStartTime == nil || len(frequencyValues) != 1 || frequencyValues[0] <= 0 {
+			return false
+		}
+
+		templateTimeZone := time.FixedZone("Template Timezone", int(template.ScheduledTimezoneUtcOffset)*60)
+		startDate := time.Unix(*template.ScheduledStartTime, 0).In(templateTimeZone)
+		startDateOnly := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, templateTimeZone)
+		transactionDateOnly := time.Date(transactionTime.Year(), transactionTime.Month(), transactionTime.Day(), 0, 0, 0, 0, templateTimeZone)
+		daysDiff := int64(transactionDateOnly.Sub(startDateOnly).Hours() / 24)
+
+		return daysDiff >= 0 && daysDiff%frequencyValues[0] == 0
+	default:
+		return false
+	}
+}
+
+// findMostRecentScheduledOccurrence returns the time of the occurrence of a scheduled template that
+// was most recently due at or before the given time, and whether there was one at all.
+//
+// The cron reckons an occurrence from the start of the UTC day, so the walk back through the
+// calendar counts UTC days too and every candidate it tests is one the cron could have posted. Set
+// dayNotFixed for a template that names no day, and every day counts as one it recurs on.
+func findMostRecentScheduledOccurrence(template *models.TransactionTemplate, frequencyValues []int64, dayNotFixed bool, currentUnixTime int64) (int64, bool) {
+	templateTimeZone := time.FixedZone("Template Timezone", int(template.ScheduledTimezoneUtcOffset)*60)
+	currentTimeInUTC := time.Unix(currentUnixTime, 0).In(time.UTC)
+	todayFirstTimeInUTC := time.Date(currentTimeInUTC.Year(), currentTimeInUTC.Month(), currentTimeInUTC.Day(), 0, 0, 0, 0, time.UTC)
+
+	for dayOffset := 0; dayOffset <= maximumScheduledTransactionLookbackDays; dayOffset++ {
+		candidateUnixTime := todayFirstTimeInUTC.AddDate(0, 0, -dayOffset).Unix() + int64(template.ScheduledAt)*60
+
+		if candidateUnixTime > currentUnixTime { // today's occurrence has not come round yet
+			continue
+		}
+
+		// Candidates only get earlier from here, so nothing before the start of the schedule can match
+		if template.ScheduledStartTime != nil && *template.ScheduledStartTime > candidateUnixTime {
+			break
+		}
+
+		if template.ScheduledEndTime != nil && *template.ScheduledEndTime < candidateUnixTime {
+			continue
+		}
+
+		if !dayNotFixed && !isScheduledTemplateDueAt(template, frequencyValues, time.Unix(candidateUnixTime, 0).In(templateTimeZone)) {
+			continue
+		}
+
+		return candidateUnixTime, true
+	}
+
+	return 0, false
+}
+
+// newTransactionFromScheduledTemplate builds the transaction that one occurrence of a scheduled
+// template posts, at the given time in the template's own timezone.
+func newTransactionFromScheduledTemplate(template *models.TransactionTemplate, transactionTime time.Time, clientIp string) (*models.Transaction, error) {
+	transactionDbType, err := template.Type.ToTransactionDbType()
+
+	if err != nil {
+		return nil, err
+	}
+
+	transaction := &models.Transaction{
+		Uid:                 template.Uid,
+		Type:                transactionDbType,
+		CategoryId:          template.CategoryId,
+		TransactionTime:     utils.GetMinTransactionTimeFromUnixTime(transactionTime.Unix()),
+		TimezoneUtcOffset:   template.ScheduledTimezoneUtcOffset,
+		AccountId:           template.AccountId,
+		Amount:              template.Amount,
+		HideAmount:          template.HideAmount,
+		IsSubscription:      template.IsSubscription,
+		Comment:             template.Comment,
+		CreatedIp:           clientIp,
+		ScheduledTemplateId: template.TemplateId,
+		ScheduledCreated:    true,
+	}
+
+	if template.Type == models.TRANSACTION_TYPE_TRANSFER {
+		transaction.RelatedAccountId = template.RelatedAccountId
+		transaction.RelatedAccountAmount = template.RelatedAccountAmount
+	}
+
+	return transaction, nil
+}
+
 // CreateScheduledTransactions saves all scheduled transactions that should be created now
 func (s *TransactionService) CreateScheduledTransactions(c core.Context, currentUnixTime int64, interval time.Duration) error {
 	var allTemplates []*models.TransactionTemplate
@@ -1376,51 +1504,21 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 			continue
 		}
 
-		if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY {
-			maxDayInMonth := utils.GetMaxDayOfMonth(currentTime.Year(), currentTime.Month())
-
-			for i := 0; i < len(frequencyValues); i++ {
-				if frequencyValues[i] < 0 {
-					frequencyValues[i] = int64(maxDayInMonth) + frequencyValues[i] + 1
-				}
-			}
+		if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS &&
+			(template.ScheduledStartTime == nil || len(frequencyValues) != 1 || frequencyValues[0] <= 0) {
+			skipCount++
+			log.Warnf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has invalid scheduled transaction frequency for every N days", template.TemplateId)
+			continue
 		}
 
-		frequencyValueSet := utils.ToSet(frequencyValues)
 		templateTimeZone := time.FixedZone("Template Timezone", int(template.ScheduledTimezoneUtcOffset)*60)
 		transactionUnixTime := todayFirstUnixTimeInUTC + int64(template.ScheduledAt)*60
 		transactionTime := time.Unix(transactionUnixTime, 0).In(templateTimeZone)
 
-		if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_WEEKLY && !frequencyValueSet[int64(transactionTime.Weekday())] {
+		if !isScheduledTemplateDueAt(template, frequencyValues, transactionTime) {
 			skipCount++
-			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" does not need to create transaction, today is %s", template.TemplateId, startTimeInUTC.Weekday())
+			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" does not need to create transaction, it does not recur on %s", template.TemplateId, utils.FormatUnixTimeToLongDate(transactionUnixTime, templateTimeZone))
 			continue
-		} else if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_MONTHLY && !frequencyValueSet[int64(transactionTime.Day())] {
-			skipCount++
-			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" does not need to create transaction, today is %d of month", template.TemplateId, startTimeInUTC.Day())
-			continue
-		} else if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_YEARLY && !frequencyValueSet[int64(transactionTime.Month())*100+int64(transactionTime.Day())] {
-			skipCount++
-			log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" does not need to create transaction, today is %d-%d of year", template.TemplateId, startTimeInUTC.Month(), startTimeInUTC.Day())
-			continue
-		} else if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS {
-			if template.ScheduledStartTime == nil || len(frequencyValues) != 1 || frequencyValues[0] <= 0 {
-				skipCount++
-				log.Warnf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has invalid scheduled transaction frequency for every N days", template.TemplateId)
-				continue
-			}
-
-			n := frequencyValues[0]
-			startDate := time.Unix(*template.ScheduledStartTime, 0).In(templateTimeZone)
-			startDateOnly := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, templateTimeZone)
-			transactionDateOnly := time.Date(transactionTime.Year(), transactionTime.Month(), transactionTime.Day(), 0, 0, 0, 0, templateTimeZone)
-			daysDiff := int(transactionDateOnly.Sub(startDateOnly).Hours() / 24)
-
-			if daysDiff < 0 || int64(daysDiff)%n != 0 {
-				skipCount++
-				log.Infof(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" does not need to create transaction, days diff is %d with interval %d", template.TemplateId, daysDiff, n)
-				continue
-			}
 		}
 
 		if template.ScheduledStartTime != nil && *template.ScheduledStartTime > transactionUnixTime {
@@ -1435,38 +1533,12 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 			continue
 		}
 
-		var transactionDbType models.TransactionDbType
+		transaction, err := newTransactionFromScheduledTemplate(template, transactionTime, c.ClientIP())
 
-		if template.Type == models.TRANSACTION_TYPE_EXPENSE {
-			transactionDbType = models.TRANSACTION_DB_TYPE_EXPENSE
-		} else if template.Type == models.TRANSACTION_TYPE_INCOME {
-			transactionDbType = models.TRANSACTION_DB_TYPE_INCOME
-		} else if template.Type == models.TRANSACTION_TYPE_TRANSFER {
-			transactionDbType = models.TRANSACTION_DB_TYPE_TRANSFER_OUT
-		} else {
+		if err != nil {
 			skipCount++
 			log.Warnf(c, "[transactions.CreateScheduledTransactions] transaction template \"id:%d\" has invalid transaction type", template.TemplateId)
 			continue
-		}
-
-		transaction := &models.Transaction{
-			Uid:               template.Uid,
-			Type:              transactionDbType,
-			CategoryId:        template.CategoryId,
-			TransactionTime:   utils.GetMinTransactionTimeFromUnixTime(transactionTime.Unix()),
-			TimezoneUtcOffset: template.ScheduledTimezoneUtcOffset,
-			AccountId:         template.AccountId,
-			Amount:            template.Amount,
-			HideAmount:        template.HideAmount,
-			IsSubscription:    template.IsSubscription,
-			Comment:           template.Comment,
-			CreatedIp:         c.ClientIP(),
-			ScheduledCreated:  true,
-		}
-
-		if template.Type == models.TRANSACTION_TYPE_TRANSFER {
-			transaction.RelatedAccountId = template.RelatedAccountId
-			transaction.RelatedAccountAmount = template.RelatedAccountAmount
 		}
 
 		tagIds := template.GetTagIds()
@@ -1484,6 +1556,124 @@ func (s *TransactionService) CreateScheduledTransactions(c core.Context, current
 	log.Infof(c, "[transactions.CreateScheduledTransactions] %d transactions has been created successfully, %d templates does not need to create transactions and %d transactions failed to create", successCount, skipCount, failedCount)
 
 	return nil
+}
+
+// CreateScheduledTransactionNow posts the occurrence of a scheduled template that was most recently
+// due, and returns the transaction it created.
+//
+// The occurrence is dated when the schedule says the money moved, not when the button was pressed:
+// a monthly template due on the first, posted by hand on the third, lands on the first. That is what
+// makes this the repair for a run the cron missed - the server being down over a due time is not a
+// reason for the ledger to record the wrong date, and the transaction it writes is byte for byte the
+// one the cron would have written.
+//
+// A template whose day is not fixed - a subscription that renews on whichever day the merchant
+// charges - is due on every day instead of none, because here somebody has seen the money move and
+// is saying so. Its occurrence is therefore today's, at the time of day the template is set to.
+func (s *TransactionService) CreateScheduledTransactionNow(c core.Context, template *models.TransactionTemplate, currentUnixTime int64, clientIp string) (*models.Transaction, error) {
+	if template.Uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	if template.TemplateType != models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE {
+		return nil, errs.ErrTransactionTemplateTypeInvalid
+	}
+
+	var frequencyValues []int64
+
+	// An empty frequency is a period without a day rather than a broken template, and it is the one
+	// case this reads differently from the cron - see the note on the function.
+	dayNotFixed := template.ScheduledFrequency == ""
+
+	if !dayNotFixed {
+		var err error
+		frequencyValues, err = utils.StringArrayToInt64Array(strings.Split(template.ScheduledFrequency, ","))
+
+		if err != nil {
+			log.Warnf(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has invalid scheduled transaction frequency, because %s", template.TemplateId, err.Error())
+			return nil, errs.ErrScheduledTransactionFrequencyInvalid
+		}
+
+		if template.ScheduledFrequencyType == models.TRANSACTION_SCHEDULE_FREQUENCY_TYPE_EVERY_N_DAYS &&
+			(template.ScheduledStartTime == nil || len(frequencyValues) != 1 || frequencyValues[0] <= 0) {
+			log.Warnf(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has invalid scheduled transaction frequency for every N days", template.TemplateId)
+			return nil, errs.ErrScheduledTransactionFrequencyInvalid
+		}
+	}
+
+	templateTimeZone := time.FixedZone("Template Timezone", int(template.ScheduledTimezoneUtcOffset)*60)
+	transactionUnixTime, found := findMostRecentScheduledOccurrence(template, frequencyValues, dayNotFixed, currentUnixTime)
+
+	if !found {
+		log.Infof(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has no occurrence due in the last %d days", template.TemplateId, maximumScheduledTransactionLookbackDays)
+		return nil, errs.ErrScheduledTransactionNothingDue
+	}
+
+	// Posting the same occurrence twice is what a button next to a schedule invites, and a rent paid
+	// twice is worse than a rent not posted at all, so the occurrence already in the ledger wins.
+	alreadyCreated, err := s.existsScheduledTransactionAt(c, template, transactionUnixTime)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.CreateScheduledTransactionNow] failed to check whether transaction template \"id:%d\" already posted %d, because %s", template.TemplateId, transactionUnixTime, err.Error())
+		return nil, err
+	}
+
+	if alreadyCreated {
+		log.Infof(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has already posted the occurrence at %d", template.TemplateId, transactionUnixTime)
+		return nil, errs.ErrScheduledTransactionAlreadyCreated
+	}
+
+	transaction, err := newTransactionFromScheduledTemplate(template, time.Unix(transactionUnixTime, 0).In(templateTimeZone), clientIp)
+
+	if err != nil {
+		log.Warnf(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has invalid transaction type", template.TemplateId)
+		return nil, err
+	}
+
+	err = s.CreateTransaction(c, transaction, template.GetTagIds(), nil)
+
+	if err != nil {
+		log.Errorf(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" failed to create new transaction, because %s", template.TemplateId, err.Error())
+		return nil, err
+	}
+
+	log.Infof(c, "[transactions.CreateScheduledTransactionNow] transaction template \"id:%d\" has created a new transaction \"id:%d\" for the occurrence at %d", template.TemplateId, transaction.TransactionId, transactionUnixTime)
+
+	return transaction, nil
+}
+
+// existsScheduledTransactionAt returns whether the given scheduled template has already posted the
+// occurrence at the given time.
+//
+// A transaction posted by a schedule names the template it came from, so the occurrence is normally
+// recognized outright. Transactions posted before that column existed name no template, and those
+// are matched on everything the template determines instead - the account, the category, the amount
+// and the second the transaction falls on - which is as close as can be got after the fact. The
+// amount is only read for those, because a template whose amount was raised since still posted the
+// occurrence it posted.
+//
+// Only transactions a schedule wrote are considered, so an entry made by hand never blocks the button.
+func (s *TransactionService) existsScheduledTransactionAt(c core.Context, template *models.TransactionTemplate, transactionUnixTime int64) (bool, error) {
+	minTransactionTime := utils.GetMinTransactionTimeFromUnixTime(transactionUnixTime)
+	maxTransactionTime := utils.GetMaxTransactionTimeFromUnixTime(transactionUnixTime)
+
+	return s.UserDataDB(template.Uid).NewSession(c).Where("uid=?"+
+		" AND deleted=?"+
+		" AND scheduled_created=?"+
+		" AND account_id=?"+
+		" AND transaction_time>=?"+
+		" AND transaction_time<=?"+
+		" AND (scheduled_template_id=? OR (scheduled_template_id=? AND category_id=? AND amount=?))",
+		template.Uid,
+		false,
+		true,
+		template.AccountId,
+		minTransactionTime,
+		maxTransactionTime,
+		template.TemplateId,
+		0,
+		template.CategoryId,
+		template.Amount).Limit(1).Exist(&models.Transaction{})
 }
 
 // ModifyTransaction saves an existed transaction to database

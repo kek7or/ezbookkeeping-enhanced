@@ -12,4 +12,6 @@ var (
 	ErrTransactionTemplateHasTooManyTags                     = NewNormalError(NormalSubcategoryTemplate, 5, http.StatusBadRequest, "transaction template has too many tags")
 	ErrScheduledTransactionTemplateStartDataLaterThanEndDate = NewNormalError(NormalSubcategoryTemplate, 6, http.StatusBadRequest, "scheduled transaction start date is later than end time")
 	ErrScheduledTransactionStartDateRequired                 = NewNormalError(NormalSubcategoryTemplate, 7, http.StatusBadRequest, "scheduled transaction start date is required")
+	ErrScheduledTransactionNothingDue                        = NewNormalError(NormalSubcategoryTemplate, 8, http.StatusBadRequest, "scheduled transaction has nothing due yet")
+	ErrScheduledTransactionAlreadyCreated                    = NewNormalError(NormalSubcategoryTemplate, 9, http.StatusBadRequest, "scheduled transaction has already been created for this occurrence")
 )

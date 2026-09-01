@@ -60,6 +60,9 @@
                 <f7-swipeout-actions :left="textDirection === TextDirection.RTL"
                                      :right="textDirection === TextDirection.LTR"
                                      v-if="!sortable">
+                    <f7-swipeout-button color="green" close :text="tt('Add Now')"
+                                        v-if="templateType === TemplateType.Schedule.type"
+                                        @click="postNow(template, false)"></f7-swipeout-button>
                     <f7-swipeout-button color="orange" close :text="tt('Edit')" @click="edit(template)"></f7-swipeout-button>
                     <f7-swipeout-button color="red" class="padding-horizontal" @click="remove(template, false)">
                         <f7-icon f7="trash"></f7-icon>
@@ -73,6 +76,16 @@
                 <f7-actions-button :class="{ 'disabled': !templates || templates.length < 2 }" @click="setSortable()">{{ tt('Sort') }}</f7-actions-button>
                 <f7-actions-button v-if="!showHidden" @click="showHidden = true">{{ tt('Show Hidden Transaction Templates') }}</f7-actions-button>
                 <f7-actions-button v-if="showHidden" @click="showHidden = false">{{ tt('Hide Hidden Transaction Templates') }}</f7-actions-button>
+            </f7-actions-group>
+            <f7-actions-group>
+                <f7-actions-button bold close>{{ tt('Cancel') }}</f7-actions-button>
+            </f7-actions-group>
+        </f7-actions>
+
+        <f7-actions close-by-outside-click close-on-escape :opened="showPostNowActionSheet" @actions:closed="showPostNowActionSheet = false">
+            <f7-actions-group>
+                <f7-actions-label>{{ tt('Are you sure you want to add the transaction for this scheduled transaction now?') }}</f7-actions-label>
+                <f7-actions-button color="green" @click="postNow(templateToPostNow, true)">{{ tt('Add Now') }}</f7-actions-button>
             </f7-actions-group>
             <f7-actions-group>
                 <f7-actions-button bold close>{{ tt('Cancel') }}</f7-actions-button>
@@ -105,6 +118,7 @@ import { TemplateType } from '@/core/template.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import { isDefined } from '@/lib/common.ts';
+import { parseDateTimeFromUnixTimeWithTimezoneOffset } from '@/lib/datetime.ts';
 import {
     isNoAvailableTemplate,
     getFirstShowingId,
@@ -116,7 +130,7 @@ const props = defineProps<{
     f7router: Router.Router;
 }>();
 
-const { tt, getCurrentLanguageTextDirection } = useI18n();
+const { tt, getCurrentLanguageTextDirection, formatDateTimeToLongDate } = useI18n();
 const { showAlert, showToast, routeBackOnError } = useI18nUIComponents();
 
 const transactionTemplatesStore = useTransactionTemplatesStore();
@@ -127,8 +141,10 @@ const loadingError = ref<unknown | null>(null);
 const showHidden = ref<boolean>(false);
 const sortable = ref<boolean>(false);
 const templateToDelete = ref<TransactionTemplate | null>(null);
+const templateToPostNow = ref<TransactionTemplate | null>(null);
 const showMoreActionSheet = ref<boolean>(false);
 const showDeleteActionSheet = ref<boolean>(false);
+const showPostNowActionSheet = ref<boolean>(false);
 const displayOrderModified = ref<boolean>(false);
 const displayOrderSaving = ref<boolean>(false);
 
@@ -212,6 +228,42 @@ function hide(template: TransactionTemplate, hidden: boolean): void {
         hidden: hidden
     }).then(() => {
         hideLoading();
+    }).catch(error => {
+        hideLoading();
+
+        if (!error.processed) {
+            showToast(error.message || error);
+        }
+    });
+}
+
+// The schedule only posts itself while the server is up over the minute it is due, so an occurrence
+// that fell during a restart is never posted at all. This is how it is entered afterwards, dated the
+// day it was due rather than today.
+function postNow(template: TransactionTemplate | null, confirm: boolean): void {
+    if (!template) {
+        showAlert('An error occurred');
+        return;
+    }
+
+    if (!confirm) {
+        templateToPostNow.value = template;
+        showPostNowActionSheet.value = true;
+        return;
+    }
+
+    showPostNowActionSheet.value = false;
+    templateToPostNow.value = null;
+    showLoading();
+
+    transactionTemplatesStore.createTransactionFromTemplate({
+        template: template
+    }).then(result => {
+        hideLoading();
+
+        showToast(tt('Transaction has been added on date', {
+            date: formatDateTimeToLongDate(parseDateTimeFromUnixTimeWithTimezoneOffset(result.time, result.utcOffset))
+        }));
     }).catch(error => {
         hideLoading();
 

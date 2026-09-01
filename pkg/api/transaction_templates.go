@@ -21,7 +21,8 @@ const maximumTagsCountOfTemplate = 10
 type TransactionTemplatesApi struct {
 	ApiUsingConfig
 	ApiUsingDuplicateChecker
-	templates *services.TransactionTemplateService
+	templates    *services.TransactionTemplateService
+	transactions *services.TransactionService
 }
 
 // Initialize a transaction template api singleton instance
@@ -36,7 +37,8 @@ var (
 			},
 			container: duplicatechecker.Container,
 		},
-		templates: services.TransactionTemplates,
+		templates:    services.TransactionTemplates,
+		transactions: services.Transactions,
 	}
 )
 
@@ -489,6 +491,54 @@ func (a *TransactionTemplatesApi) TemplateDeleteHandler(c *core.WebContext) (any
 
 	log.Infof(c, "[transaction_templates.TemplateDeleteHandler] user \"uid:%d\" has deleted template \"id:%d\"", uid, templateDeleteReq.Id)
 	return true, nil
+}
+
+// TemplateCreateTransactionHandler posts the most recently due occurrence of a scheduled transaction
+// template for current user
+//
+// The cron job that posts schedules only looks at the quarter hour it wakes up in, so an occurrence
+// that falls while the server is down is never posted at all. This is how it gets posted afterwards,
+// on the date it was due rather than the date it was noticed.
+func (a *TransactionTemplatesApi) TemplateCreateTransactionHandler(c *core.WebContext) (any, *errs.Error) {
+	var templateCreateTransactionReq models.TransactionTemplateCreateTransactionRequest
+	err := c.ShouldBindJSON(&templateCreateTransactionReq)
+
+	if err != nil {
+		log.Warnf(c, "[transaction_templates.TemplateCreateTransactionHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	if !a.CurrentConfig().EnableScheduledTransaction {
+		return nil, errs.ErrScheduledTransactionNotEnabled
+	}
+
+	uid := c.GetCurrentUid()
+
+	template, err := a.templates.GetTemplateByTemplateId(c, uid, templateCreateTransactionReq.Id)
+
+	if err != nil {
+		log.Errorf(c, "[transaction_templates.TemplateCreateTransactionHandler] failed to get template \"id:%d\" for user \"uid:%d\", because %s", templateCreateTransactionReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	if template.TemplateType != models.TRANSACTION_TEMPLATE_TYPE_SCHEDULE {
+		return nil, errs.ErrTransactionTemplateTypeInvalid
+	}
+
+	transaction, err := a.transactions.CreateScheduledTransactionNow(c, template, time.Now().Unix(), c.ClientIP())
+
+	if err != nil {
+		log.Errorf(c, "[transaction_templates.TemplateCreateTransactionHandler] failed to create transaction from template \"id:%d\" for user \"uid:%d\", because %s", templateCreateTransactionReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[transaction_templates.TemplateCreateTransactionHandler] user \"uid:%d\" has created transaction \"id:%d\" from template \"id:%d\"", uid, transaction.TransactionId, templateCreateTransactionReq.Id)
+
+	return &models.TransactionTemplateCreateTransactionResponse{
+		Id:        transaction.TransactionId,
+		Time:      utils.GetUnixTimeFromTransactionTime(transaction.TransactionTime),
+		UtcOffset: transaction.TimezoneUtcOffset,
+	}, nil
 }
 
 func (a *TransactionTemplatesApi) createNewTemplateModel(uid int64, templateCreateReq *models.TransactionTemplateCreateRequest, order int32) (*models.TransactionTemplate, error) {

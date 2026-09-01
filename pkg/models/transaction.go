@@ -152,11 +152,18 @@ type Transaction struct {
 	// It is set from the template for a schedule that posts itself, and by hand for a charge that
 	// lands on a day nobody could name in advance. The default is what lets this column be added to
 	// a table that already has rows: nothing recorded before subscriptions could be marked is one.
-	IsSubscription   bool    `xorm:"NOT NULL DEFAULT 0"`
-	GeoLongitude     float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
-	GeoLatitude      float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
-	CreatedIp        string  `xorm:"VARCHAR(39)"`
-	ScheduledCreated bool
+	IsSubscription bool    `xorm:"NOT NULL DEFAULT 0"`
+	GeoLongitude   float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
+	GeoLatitude    float64 `xorm:"INDEX(IDX_transaction_uid_deleted_time_longitude_latitude)"`
+	CreatedIp      string  `xorm:"VARCHAR(39)"`
+	// ScheduledTemplateId is the scheduled template that posted this transaction, zero for every
+	// transaction that no schedule posted. ScheduledCreated already says that a schedule posted one,
+	// but not which, and without that two schedules on the same account and category falling on the
+	// same day are indistinguishable - which is what tells whether an occurrence is already in the
+	// ledger or is still missing. The default is what lets this column be added to a table that
+	// already has rows: every transaction posted before it existed names no template, which is zero.
+	ScheduledTemplateId int64 `xorm:"NOT NULL DEFAULT 0"`
+	ScheduledCreated    bool
 	CreatedUnixTime  int64
 	UpdatedUnixTime  int64
 	DeletedUnixTime  int64

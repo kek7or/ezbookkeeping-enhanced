@@ -104,6 +104,18 @@
                                              :class="{ 'template-operation-buttons-shown': hoveredTemplateId === element.id && !loading }">
                                             <v-btn class="px-2 ms-2" color="default"
                                                    density="comfortable" variant="text"
+                                                   :prepend-icon="mdiPlusCircleOutline"
+                                                   :loading="templatePosting[element.id]"
+                                                   :disabled="loading || updating"
+                                                   v-if="isScheduleList"
+                                                   @click="postNow(element)">
+                                                <template #loader>
+                                                    <v-progress-circular indeterminate size="20" width="2"/>
+                                                </template>
+                                                {{ tt('Add Now') }}
+                                            </v-btn>
+                                            <v-btn class="px-2 ms-2" color="default"
+                                                   density="comfortable" variant="text"
                                                    :prepend-icon="element.hidden ? mdiEyeOutline : mdiEyeOffOutline"
                                                    :loading="templateHiding[element.id]"
                                                    :disabled="loading || updating"
@@ -191,6 +203,7 @@ import { TransactionTemplate } from '@/models/transaction_template.ts';
 
 import { type BigDecimal } from '@/core/numeral.ts';
 import { parseBigDecimal } from '@/lib/numeral.ts';
+import { parseDateTimeFromUnixTimeWithTimezoneOffset } from '@/lib/datetime.ts';
 import {
     type ScheduledCostTotal,
     isNoAvailableTemplate,
@@ -208,7 +221,8 @@ import {
     mdiDotsVertical,
     mdiTextBoxOutline,
     mdiClockTimeNineOutline,
-    mdiAutorenew
+    mdiAutorenew,
+    mdiPlusCircleOutline
 } from '@mdi/js';
 
 interface ScheduleTotalRow {
@@ -225,7 +239,7 @@ const props = defineProps<{
     initType: number;
 }>();
 
-const { tt, getScheduleFrequencyDisplayName, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
+const { tt, getScheduleFrequencyDisplayName, formatAmountToLocalizedNumeralsWithCurrency, formatDateTimeToLongDate } = useI18n();
 
 const userStore = useUserStore();
 const accountsStore = useAccountsStore();
@@ -242,6 +256,7 @@ const updating = ref<boolean>(false);
 const hoveredTemplateId = ref<string>('');
 const templateHiding = ref<Record<string, boolean>>({});
 const templateRemoving = ref<Record<string, boolean>>({});
+const templatePosting = ref<Record<string, boolean>>({});
 const displayOrderModified = ref<boolean>(false);
 const showHidden = ref<boolean>(false);
 
@@ -434,6 +449,34 @@ function hide(template: TransactionTemplate, hidden: boolean): void {
         if (!error.processed) {
             snackbar.value?.showError(error);
         }
+    });
+}
+
+// The schedule only posts itself while the server is up over the minute it is due, so an occurrence
+// that fell during a restart is never posted at all. This is how it is entered afterwards, dated the
+// day it was due rather than today.
+function postNow(template: TransactionTemplate): void {
+    confirmDialog.value?.open('Are you sure you want to add the transaction for this scheduled transaction now?').then(() => {
+        updating.value = true;
+        templatePosting.value[template.id] = true;
+
+        transactionTemplatesStore.createTransactionFromTemplate({
+            template: template
+        }).then(result => {
+            updating.value = false;
+            templatePosting.value[template.id] = false;
+
+            snackbar.value?.showMessage('Transaction has been added on date', {
+                date: formatDateTimeToLongDate(parseDateTimeFromUnixTimeWithTimezoneOffset(result.time, result.utcOffset))
+            });
+        }).catch(error => {
+            updating.value = false;
+            templatePosting.value[template.id] = false;
+
+            if (!error.processed) {
+                snackbar.value?.showError(error);
+            }
+        });
     });
 }
 
