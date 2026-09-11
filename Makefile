@@ -22,7 +22,13 @@ OLLAMA    := C:/Users/Viktor/AppData/Local/Programs/Ollama/ollama.exe
 BINARY       := ezbookkeeping.exe
 API_PORT     := 4242
 WEB_PORT     := 5173
-OLLAMA_PORT  := 11434
+# Not Ollama's default 11434: Windows reserves 11250-11649 for dynamic port
+# allocation (WinNAT grabs the range, and the reservation survives reboots), so
+# a bind there fails with "forbidden by its access permissions" and Ollama dies
+# on startup. OLLAMA_HOST is exported so the server started below actually
+# listens here; the ini's ollama_server_url has to match.
+OLLAMA_PORT  := 21434
+export OLLAMA_HOST := 127.0.0.1:$(OLLAMA_PORT)
 OLLAMA_MODEL ?= qwen3-vl-16k
 
 # The models are not in the default store, they are on F:, and Ollama only
