@@ -114,7 +114,7 @@ export function isUtilityTariffFormValid(value: UtilityTariffFormValue): boolean
 }
 
 export function useUtilityMetersPageBase() {
-    const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatDateTimeToLongDate } = useI18n();
+    const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatDateTimeToLongDate, formatDateTimeToLongMonthDay } = useI18n();
 
     const utilityMetersStore = useUtilityMetersStore();
 
@@ -122,23 +122,6 @@ export function useUtilityMetersPageBase() {
 
     function getDisplayAmount(amount: number, currency: string): string {
         return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(amount), currency);
-    }
-
-    // a difference is shown with the sign it carries, because "you are 65.00 up" and "you owe
-    // 65.00" are the two answers this page exists to tell apart
-    function getDisplayDifference(difference: number, currency: string): string {
-        const formatted = getDisplayAmount(Math.abs(difference), currency);
-        return difference < 0 ? `-${formatted}` : `+${formatted}`;
-    }
-
-    function getDifferenceColor(difference: number): string {
-        if (difference > 0) {
-            return 'text-success';
-        } else if (difference < 0) {
-            return 'text-error';
-        }
-
-        return '';
     }
 
     // a reading and a use are shown to as many decimals as they actually carry, so that a meter
@@ -187,6 +170,21 @@ export function useUtilityMetersPageBase() {
         return formatDateTimeToLongDate(parseDateTimeFromUnixTime(getUnixTimeFromNumericDate(numericDate)));
     }
 
+    // a period reads as "January 12 - February 14, 2026", with the year written once at the end -
+    // and on both sides only when the period runs across new year
+    function getDisplayPeriod(startDate: number, endDate: number): string {
+        const startYear = Math.floor(startDate / 10000);
+        const endYear = Math.floor(endDate / 10000);
+        const start = formatDateTimeToLongMonthDay(parseDateTimeFromUnixTime(getUnixTimeFromNumericDate(startDate)));
+        const end = formatDateTimeToLongMonthDay(parseDateTimeFromUnixTime(getUnixTimeFromNumericDate(endDate)));
+
+        if (startYear !== endYear) {
+            return `${start}, ${startYear} – ${end}, ${endYear}`;
+        }
+
+        return `${start} – ${end}, ${endYear}`;
+    }
+
     function getMeterKindName(kind: UtilityMeterKind): string {
         switch (kind) {
             case UtilityMeterKind.Electricity:
@@ -205,14 +203,13 @@ export function useUtilityMetersPageBase() {
     return {
         allMeters,
         getDisplayAmount,
-        getDisplayDifference,
-        getDifferenceColor,
         getDisplayUsage,
         getDisplayEnergy,
         getDisplayReading,
         getDisplayUnitPrice,
         getDisplayConversionFactor,
         getDisplayDate,
+        getDisplayPeriod,
         getMeterKindName
     };
 }

@@ -23,7 +23,7 @@
 
                 <v-card-text>
                     <p class="text-body-2 text-medium-emphasis mb-0">
-                        {{ tt('What your meters have used, and what that is worth against what you pay every month. Nothing here is written to your ledger.') }}
+                        {{ tt('What your meters have used, and what that costs. Nothing here is written to your ledger.') }}
                     </p>
                 </v-card-text>
 
@@ -98,31 +98,16 @@
 
                     <v-card-text v-if="getSelectedYear(meter)">
                         <v-row>
-                            <v-col cols="12" md="3">
+                            <v-col cols="12" md="6">
                                 <span class="text-subtitle-2">{{ tt('Used') }}</span>
                                 <p class="text-h6 mt-1 mb-0">{{ getDisplayUsage(getSelectedYear(meter)!.usedUnits, meter.unit) }}</p>
                                 <small class="text-caption" v-if="getSelectedYear(meter)!.usedEnergy">
                                     {{ getDisplayEnergy(getSelectedYear(meter)!.usedEnergy!) }}
                                 </small>
                             </v-col>
-                            <v-col cols="12" md="3">
+                            <v-col cols="12" md="6">
                                 <span class="text-subtitle-2">{{ tt('Cost So Far') }}</span>
                                 <p class="text-h6 mt-1 mb-0">{{ getDisplayAmount(getSelectedYear(meter)!.cost, meter.currency) }}</p>
-                                <small class="text-caption">{{ getDaysCoveredText(getSelectedYear(meter)!) }}</small>
-                            </v-col>
-                            <v-col cols="12" md="3">
-                                <span class="text-subtitle-2">{{ tt('Paid So Far') }}</span>
-                                <p class="text-h6 mt-1 mb-0">{{ getDisplayAmount(getSelectedYear(meter)!.prepaid, meter.currency) }}</p>
-                                <small class="text-caption" :class="getDifferenceColor(getSelectedYear(meter)!.difference)">
-                                    {{ getDisplayDifference(getSelectedYear(meter)!.difference, meter.currency) }}
-                                </small>
-                            </v-col>
-                            <v-col cols="12" md="3">
-                                <span class="text-subtitle-2">{{ getSelectedYear(meter)!.complete ? tt('At Year End') : tt('Projected At Year End') }}</span>
-                                <p class="text-h6 mt-1 mb-0" :class="getDifferenceColor(getSelectedYear(meter)!.projectedDifference)">
-                                    {{ getDisplayDifference(getSelectedYear(meter)!.projectedDifference, meter.currency) }}
-                                </p>
-                                <small class="text-caption">{{ getProjectionText(getSelectedYear(meter)!, meter.currency) }}</small>
                             </v-col>
                         </v-row>
                     </v-card-text>
@@ -136,8 +121,6 @@
                             <th class="text-right">{{ tt('To') }}</th>
                             <th class="text-right">{{ tt('Used') }}</th>
                             <th class="text-right">{{ tt('Cost') }}</th>
-                            <th class="text-right">{{ tt('Paid') }}</th>
-                            <th class="text-right">{{ tt('Difference') }}</th>
                         </tr>
                         </thead>
 
@@ -145,13 +128,12 @@
                         <tr :key="period.startDate" v-for="period in (getSelectedYear(meter)?.periods ?? [])">
                             <td class="text-no-wrap">
                                 <div class="d-flex align-center">
-                                    <span>{{ getDisplayDate(period.endDate) }}</span>
+                                    <span>{{ getDisplayPeriod(period.startDate, period.endDate) }}</span>
                                     <v-icon class="ms-1" size="16" :icon="mdiHelpCircleOutline"
                                             v-if="period.estimated || period.partial || period.priceChanged">
                                         <v-tooltip activator="parent">{{ getPeriodNote(period) }}</v-tooltip>
                                     </v-icon>
                                 </div>
-                                <small class="text-caption">{{ getDisplayDate(period.startDate) }}</small>
                             </td>
                             <td class="text-right">{{ period.days }}</td>
                             <td class="text-right text-no-wrap">{{ getDisplayReading(period.startValue, meter.unit) }}</td>
@@ -160,14 +142,7 @@
                                 <div>{{ getDisplayUsage(period.usedUnits, meter.unit) }}</div>
                                 <small class="text-caption" v-if="period.usedEnergy">{{ getDisplayEnergy(period.usedEnergy) }}</small>
                             </td>
-                            <td class="text-right text-no-wrap">
-                                <div>{{ getDisplayAmount(period.cost, meter.currency) }}</div>
-                                <small class="text-caption">{{ getBaseFeeText(period, meter.currency) }}</small>
-                            </td>
-                            <td class="text-right text-no-wrap">{{ getDisplayAmount(period.prepaid, meter.currency) }}</td>
-                            <td class="text-right text-no-wrap" :class="getDifferenceColor(period.difference)">
-                                {{ getDisplayDifference(period.difference, meter.currency) }}
-                            </td>
+                            <td class="text-right text-no-wrap">{{ getDisplayAmount(period.cost, meter.currency) }}</td>
                         </tr>
                         </tbody>
                     </v-table>
@@ -284,14 +259,13 @@ const { tt } = useI18n();
 const {
     allMeters,
     getDisplayAmount,
-    getDisplayDifference,
-    getDifferenceColor,
     getDisplayUsage,
     getDisplayEnergy,
     getDisplayReading,
     getDisplayUnitPrice,
     getDisplayConversionFactor,
     getDisplayDate,
+    getDisplayPeriod,
     getMeterKindName
 } = useUtilityMetersPageBase();
 
@@ -381,26 +355,6 @@ function getTariffSummary(tariff: UtilityTariffInfoResponse, meter: UtilityMeter
     }
 
     return parts.join(' · ');
-}
-
-// the standing charge is called out under every cost, because a month that used almost nothing
-// still costs it and a total that hides it reads as an error
-function getBaseFeeText(period: UtilityPeriodResponse, currency: string): string {
-    return tt('format.misc.utilityIncludingBaseFee', { amount: getDisplayAmount(period.baseFee, currency) });
-}
-
-function getDaysCoveredText(year: UtilityBillingYearResponse): string {
-    return tt('format.misc.utilityDaysCovered', { covered: year.daysCovered, total: year.daysInYear });
-}
-
-// what the fifth stat is saying: a finished year is a balance, and an unfinished one is the cost
-// the whole year is heading for at the rate the days already read have been running at
-function getProjectionText(year: UtilityBillingYearResponse, currency: string): string {
-    if (year.complete) {
-        return year.projectedDifference >= 0 ? tt('Refund expected') : tt('Extra payment expected');
-    }
-
-    return tt('format.misc.utilityProjectedCost', { amount: getDisplayAmount(year.projectedCost, currency) });
 }
 
 function getPeriodNote(period: UtilityPeriodResponse): string {
