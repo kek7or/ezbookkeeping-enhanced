@@ -21,19 +21,21 @@
                     </div>
                 </template>
 
-                <v-card-text class="pb-0">
-                    <span class="text-subtitle-2">{{ tt('Total Owed to You') }}</span>
-                    <p class="text-h5 mt-1 mb-0">
-                        <span v-if="totalOwed.length">{{ getDisplayAmounts(totalOwed) }}</span>
-                        <span v-else-if="!totalOwed.length">{{ tt('Nothing') }}</span>
-                    </p>
-                    <template v-if="totalOwing.length">
+                <v-card-text class="d-flex flex-wrap gap-8 pb-0">
+                    <div>
+                        <span class="text-subtitle-2">{{ tt('Total Owed to You') }}</span>
+                        <p class="text-h5 mt-1 mb-0">
+                            <span v-if="totalOwed.length">{{ getDisplayAmounts(totalOwed) }}</span>
+                            <span v-else-if="!totalOwed.length">{{ tt('Nothing') }}</span>
+                        </p>
+                    </div>
+                    <div v-if="totalOwing.length">
                         <span class="text-subtitle-2">{{ tt('Total You Owe') }}</span>
                         <p class="text-h5 text-error mt-1 mb-0">{{ getDisplayAmounts(totalOwing) }}</p>
-                    </template>
+                    </div>
                 </v-card-text>
 
-                <v-card-text>
+                <v-card-text class="pt-4">
                     <v-list class="pt-0" density="comfortable" v-if="allPeople.length">
                         <v-list-item class="px-3" rounded
                                      :key="person.id" v-for="person in allPeople"
@@ -45,6 +47,10 @@
                             <v-list-item-title>{{ person.name }}</v-list-item-title>
                             <v-list-item-subtitle>
                                 <span>{{ getPersonSummary(person) }}</span>
+                            </v-list-item-subtitle>
+                            <v-list-item-subtitle class="text-primary" v-if="getBirthdayHint(person)">
+                                <v-icon size="14" :icon="mdiCakeVariantOutline"/>
+                                <span class="ms-1">{{ getBirthdayHint(person) }}</span>
                             </v-list-item-subtitle>
                             <template #append>
                                 <v-btn density="comfortable" color="default" variant="text" :icon="true"
@@ -78,7 +84,19 @@
             <v-card :class="{ 'disabled': loadingEntries }" v-if="selectedPerson">
                 <template #title>
                     <div class="title-and-toolbar d-flex align-center">
-                        <span>{{ selectedPerson.name }}</span>
+                        <div class="d-flex flex-column">
+                            <span>{{ selectedPerson.name }}</span>
+                            <div class="d-flex align-center text-body-2 text-medium-emphasis">
+                                <v-icon size="16" :icon="mdiCakeVariantOutline"/>
+                                <date-select class="person-birthday ms-1" variant="plain" density="compact"
+                                             menu-icon="" hide-details
+                                             :clearable="true"
+                                             :no-data-text="tt('Add birthday')"
+                                             :disabled="updating"
+                                             :model-value="(selectedPerson.birthday as TextualYearMonthDay | undefined)"
+                                             @update:model-value="setBirthday" />
+                            </div>
+                        </div>
                         <v-spacer/>
                         <v-btn density="comfortable" variant="text" color="default"
                                :prepend-icon="showSettled ? mdiEyeOffOutline : mdiEyeOutline"
@@ -95,27 +113,37 @@
                             {{ tt('Make a Receipt') }}
                             <v-tooltip activator="parent" open-delay="500">{{ tt('A spreadsheet of everything still owed, to hand to this person') }}</v-tooltip>
                         </v-btn>
-                        <v-btn class="ms-2" density="comfortable" :prepend-icon="mdiHandCoinOutline"
-                               :disabled="loadingEntries || updating" @click="addLoan(false)">
-                            {{ tt('Record a Loan') }}
-                        </v-btn>
-                        <v-btn class="ms-2" density="comfortable" variant="tonal" :prepend-icon="mdiCashMinus"
-                               :disabled="loadingEntries || updating" @click="addLoan(true)">
-                            {{ tt('Record What You Owe') }}
+                        <v-btn class="ms-2" density="comfortable" :prepend-icon="mdiPlus"
+                               :disabled="loadingEntries || updating">
+                            {{ tt('Record') }}
+                            <v-menu activator="parent">
+                                <v-list>
+                                    <v-list-item :prepend-icon="mdiHandCoinOutline"
+                                                 :title="tt('Record a Loan')"
+                                                 :subtitle="tt('They owe you')"
+                                                 @click="addLoan(false)"></v-list-item>
+                                    <v-list-item :prepend-icon="mdiCashMinus"
+                                                 :title="tt('Record What You Owe')"
+                                                 :subtitle="tt('You owe them')"
+                                                 @click="addLoan(true)"></v-list-item>
+                                </v-list>
+                            </v-menu>
                         </v-btn>
                     </div>
                 </template>
 
-                <v-card-text>
-                    <span class="text-subtitle-2">{{ tt('Still Owed') }}</span>
-                    <p class="text-h5 mt-1 mb-0">
-                        <span v-if="openTotals.length">{{ getDisplayAmounts(openTotals) }}</span>
-                        <span v-else-if="!openTotals.length">{{ tt('Nothing') }}</span>
-                    </p>
-                    <template v-if="owingTotals.length">
+                <v-card-text class="d-flex flex-wrap gap-8">
+                    <div>
+                        <span class="text-subtitle-2">{{ tt('Still Owed') }}</span>
+                        <p class="text-h5 mt-1 mb-0">
+                            <span v-if="openTotals.length">{{ getDisplayAmounts(openTotals) }}</span>
+                            <span v-else-if="!openTotals.length">{{ tt('Nothing') }}</span>
+                        </p>
+                    </div>
+                    <div v-if="owingTotals.length">
                         <span class="text-subtitle-2">{{ tt('You Owe') }}</span>
                         <p class="text-h5 text-error mt-1 mb-0">{{ getDisplayAmounts(owingTotals) }}</p>
-                    </template>
+                    </div>
                 </v-card-text>
 
                 <v-card-text class="pt-0">
@@ -286,6 +314,7 @@ import AddLoanDialog from './dialogs/AddLoanDialog.vue';
 import EditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import RenameDialog from '@/components/desktop/RenameDialog.vue';
 import AmountInputDialog from '@/components/desktop/AmountInputDialog.vue';
+import DateSelect from '@/components/desktop/DateSelect.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 
@@ -296,11 +325,12 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useDebtsStore } from '@/stores/debt.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 
+import type { TextualYearMonthDay } from '@/core/datetime.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
 import type { DebtAmount, DebtEntryGroup, DebtEntryGroupKind, DebtEntryInfoResponse, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
-import { sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen } from '@/models/debt.ts';
+import { sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday } from '@/models/debt.ts';
 
 import { KnownFileType } from '@/core/file.ts';
 
@@ -319,6 +349,7 @@ import {
     mdiRenameOutline,
     mdiHandCoinOutline,
     mdiCashMinus,
+    mdiCakeVariantOutline,
     mdiHandHeartOutline,
     mdiEyeOutline,
     mdiEyeOffOutline,
@@ -501,6 +532,45 @@ function getPersonSummary(person: DebtPersonInfoResponse): string {
     }
 
     return parts.join(' · ');
+}
+
+// a birthday is only called out in the list while it is coming up, so that the list does not turn
+// into a column of dates
+function getBirthdayHint(person: DebtPersonInfoResponse): string {
+    if (!person.birthday) {
+        return '';
+    }
+
+    const days = daysUntilBirthday(person.birthday, new Date());
+
+    if (days === 0) {
+        return tt('Birthday today');
+    } else if (days <= 30) {
+        return tt('format.misc.birthdayInDays', { days: formatNumberToLocalizedNumerals(days) });
+    }
+
+    return '';
+}
+
+function setBirthday(birthday: string): void {
+    const person = selectedPerson.value;
+
+    if (!person || birthday === (person.birthday ?? '')) {
+        return;
+    }
+
+    updating.value = true;
+
+    debtsStore.modifyPerson({ id: person.id, name: person.name, birthday: birthday }).then(() => {
+        updating.value = false;
+        reload(true);
+    }).catch(error => {
+        updating.value = false;
+
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
+    });
 }
 
 function getDisplayTime(unixTime: number): string {
@@ -757,7 +827,7 @@ function renamePerson(person: DebtPersonInfoResponse): void {
     renameDialog.value?.open(person.name, tt('Rename')).then((newName: string) => {
         updating.value = true;
 
-        debtsStore.renamePerson({ id: person.id, name: newName }).then(() => {
+        debtsStore.modifyPerson({ id: person.id, name: newName }).then(() => {
             updating.value = false;
             reload(true);
         }).catch(error => {
@@ -1045,6 +1115,17 @@ onMounted(() => {
 </script>
 
 <style>
+.person-birthday {
+    min-width: 160px;
+    max-width: 220px;
+}
+
+.person-birthday .v-field__input {
+    min-height: unset;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
 .debt-entry-select {
     width: 40px;
 }

@@ -10,6 +10,8 @@ export interface DebtPersonInfoResponse {
     readonly id: string;
     readonly name: string;
     readonly displayOrder: number;
+    // birthday is the date of birth as YYYY-MM-DD, and is absent when it is not known
+    readonly birthday?: string;
     readonly openAmounts?: DebtAmount[];
     readonly openCount: number;
     // owingAmounts is what the user still owes this person, kept apart from what the person owes
@@ -62,6 +64,8 @@ export interface DebtPersonCreateRequest {
 export interface DebtPersonModifyRequest {
     readonly id: string;
     readonly name: string;
+    // birthday is the new date of birth, empty to forget it, or absent to leave it as it is
+    readonly birthday?: string;
 }
 
 export interface DebtPersonDeleteRequest {
@@ -349,6 +353,22 @@ export function splitAmountEvenly(amount: number, shareCount: number): number[] 
     }
 
     return shares;
+}
+
+// daysUntilBirthday counts the days from today to the next time the given date of birth comes round,
+// which is zero on the day itself. Somebody born on the 29th of February has it on the 1st of March in
+// a year that has no 29th, which is where the calendar rolls the date over to.
+export function daysUntilBirthday(birthday: string, today: Date): number {
+    const [, month, day] = birthday.split('-').map(part => parseInt(part, 10));
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    let next = new Date(start.getFullYear(), (month as number) - 1, day as number);
+
+    if (next < start) {
+        next = new Date(start.getFullYear() + 1, (month as number) - 1, day as number);
+    }
+
+    // rounded rather than floored, because a day that changes the clock is an hour short or long
+    return Math.round((next.getTime() - start.getTime()) / 86400000);
 }
 
 // sumDebtAmountsByCurrency totals what a set of amounts comes to, one total per currency.

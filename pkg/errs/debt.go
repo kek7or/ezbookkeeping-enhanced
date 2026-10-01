@@ -20,4 +20,5 @@ var (
 	ErrDebtEntryDescriptionIsEmpty  = NewNormalError(NormalSubcategoryDebt, 13, http.StatusBadRequest, "debt entry description is empty")
 	ErrDebtPersonOwesNothing        = NewNormalError(NormalSubcategoryDebt, 14, http.StatusBadRequest, "this person owes nothing to make a receipt of")
 	ErrDebtEntryAlreadyForgiven     = NewNormalError(NormalSubcategoryDebt, 15, http.StatusBadRequest, "debt entry has already been forgiven")
+	ErrDebtPersonBirthdayInvalid    = NewNormalError(NormalSubcategoryDebt, 16, http.StatusBadRequest, "debt person birthday is invalid")
 )

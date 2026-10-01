@@ -194,9 +194,13 @@ const router = createRouter({
                     beforeEnter: checkLogin
                 },
                 {
-                    path: '/debts',
+                    path: '/people',
                     component: DebtListPage,
                     beforeEnter: checkLogin
+                },
+                {
+                    path: '/debts',
+                    redirect: '/people'
                 },
                 {
                     path: '/crypto',

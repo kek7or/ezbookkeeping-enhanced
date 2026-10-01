@@ -159,13 +159,13 @@ export const useDebtsStore = defineStore('debts', () => {
         });
     }
 
-    function renamePerson({ id, name }: { id: string, name: string }): Promise<DebtPersonInfoResponse> {
+    function modifyPerson({ id, name, birthday }: { id: string, name: string, birthday?: string }): Promise<DebtPersonInfoResponse> {
         return new Promise((resolve, reject) => {
-            services.modifyDebtPerson({ id: id, name: name }).then(response => {
+            services.modifyDebtPerson({ id: id, name: name, birthday: birthday }).then(response => {
                 const data = response.data;
 
                 if (!data || !data.success || !data.result) {
-                    reject({ message: 'Unable to rename this person' });
+                    reject({ message: 'Unable to change this person' });
                     return;
                 }
 
@@ -173,12 +173,12 @@ export const useDebtsStore = defineStore('debts', () => {
 
                 resolve(data.result);
             }).catch(error => {
-                logger.error('failed to rename debt person', error);
+                logger.error('failed to modify debt person', error);
 
                 if (error.response && error.response.data && error.response.data.errorMessage) {
                     reject({ error: error.response.data });
                 } else if (!error.processed) {
-                    reject({ message: 'Unable to rename this person' });
+                    reject({ message: 'Unable to change this person' });
                 } else {
                     reject(error);
                 }
@@ -523,7 +523,7 @@ export const useDebtsStore = defineStore('debts', () => {
         updatePeopleStateInvalid,
         loadAllPeople,
         addPerson,
-        renamePerson,
+        modifyPerson,
         deletePerson,
         loadEntries,
         loadEntriesOfTransaction,

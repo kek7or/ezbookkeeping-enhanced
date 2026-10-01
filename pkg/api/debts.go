@@ -138,7 +138,17 @@ func (a *DebtsApi) PersonModifyHandler(c *core.WebContext) (any, *errs.Error) {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	if person.Name == personModifyReq.Name {
+	birthday := person.Birthday
+
+	if personModifyReq.Birthday != nil {
+		birthday = *personModifyReq.Birthday
+
+		if _, err := time.Parse("2006-01-02", birthday); birthday != "" && err != nil {
+			return nil, errs.ErrDebtPersonBirthdayInvalid
+		}
+	}
+
+	if person.Name == personModifyReq.Name && person.Birthday == birthday {
 		return nil, errs.ErrNothingWillBeUpdated
 	}
 
@@ -146,6 +156,7 @@ func (a *DebtsApi) PersonModifyHandler(c *core.WebContext) (any, *errs.Error) {
 		PersonId: person.PersonId,
 		Uid:      uid,
 		Name:     personModifyReq.Name,
+		Birthday: birthday,
 	}
 
 	err = a.debts.ModifyPerson(c, newPerson)
@@ -158,6 +169,7 @@ func (a *DebtsApi) PersonModifyHandler(c *core.WebContext) (any, *errs.Error) {
 	log.Infof(c, "[debts.PersonModifyHandler] user \"uid:%d\" has modified person \"id:%d\" successfully", uid, personModifyReq.Id)
 
 	person.Name = newPerson.Name
+	person.Birthday = newPerson.Birthday
 
 	return person.ToDebtPersonInfoResponse(nil, 0, nil, 0), nil
 }

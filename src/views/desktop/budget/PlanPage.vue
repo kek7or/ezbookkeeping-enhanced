@@ -179,6 +179,21 @@
             </v-card>
         </v-col>
 
+        <!-- whoever has a birthday in this month, so that a present is planned rather than
+             remembered on the day -->
+        <v-col cols="12" v-if="birthdaysThisMonth.length">
+            <v-card>
+                <v-card-text class="d-flex flex-wrap align-center gap-2">
+                    <v-icon :icon="mdiCakeVariantOutline" color="primary"/>
+                    <span class="text-body-1 font-weight-medium me-2">{{ tt('Birthdays This Month') }}</span>
+                    <v-chip size="small" variant="tonal" color="primary"
+                            :key="person.id" v-for="person in birthdaysThisMonth">
+                        {{ tt('format.misc.personBirthdayOn', { name: person.name, date: formatGregorianTextualMonthDayToGregorianLikeLongMonthDay(person.monthDay) }) }}
+                    </v-chip>
+                </v-card-text>
+            </v-card>
+        </v-col>
+
         <v-col cols="12" v-if="loading || planActive">
             <v-card :title="tt('The Plan')">
                 <v-card-text class="pt-0">
@@ -612,8 +627,10 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { type CategoryBudgetNode, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
+import { useDebtsStore } from '@/stores/debt.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
+import type { TextualMonthDay } from '@/core/datetime.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import { type PlannedLine, PlannedLineSource, hasCategoryBudgetActivity } from '@/lib/budgetPlan.ts';
@@ -626,6 +643,7 @@ import {
     mdiCheck,
     mdiClose,
     mdiChevronLeft,
+    mdiCakeVariantOutline,
     mdiChevronRight,
     mdiChevronDown,
     mdiDotsVertical,
@@ -723,11 +741,12 @@ const METER_TRACK_OVER = 'rgba(var(--v-theme-error), 0.16)';
 
 const NEAR_PLAN_RATIO = 0.85;
 
-const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatPercentToLocalizedNumerals, formatDateTimeToGregorianLikeLongYearMonth } = useI18n();
+const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatPercentToLocalizedNumerals, formatDateTimeToGregorianLikeLongYearMonth, formatGregorianTextualMonthDayToGregorianLikeLongMonthDay } = useI18n();
 
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const budgetPlanStore = useBudgetPlanStore();
+const debtsStore = useDebtsStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -811,6 +830,16 @@ const planGap = computed<PlanGap | null>(() => {
         ahead: difference.isPositive(),
         amount: displayAmount(difference.abs())
     };
+});
+
+// the people whose birthday falls in the month being planned, in the order the month reaches them
+const birthdaysThisMonth = computed<{ id: string, name: string, monthDay: TextualMonthDay }[]>(() => {
+    const month = String(budgetPlanStore.month).padStart(2, '0');
+
+    return debtsStore.allPeople
+        .filter(person => person.birthday && person.birthday.substring(5, 7) === month)
+        .map(person => ({ id: person.id, name: person.name, monthDay: (person.birthday as string).substring(5) as TextualMonthDay }))
+        .sort((a, b) => a.monthDay.localeCompare(b.monthDay));
 });
 
 const displayMonth = computed<string>(() => formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime({ year: budgetPlanStore.year, month0base: budgetPlanStore.month - 1 }))));
@@ -1429,6 +1458,9 @@ function copyPreviousMonth(): void {
 
 onMounted(() => {
     load(false);
+
+    // birthdays are a courtesy on this page, so a failure to load them is not worth an error
+    debtsStore.loadAllPeople({ force: false }).catch(() => {});
 });
 </script>
 

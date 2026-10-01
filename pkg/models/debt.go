@@ -18,11 +18,14 @@ const MaximumDebtEntriesCountOfOneRequest = 500
 // who can log in, not somebody the money is tracked for. The user is the only one who ever sees it,
 // and the only reason it exists is so that the things bought for that person can be counted together.
 type DebtPerson struct {
-	PersonId        int64  `xorm:"PK"`
-	Uid             int64  `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
-	Deleted         bool   `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
-	Name            string `xorm:"VARCHAR(64) NOT NULL"`
-	DisplayOrder    int32  `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
+	PersonId     int64  `xorm:"PK"`
+	Uid          int64  `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
+	Deleted      bool   `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
+	Name         string `xorm:"VARCHAR(64) NOT NULL"`
+	DisplayOrder int32  `xorm:"INDEX(IDX_debt_person_uid_deleted_order) NOT NULL"`
+	// Birthday is the person's date of birth as YYYY-MM-DD, or empty when it is not known. It carries
+	// a default because it is added to a table that already exists.
+	Birthday        string `xorm:"VARCHAR(10) NOT NULL DEFAULT ''"`
 	CreatedUnixTime int64
 	UpdatedUnixTime int64
 	DeletedUnixTime int64
@@ -106,6 +109,9 @@ type DebtPersonCreateRequest struct {
 type DebtPersonModifyRequest struct {
 	Id   int64  `json:"id,string" binding:"required,min=1"`
 	Name string `json:"name" binding:"required,notBlank,max=64"`
+	// Birthday is the new date of birth as YYYY-MM-DD, empty to forget it, or absent to leave it as
+	// it is - which is what a rename does
+	Birthday *string `json:"birthday" binding:"omitempty,max=10"`
 }
 
 // DebtPersonDeleteRequest represents all parameters of a person deletion request
@@ -228,6 +234,7 @@ type DebtPersonInfoResponse struct {
 	Id           int64  `json:"id,string"`
 	Name         string `json:"name"`
 	DisplayOrder int32  `json:"displayOrder"`
+	Birthday     string `json:"birthday,omitempty"`
 	// OpenAmounts is what is still owed, one entry per currency, and is empty when nothing is
 	OpenAmounts []*DebtAmount `json:"openAmounts,omitempty"`
 	OpenCount   int32         `json:"openCount"`
@@ -285,6 +292,7 @@ func (p *DebtPerson) ToDebtPersonInfoResponse(openAmounts []*DebtAmount, openCou
 		Id:           p.PersonId,
 		Name:         p.Name,
 		DisplayOrder: p.DisplayOrder,
+		Birthday:     p.Birthday,
 		OpenAmounts:  openAmounts,
 		OpenCount:    openCount,
 		OwingAmounts: owingAmounts,

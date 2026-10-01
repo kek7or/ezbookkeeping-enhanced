@@ -97,9 +97,9 @@
                     </div>
                 </li>
                 <li class="nav-link">
-                    <router-link to="/debts">
+                    <router-link to="/people">
                         <v-icon class="nav-item-icon" :icon="mdiAccountCashOutline"/>
-                        <span class="nav-item-title">{{ tt('Debts') }}</span>
+                        <span class="nav-item-title">{{ tt('People') }}</span>
                     </router-link>
                 </li>
                 <li class="nav-link">

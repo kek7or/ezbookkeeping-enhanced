@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen } from '@/models/debt.ts';
+import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday } from '@/models/debt.ts';
 import type { DebtEntryInfoResponse } from '@/models/debt.ts';
 
 function createEntry(amount: number, currency: string): DebtEntryInfoResponse {
@@ -361,5 +361,23 @@ describe('isDebtEntryOpen', () => {
 
     test('says something forgiven is no longer owed', () => {
         expect(isDebtEntryOpen(forgiven(createReceiptEntry('1', undefined, 40)))).toEqual(false);
+    });
+});
+
+describe('daysUntilBirthday', () => {
+    test('is zero on the day itself', () => {
+        expect(daysUntilBirthday('1990-10-02', new Date(2026, 9, 2, 18, 30))).toBe(0);
+    });
+
+    test('counts forward within the year', () => {
+        expect(daysUntilBirthday('1990-10-12', new Date(2026, 9, 2))).toBe(10);
+    });
+
+    test('wraps to next year once it has passed', () => {
+        expect(daysUntilBirthday('1990-10-01', new Date(2026, 9, 2))).toBe(364);
+    });
+
+    test('a 29th of February comes round on the 1st of March in a common year', () => {
+        expect(daysUntilBirthday('2000-02-29', new Date(2027, 1, 27))).toBe(2);
     });
 });

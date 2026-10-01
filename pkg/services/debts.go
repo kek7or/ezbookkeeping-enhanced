@@ -140,7 +140,7 @@ func (s *DebtService) CreatePerson(c core.Context, person *models.DebtPerson) er
 	})
 }
 
-// ModifyPerson renames an existed person
+// ModifyPerson renames an existed person and sets their birthday
 func (s *DebtService) ModifyPerson(c core.Context, person *models.DebtPerson) error {
 	if person.Uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -157,7 +157,7 @@ func (s *DebtService) ModifyPerson(c core.Context, person *models.DebtPerson) er
 	person.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(person.Uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(person.PersonId).Cols("name", "updated_unix_time").Where("uid=? AND deleted=?", person.Uid, false).Update(person)
+		updatedRows, err := sess.ID(person.PersonId).Cols("name", "birthday", "updated_unix_time").Where("uid=? AND deleted=?", person.Uid, false).Update(person)
 
 		if err != nil {
 			return err
