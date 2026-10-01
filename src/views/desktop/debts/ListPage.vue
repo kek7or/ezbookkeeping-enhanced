@@ -330,7 +330,7 @@ import { TransactionType } from '@/core/transaction.ts';
 import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 
 import type { DebtAmount, DebtEntryGroup, DebtEntryGroupKind, DebtEntryInfoResponse, DebtEntryRow, DebtPersonInfoResponse } from '@/models/debt.ts';
-import { sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday } from '@/models/debt.ts';
+import { sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday, sortPeopleForList } from '@/models/debt.ts';
 
 import { KnownFileType } from '@/core/file.ts';
 
@@ -397,7 +397,7 @@ const showSettled = ref<boolean>(false);
 const selectedPersonId = ref<string>('');
 const selectedEntryIds = ref<string[]>([]);
 
-const allPeople = computed<DebtPersonInfoResponse[]>(() => debtsStore.allPeople);
+const allPeople = computed<DebtPersonInfoResponse[]>(() => sortPeopleForList(debtsStore.allPeople, new Date()));
 const selectedPerson = computed<DebtPersonInfoResponse | undefined>(() => debtsStore.allPeopleMap[selectedPersonId.value]);
 
 const openEntries = computed<DebtEntryInfoResponse[]>(() => debtsStore.openEntries);

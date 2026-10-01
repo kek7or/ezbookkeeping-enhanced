@@ -371,6 +371,34 @@ export function daysUntilBirthday(birthday: string, today: Date): number {
     return Math.round((next.getTime() - start.getTime()) / 86400000);
 }
 
+// totalOfAmounts adds amounts up across currencies, which is only good for putting people in order
+// ponytail: ignores exchange rates, so 100 JPY outweighs 10 EUR; convert when people owe in mixed currencies
+function totalOfAmounts(amounts: readonly DebtAmount[] | undefined): number {
+    return (amounts ?? []).reduce((total, amount) => total + amount.amount, 0);
+}
+
+// sortPeopleForList puts the people whose birthday falls in the current month first, and within
+// that and within everybody else, whoever the user owes the most, then whoever owes the user the
+// most. Birthdays break what is left of a tie in the order the month reaches them.
+export function sortPeopleForList(people: readonly DebtPersonInfoResponse[], today: Date): DebtPersonInfoResponse[] {
+    const currentMonth = String(today.getMonth() + 1).padStart(2, '0');
+    const birthdayThisMonth = (person: DebtPersonInfoResponse): string => person.birthday && person.birthday.substring(5, 7) === currentMonth ? person.birthday.substring(5) : '';
+
+    return [...people].sort((a, b) => {
+        const aBirthday = birthdayThisMonth(a);
+        const bBirthday = birthdayThisMonth(b);
+
+        if (!!aBirthday !== !!bBirthday) {
+            return aBirthday ? -1 : 1;
+        }
+
+        return totalOfAmounts(b.owingAmounts) - totalOfAmounts(a.owingAmounts)
+            || totalOfAmounts(b.openAmounts) - totalOfAmounts(a.openAmounts)
+            || aBirthday.localeCompare(bBirthday)
+            || a.displayOrder - b.displayOrder;
+    });
+}
+
 // sumDebtAmountsByCurrency totals what a set of amounts comes to, one total per currency.
 //
 // It takes anything that states a currency and an amount, because the same question is asked of the

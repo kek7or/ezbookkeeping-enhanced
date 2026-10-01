@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday } from '@/models/debt.ts';
-import type { DebtEntryInfoResponse } from '@/models/debt.ts';
+import { splitAmountEvenly, sumDebtAmountsByCurrency, groupDebtEntries, isDebtEntryOpen, daysUntilBirthday, sortPeopleForList } from '@/models/debt.ts';
+import type { DebtEntryInfoResponse, DebtPersonInfoResponse } from '@/models/debt.ts';
 
 function createEntry(amount: number, currency: string): DebtEntryInfoResponse {
     return {
@@ -379,5 +379,34 @@ describe('daysUntilBirthday', () => {
 
     test('a 29th of February comes round on the 1st of March in a common year', () => {
         expect(daysUntilBirthday('2000-02-29', new Date(2027, 1, 27))).toBe(2);
+    });
+});
+
+describe('sortPeopleForList', () => {
+    function person(id: string, birthday: string | undefined, iOwe: number, theyOwe: number): DebtPersonInfoResponse {
+        return {
+            id: id,
+            name: id,
+            displayOrder: parseInt(id.substring(1), 10),
+            birthday: birthday,
+            owingAmounts: iOwe ? [{ currency: 'EUR', amount: iOwe }] : undefined,
+            owingCount: iOwe ? 1 : 0,
+            openAmounts: theyOwe ? [{ currency: 'EUR', amount: theyOwe }] : undefined,
+            openCount: theyOwe ? 1 : 0
+        };
+    }
+
+    test('birthdays this month come first, then what I owe, then what they owe', () => {
+        const today = new Date(2026, 9, 2);
+        const people = [
+            person('p1', undefined, 0, 900),
+            person('p2', '1990-11-05', 500, 0),
+            person('p3', '1990-10-20', 0, 100),
+            person('p4', '1990-10-25', 300, 0),
+            person('p5', undefined, 0, 0),
+            person('p6', '1990-10-05', 0, 100)
+        ];
+
+        expect(sortPeopleForList(people, today).map(p => p.id)).toEqual(['p4', 'p6', 'p3', 'p2', 'p1', 'p5']);
     });
 });
