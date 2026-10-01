@@ -12,6 +12,9 @@ export interface DebtPersonInfoResponse {
     readonly displayOrder: number;
     readonly openAmounts?: DebtAmount[];
     readonly openCount: number;
+    // owingAmounts is what the user still owes this person, kept apart from what the person owes
+    readonly owingAmounts?: DebtAmount[];
+    readonly owingCount: number;
 }
 
 // DebtEntryInfoResponse is one thing a person owes: a whole transaction, one position of one, or a
@@ -37,6 +40,8 @@ export interface DebtEntryInfoResponse {
     readonly forgivenTime?: number;
     // manual says this debt was entered by hand and has no transaction behind it
     readonly manual?: boolean;
+    // owing says the user owes this to the person rather than the other way round
+    readonly owing?: boolean;
     // name is what the position is called on the receipt, or what a debt entered by hand was called,
     // and is absent when the whole transaction is owed rather than one of its positions
     readonly name?: string;
@@ -88,6 +93,8 @@ export interface DebtEntryCreateManualRequest {
     readonly amount: number;
     readonly currency: string;
     readonly time: number;
+    // owing records what the user owes the person, rather than what the person owes the user
+    readonly owing?: boolean;
 }
 
 export interface DebtEntryModifyRequest {

@@ -80,9 +80,16 @@ type DebtEntry struct {
 	// It carries a default because it is added to a table that already exists, and a NOT NULL column
 	// without one cannot be added to a populated table.
 	ForgivenUnixTime int64 `xorm:"NOT NULL DEFAULT 0"`
-	CreatedUnixTime  int64
-	UpdatedUnixTime  int64
-	DeletedUnixTime  int64
+	// Owing turns the entry around: the user owes this to the person, rather than the person to the
+	// user. Only a debt entered by hand can be one - money somebody else paid for the user never
+	// passed through this ledger, so there is no transaction of the user's to point at. Settling it
+	// is paying it back, and forgiving it is the person letting it go.
+	//
+	// It carries a default because it is added to a table that already exists.
+	Owing           bool `xorm:"NOT NULL DEFAULT 0"`
+	CreatedUnixTime int64
+	UpdatedUnixTime int64
+	DeletedUnixTime int64
 }
 
 // DebtPersonGetRequest represents all parameters of a request to get one person
@@ -166,6 +173,8 @@ type DebtEntryCreateManualRequest struct {
 	Amount      int64  `json:"amount" binding:"required,min=1,max=999999999999999"`
 	Currency    string `json:"currency" binding:"required,len=3,validCurrency"`
 	Time        int64  `json:"time" binding:"required,min=1"`
+	// Owing records what the user owes the person, rather than what the person owes the user
+	Owing bool `json:"owing"`
 }
 
 // DebtEntryModifyRequest represents all parameters of a request to change what is owed of one entry
@@ -222,6 +231,10 @@ type DebtPersonInfoResponse struct {
 	// OpenAmounts is what is still owed, one entry per currency, and is empty when nothing is
 	OpenAmounts []*DebtAmount `json:"openAmounts,omitempty"`
 	OpenCount   int32         `json:"openCount"`
+	// OwingAmounts is what the user still owes this person, one entry per currency, kept apart from
+	// what the person owes because the two are paid in opposite directions
+	OwingAmounts []*DebtAmount `json:"owingAmounts,omitempty"`
+	OwingCount   int32         `json:"owingCount"`
 }
 
 // DebtEntryInfoResponse represents a view-object of one thing a person owes.
@@ -246,6 +259,8 @@ type DebtEntryInfoResponse struct {
 	ForgivenTime int64 `json:"forgivenTime,omitempty"`
 	// Manual says this debt was entered by hand and has no transaction behind it
 	Manual bool `json:"manual,omitempty"`
+	// Owing says the user owes this to the person rather than the other way round
+	Owing bool `json:"owing,omitempty"`
 	// Name is what the position is called on the receipt, or what a debt entered by hand was called,
 	// and is empty when the whole transaction is owed rather than one of its positions
 	Name string `json:"name,omitempty"`
@@ -265,13 +280,15 @@ type DebtEntryInfoResponse struct {
 }
 
 // ToDebtPersonInfoResponse returns a view-object according to database model
-func (p *DebtPerson) ToDebtPersonInfoResponse(openAmounts []*DebtAmount, openCount int32) *DebtPersonInfoResponse {
+func (p *DebtPerson) ToDebtPersonInfoResponse(openAmounts []*DebtAmount, openCount int32, owingAmounts []*DebtAmount, owingCount int32) *DebtPersonInfoResponse {
 	return &DebtPersonInfoResponse{
 		Id:           p.PersonId,
 		Name:         p.Name,
 		DisplayOrder: p.DisplayOrder,
 		OpenAmounts:  openAmounts,
 		OpenCount:    openCount,
+		OwingAmounts: owingAmounts,
+		OwingCount:   owingCount,
 	}
 }
 
@@ -291,6 +308,7 @@ func (e *DebtEntry) ToDebtEntryInfoResponse() *DebtEntryInfoResponse {
 		Forgiven:                e.ForgivenUnixTime > 0,
 		ForgivenTime:            e.ForgivenUnixTime,
 		Manual:                  e.TransactionId <= 0,
+		Owing:                   e.Owing,
 		Name:                    e.Description,
 	}
 }

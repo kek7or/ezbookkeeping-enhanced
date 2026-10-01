@@ -2,11 +2,11 @@
     <v-dialog width="600" v-model="showState">
         <v-card class="pa-sm-1 pa-md-2">
             <template #title>
-                <h4 class="text-h4 text-wrap">{{ tt('Record a Loan') }}</h4>
+                <h4 class="text-h4 text-wrap">{{ owing ? tt('Record What You Owe') : tt('Record a Loan') }}</h4>
             </template>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ tt('For money that never passed through the ledger, such as cash you handed over.') }}
+                    {{ owing ? tt('For money this person paid or lent you, such as a bill they covered.') : tt('For money that never passed through the ledger, such as cash you handed over.') }}
                 </p>
                 <v-row>
                     <v-col cols="12">
@@ -14,7 +14,7 @@
                                       autofocus
                                       :disabled="submitting"
                                       :label="tt('Description')"
-                                      :placeholder="tt('What was lent')"
+                                      :placeholder="owing ? tt('What was borrowed') : tt('What was lent')"
                                       v-model="description"/>
                     </v-col>
                     <v-col cols="12" md="6">
@@ -88,6 +88,7 @@ const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const showState = ref<boolean>(false);
 const submitting = ref<boolean>(false);
 const personId = ref<string>('');
+const owing = ref<boolean>(false);
 const description = ref<string>('');
 const amount = ref<number>(0);
 const currency = ref<string>('');
@@ -101,13 +102,14 @@ const isInputValid = computed<boolean>(() => !!description.value.trim() && amoun
 
 // a loan is opened with the currency the user keeps their books in, because that is the one they are
 // most likely to have handed over
-function open(openPersonId: string): Promise<DebtEntryInfoResponse> {
+function open(openPersonId: string, openOwing?: boolean): Promise<DebtEntryInfoResponse> {
     const now = getCurrentUnixTime();
     const timezone = settingsStore.appSettings.timeZone;
 
     showState.value = true;
     submitting.value = false;
     personId.value = openPersonId;
+    owing.value = !!openOwing;
     description.value = '';
     amount.value = 0;
     currency.value = userStore.currentUserDefaultCurrency;
@@ -132,7 +134,8 @@ function save(): void {
         description: description.value.trim(),
         amount: amount.value,
         currency: currency.value,
-        time: time.value
+        time: time.value,
+        owing: owing.value
     }).then(entry => {
         submitting.value = false;
         showState.value = false;

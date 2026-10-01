@@ -27,6 +27,10 @@
                         <span v-if="totalOwed.length">{{ getDisplayAmounts(totalOwed) }}</span>
                         <span v-else-if="!totalOwed.length">{{ tt('Nothing') }}</span>
                     </p>
+                    <template v-if="totalOwing.length">
+                        <span class="text-subtitle-2">{{ tt('Total You Owe') }}</span>
+                        <p class="text-h5 text-error mt-1 mb-0">{{ getDisplayAmounts(totalOwing) }}</p>
+                    </template>
                 </v-card-text>
 
                 <v-card-text>
@@ -40,8 +44,7 @@
                             </template>
                             <v-list-item-title>{{ person.name }}</v-list-item-title>
                             <v-list-item-subtitle>
-                                <span v-if="person.openCount">{{ getDisplayOpenAmounts(person) }}</span>
-                                <span v-else-if="!person.openCount">{{ tt('Owes you nothing') }}</span>
+                                <span>{{ getPersonSummary(person) }}</span>
                             </v-list-item-subtitle>
                             <template #append>
                                 <v-btn density="comfortable" color="default" variant="text" :icon="true"
@@ -84,7 +87,7 @@
                         </v-btn>
                         <v-btn class="ms-2" density="comfortable" variant="text" color="default"
                                :prepend-icon="mdiFileExcelOutline" :loading="exportingReceipt"
-                               :disabled="loadingEntries || updating || !openEntries.length"
+                               :disabled="loadingEntries || updating || !openTotals.length"
                                @click="makeReceipt">
                             <template #loader>
                                 <v-progress-circular indeterminate size="20"/>
@@ -93,8 +96,12 @@
                             <v-tooltip activator="parent" open-delay="500">{{ tt('A spreadsheet of everything still owed, to hand to this person') }}</v-tooltip>
                         </v-btn>
                         <v-btn class="ms-2" density="comfortable" :prepend-icon="mdiHandCoinOutline"
-                               :disabled="loadingEntries || updating" @click="addLoan">
+                               :disabled="loadingEntries || updating" @click="addLoan(false)">
                             {{ tt('Record a Loan') }}
+                        </v-btn>
+                        <v-btn class="ms-2" density="comfortable" variant="tonal" :prepend-icon="mdiCashMinus"
+                               :disabled="loadingEntries || updating" @click="addLoan(true)">
+                            {{ tt('Record What You Owe') }}
                         </v-btn>
                     </div>
                 </template>
@@ -102,9 +109,13 @@
                 <v-card-text>
                     <span class="text-subtitle-2">{{ tt('Still Owed') }}</span>
                     <p class="text-h5 mt-1 mb-0">
-                        <span v-if="openEntries.length">{{ getDisplayAmounts(openTotals) }}</span>
-                        <span v-else-if="!openEntries.length">{{ tt('Nothing') }}</span>
+                        <span v-if="openTotals.length">{{ getDisplayAmounts(openTotals) }}</span>
+                        <span v-else-if="!openTotals.length">{{ tt('Nothing') }}</span>
                     </p>
+                    <template v-if="owingTotals.length">
+                        <span class="text-subtitle-2">{{ tt('You Owe') }}</span>
+                        <p class="text-h5 text-error mt-1 mb-0">{{ getDisplayAmounts(owingTotals) }}</p>
+                    </template>
                 </v-card-text>
 
                 <v-card-text class="pt-0">
@@ -174,6 +185,7 @@
                                     <div class="d-flex align-center">
                                         <span :class="{ 'cursor-pointer': !row.entry.manual }" @click="showTransaction(row.entry)">{{ getEntryDescription(row.entry) }}</span>
                                         <v-chip class="ms-2" size="x-small" label v-if="row.entry.manual">{{ tt('By Hand') }}</v-chip>
+                                        <v-chip class="ms-2" size="x-small" label color="error" v-if="row.entry.owing">{{ tt('You Owe') }}</v-chip>
                                         <v-chip class="ms-2" size="x-small" label v-if="row.entry.settled">{{ tt('Settled') }}</v-chip>
                                         <v-chip class="ms-2" size="x-small" label v-if="row.entry.forgiven">
                                             {{ tt('Forgiven') }}
@@ -306,6 +318,7 @@ import {
     mdiUndoVariant,
     mdiRenameOutline,
     mdiHandCoinOutline,
+    mdiCashMinus,
     mdiHandHeartOutline,
     mdiEyeOutline,
     mdiEyeOffOutline,
@@ -359,7 +372,10 @@ const selectedPerson = computed<DebtPersonInfoResponse | undefined>(() => debtsS
 const openEntries = computed<DebtEntryInfoResponse[]>(() => debtsStore.openEntries);
 const visibleEntries = computed<DebtEntryInfoResponse[]>(() => showSettled.value ? debtsStore.currentEntries : debtsStore.openEntries);
 
-const openTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(openEntries.value));
+// what the person owes the user and what the user owes the person are paid in opposite directions,
+// so they are totalled apart rather than netted
+const openTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(openEntries.value.filter(entry => !entry.owing)));
+const owingTotals = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(openEntries.value.filter(entry => entry.owing)));
 
 // what everybody together still owes, added from the standing totals the server keeps for each
 // person, so it counts the people whose debts are not on screen as well as the one who is
@@ -374,6 +390,8 @@ const totalOwed = computed<DebtAmount[]>(() => {
 
     return sumDebtAmountsByCurrency(allOpenAmounts);
 });
+
+const totalOwing = computed<DebtAmount[]>(() => sumDebtAmountsByCurrency(allPeople.value.flatMap(person => person.owingAmounts ?? [])));
 
 // only what is still open can be paid back, so a ticked settled row is ignored rather than counted
 const selectedOpenEntries = computed<DebtEntryInfoResponse[]>(() => openEntries.value.filter(entry => selectedEntryIds.value.indexOf(entry.id) >= 0));
@@ -467,8 +485,22 @@ function getDisplayAmounts(amounts: DebtAmount[]): string {
     return amounts.map(amount => getDisplayAmount(amount.amount, amount.currency)).join(' + ');
 }
 
-function getDisplayOpenAmounts(person: DebtPersonInfoResponse): string {
-    return getDisplayAmounts(person.openAmounts ?? []);
+function getPersonSummary(person: DebtPersonInfoResponse): string {
+    const parts: string[] = [];
+
+    if (person.openCount) {
+        parts.push(getDisplayAmounts(person.openAmounts ?? []));
+    }
+
+    if (person.owingCount) {
+        parts.push(tt('format.misc.debtYouOwe', { amount: getDisplayAmounts(person.owingAmounts ?? []) }));
+    }
+
+    if (!parts.length) {
+        return tt('Settled up');
+    }
+
+    return parts.join(' · ');
 }
 
 function getDisplayTime(unixTime: number): string {
@@ -784,12 +816,12 @@ function changeAmount(entry: DebtEntryInfoResponse): void {
     });
 }
 
-function addLoan(): void {
+function addLoan(owing: boolean): void {
     if (!selectedPersonId.value) {
         return;
     }
 
-    addLoanDialog.value?.open(selectedPersonId.value).then(() => {
+    addLoanDialog.value?.open(selectedPersonId.value, owing).then(() => {
         reload(true);
     }).catch(() => {
         // the dialog rejects when it is closed without saving, which is not an error here
@@ -951,6 +983,14 @@ function recordRepayment(): void {
         return;
     }
 
+    const owing = !!selectedOpenEntries.value[0]?.owing;
+
+    // money going out and money coming in are two transactions, never one
+    if (selectedOpenEntries.value.some(entry => !!entry.owing !== owing)) {
+        snackbar.value?.showMessage('A repayment goes one way at a time. Tick either what you owe or what is owed to you.');
+        return;
+    }
+
     if (selectedTotals.value.length > 1) {
         snackbar.value?.showMessage('A repayment covers one currency at a time. Tick things owed in the same currency.');
         return;
@@ -966,9 +1006,9 @@ function recordRepayment(): void {
     const personName = selectedPerson.value.name;
 
     editDialog.value?.open({
-        type: TransactionType.Income,
+        type: owing ? TransactionType.Expense : TransactionType.Income,
         amount: total.amount,
-        comment: tt('format.misc.debtRepaymentComment', { name: personName }),
+        comment: owing ? tt('format.misc.debtOwingRepaymentComment', { name: personName }) : tt('format.misc.debtRepaymentComment', { name: personName }),
         noTransactionDraft: true
     }).then(result => {
         if (!result || !result.transactionId) {

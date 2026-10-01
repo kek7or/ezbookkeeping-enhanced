@@ -60,12 +60,23 @@ func (a *DebtsApi) PersonListHandler(c *core.WebContext) (any, *errs.Error) {
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	openAmounts, openCounts := a.getOpenAmountsByPerson(openEntries)
+	var owedEntries, owingEntries []*models.DebtEntry
+
+	for i := 0; i < len(openEntries); i++ {
+		if openEntries[i].Owing {
+			owingEntries = append(owingEntries, openEntries[i])
+		} else {
+			owedEntries = append(owedEntries, openEntries[i])
+		}
+	}
+
+	openAmounts, openCounts := a.getOpenAmountsByPerson(owedEntries)
+	owingAmounts, owingCounts := a.getOpenAmountsByPerson(owingEntries)
 	personResps := make(models.DebtPersonInfoResponseSlice, len(persons))
 
 	for i := 0; i < len(persons); i++ {
 		person := persons[i]
-		personResps[i] = person.ToDebtPersonInfoResponse(openAmounts[person.PersonId], openCounts[person.PersonId])
+		personResps[i] = person.ToDebtPersonInfoResponse(openAmounts[person.PersonId], openCounts[person.PersonId], owingAmounts[person.PersonId], owingCounts[person.PersonId])
 	}
 
 	sort.Sort(personResps)
@@ -106,7 +117,7 @@ func (a *DebtsApi) PersonCreateHandler(c *core.WebContext) (any, *errs.Error) {
 
 	log.Infof(c, "[debts.PersonCreateHandler] user \"uid:%d\" has created a new person \"id:%d\" successfully", uid, person.PersonId)
 
-	return person.ToDebtPersonInfoResponse(nil, 0), nil
+	return person.ToDebtPersonInfoResponse(nil, 0, nil, 0), nil
 }
 
 // PersonModifyHandler saves an existed person modification by request parameters for current user
@@ -148,7 +159,7 @@ func (a *DebtsApi) PersonModifyHandler(c *core.WebContext) (any, *errs.Error) {
 
 	person.Name = newPerson.Name
 
-	return person.ToDebtPersonInfoResponse(nil, 0), nil
+	return person.ToDebtPersonInfoResponse(nil, 0, nil, 0), nil
 }
 
 // PersonDeleteHandler deletes an existed person by request parameters for current user
@@ -281,11 +292,20 @@ func (a *DebtsApi) EntryExportHandler(c *core.WebContext) ([]byte, string, *errs
 		return nil, "", errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	entries, err := a.debts.GetEntriesByPersonId(c, uid, exportReq.PersonId, false)
+	allEntries, err := a.debts.GetEntriesByPersonId(c, uid, exportReq.PersonId, false)
 
 	if err != nil {
 		log.Errorf(c, "[debts.EntryExportHandler] failed to get debt entries of person \"id:%d\" for user \"uid:%d\", because %s", exportReq.PersonId, uid, err.Error())
 		return nil, "", errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	// the receipt is a bill for the person, so what the user owes them has no place on it
+	entries := make([]*models.DebtEntry, 0, len(allEntries))
+
+	for i := 0; i < len(allEntries); i++ {
+		if !allEntries[i].Owing {
+			entries = append(entries, allEntries[i])
+		}
 	}
 
 	if len(entries) < 1 {
@@ -558,6 +578,7 @@ func (a *DebtsApi) EntryCreateManualHandler(c *core.WebContext) (any, *errs.Erro
 		// the time is kept the way every other time in this ledger is, so that a debt entered by
 		// hand sorts among the ones that came from transactions instead of beside them
 		TransactionTime: utils.GetMinTransactionTimeFromUnixTime(entryCreateReq.Time),
+		Owing:           entryCreateReq.Owing,
 	}
 
 	err = a.debts.CreateManualEntry(c, entry)
