@@ -148,15 +148,15 @@
                                     <div class="text-h6 font-weight-regular">{{ displayAmount(plannedTotals.expense) }}</div>
                                 </div>
                                 <div class="budget-plan-figure">
-                                    <div class="text-caption text-medium-emphasis">{{ tt('Spent so far') }}</div>
+                                    <div class="text-caption text-medium-emphasis">{{ monthOver ? tt('Spent') : tt('Spent so far') }}</div>
                                     <div class="text-h6 font-weight-regular">{{ displayAmount(actualTotals.expense) }}</div>
                                 </div>
                                 <div class="budget-plan-figure">
-                                    <div class="text-caption text-medium-emphasis">{{ tt('Still to Come') }}</div>
+                                    <div class="text-caption text-medium-emphasis">{{ remainingLabel }}</div>
                                     <div class="text-h6 font-weight-regular">{{ displayAmount(remainingToSpend) }}</div>
                                 </div>
                                 <div class="budget-plan-figure">
-                                    <div class="text-caption text-medium-emphasis">{{ tt('Earned so far') }}</div>
+                                    <div class="text-caption text-medium-emphasis">{{ monthOver ? tt('Earned') : tt('Earned so far') }}</div>
                                     <div class="text-h6 font-weight-regular">{{ displayAmount(actualTotals.income) }}</div>
                                 </div>
                             </div>
@@ -403,7 +403,10 @@
                                 <span class="budget-category-indent" v-else></span>
                                 <div class="d-flex flex-column">
                                     <div class="d-flex align-center">
-                                        <span :class="row.isPrimary ? 'font-weight-medium' : ''">{{ getCategoryName(row.categoryId) }}</span>
+                                        <!-- the name opens what was actually booked against the
+                                             category this month, newest first -->
+                                        <router-link class="budget-category-link" :to="categoryTransactionsLink(row.categoryId)"
+                                                     :class="row.isPrimary ? 'font-weight-medium' : ''">{{ getCategoryName(row.categoryId) }}</router-link>
                                         <v-chip class="ms-2" size="x-small" color="error" variant="tonal"
                                                 v-if="row.node.overAllocated">{{ tt('Over-allocated') }}</v-chip>
                                     </div>
@@ -630,12 +633,12 @@ import { type CategoryBudgetNode, useBudgetPlanStore } from '@/stores/budgetPlan
 import { useDebtsStore } from '@/stores/debt.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
-import type { TextualMonthDay } from '@/core/datetime.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import { type PlannedLine, PlannedLineSource, hasCategoryBudgetActivity } from '@/lib/budgetPlan.ts';
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
-import { parseDateTimeFromUnixTime, getYearMonthFirstUnixTime } from '@/lib/datetime.ts';
+import { type TextualMonthDay, DateRange } from '@/core/datetime.ts';
+import { parseDateTimeFromUnixTime, getYearMonthFirstUnixTime, getYearMonthLastUnixTime } from '@/lib/datetime.ts';
 
 import {
     mdiRefresh,
@@ -779,6 +782,11 @@ const assigningWishId = ref<string>('');
 // Whether this month has a plan to show at all. See the store for why a past month that was never
 // planned shows nothing rather than a plan assembled out of the standing figures and the schedules.
 const planActive = computed<boolean>(() => budgetPlanStore.planActive);
+const monthOver = computed<boolean>(() => budgetPlanStore.monthOver);
+
+// What the plan expected and has not seen go out. While the month runs that is still to come; once
+// it is over nothing more is coming, and the same money is what the plan allowed and was not spent.
+const remainingLabel = computed<string>(() => monthOver.value ? tt('Left Unspent') : tt('Still to Come'));
 
 const wishes = computed<BudgetPlanItem[]>(() => budgetPlanStore.planWishes);
 const pickedWishCount = computed<number>(() => budgetPlanStore.pickedWishCount);
@@ -876,7 +884,7 @@ const flowSegments = computed<FlowSegment[]>(() => {
     // so the three of them are the income - which is what makes the last one believable.
     const segments: FlowSegment[] = [
         buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, actualTotals.value.expense, total),
-        buildSegment('still-to-come', tt('Still to Come'), FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
+        buildSegment('still-to-come', remainingLabel.value, FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
         buildSegment('left', tt('On Track to Save'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
 
@@ -1096,6 +1104,16 @@ function getAccountName(accountId: string): string {
 
 function toggleGroup(key: string): void {
     collapsedGroups.value = { ...collapsedGroups.value, [key]: !collapsedGroups.value[key] };
+}
+
+// The transaction list over the month being looked at, narrowed to the category. A primary brings
+// its subcategories with it, the same way its Actual figure does.
+function categoryTransactionsLink(categoryId: string): string {
+    const month0base = budgetPlanStore.month - 1;
+    const minTime = getYearMonthFirstUnixTime({ year: budgetPlanStore.year, month0base: month0base });
+    const maxTime = getYearMonthLastUnixTime({ year: budgetPlanStore.year, month0base: month0base });
+
+    return `/transaction/list?dateType=${DateRange.Custom.type}&minTime=${minTime}&maxTime=${maxTime}&categoryIds=${categoryId}`;
 }
 
 function toggleCategory(categoryId: string): void {
@@ -1682,6 +1700,15 @@ onMounted(() => {
     width: 48px;
     min-width: 48px;
     flex: 0 0 auto;
+}
+
+.budget-category-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.budget-category-link:hover {
+    text-decoration: underline;
 }
 
 .budget-category-table .budget-category-primary-row > td {

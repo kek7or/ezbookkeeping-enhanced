@@ -164,6 +164,16 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // about. A month is planned when somebody says so, and until then there is nothing to show.
     const planActive = computed<boolean>(() => monthIsPlanned.value);
 
+    // monthOver is whether the month has already ended. What the plan still expected to go out in a
+    // month that is over is not still to come - it is what was never spent - and the page words it so.
+    const monthOver = computed<boolean>(() => {
+        const today = getCurrentDateTime();
+        const currentYear = today.getGregorianCalendarYear();
+        const currentMonth = today.getGregorianCalendarMonth();
+
+        return year.value < currentYear || (year.value === currentYear && month.value < currentMonth);
+    });
+
     // Only the two spending types are planned against. A transfer moves money between two accounts
     // of one ledger and is neither earned nor spent, so there is nothing about it to expect.
     const primaryCategories = computed<TransactionCategory[]>(() => {
@@ -782,6 +792,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         planStateInvalid,
         // computed states
         planActive,
+        monthOver,
         defaultCurrency,
         scheduleLines,
         itemLines,
