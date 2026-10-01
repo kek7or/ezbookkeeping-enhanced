@@ -758,6 +758,10 @@ const initOptions = ref<TransactionEditOptions | undefined>(undefined);
 // transaction was added even when the caller only hears about it on close
 const lastSavedTransactionId = ref<string | null>(null);
 
+// positions are saved on their own, before the dialog is, and can move the amount of the transaction.
+// Closing the dialog afterwards has to tell the caller, or the page behind it keeps the old amount.
+let lineItemsSaved = false;
+
 let resolveFunc: ((response?: TransactionEditResponse) => void) | null = null;
 let rejectFunc: ((reason?: unknown) => void) | null = null;
 
@@ -812,6 +816,7 @@ const isTransactionModified = computed<boolean>(() => {
 function onLineItemsSaved(lineItems: TransactionReceiptLineItem[], amount: number): void {
     transaction.value.lineItems = lineItems;
     transaction.value.sourceAmount = amount;
+    lineItemsSaved = true;
 }
 
 function getDisplayLineItemAmount(amount: number): string {
@@ -820,6 +825,7 @@ function getDisplayLineItemAmount(amount: number): string {
 
 function open(options: TransactionEditOptions): Promise<TransactionEditResponse | undefined> {
     lastSavedTransactionId.value = null;
+    lineItemsSaved = false;
     addByTemplateId.value = null;
     duplicateFromId.value = null;
     showState.value = true;
@@ -1205,6 +1211,8 @@ function cancel(): void {
                 message: 'You have added a new transaction',
                 transactionId: lastSavedTransactionId.value ?? undefined
             });
+        } else if (lineItemsSaved && resolveFunc) {
+            resolveFunc();
         } else if (rejectFunc) {
             rejectFunc();
         }
