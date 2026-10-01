@@ -1136,13 +1136,21 @@ func (s *TransactionService) ModifyReceiptMerchantName(c core.Context, uid int64
 // total wherever they are read, and a difference is a thing to be seen rather than refused: an
 // itemization written by hand is written a line at a time, and is short of the total until the last
 // line is in.
-func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, transactionId int64, lineItems []*models.TransactionReceiptLineItemModifyItem) ([]*models.TransactionReceiptLineItem, error) {
+//
+// An itemization that did add up keeps adding up, though: correcting the price of one article of an
+// expense or an income moves the amount of the transaction, and the balance of its account, along
+// with it. Positions that already disagreed with the total are left disagreeing, because nothing says
+// which of the two numbers is the one that was wrong. A transfer is never moved, as its two sides
+// would then have to be told apart.
+//
+// The amount of the transaction as it now stands is returned beside the positions.
+func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, transactionId int64, lineItems []*models.TransactionReceiptLineItemModifyItem) ([]*models.TransactionReceiptLineItem, int64, error) {
 	if uid <= 0 {
-		return nil, errs.ErrUserIdInvalid
+		return nil, 0, errs.ErrUserIdInvalid
 	}
 
 	if transactionId <= 0 {
-		return nil, errs.ErrTransactionIdInvalid
+		return nil, 0, errs.ErrTransactionIdInvalid
 	}
 
 	now := time.Now().Unix()
@@ -1162,11 +1170,18 @@ func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, t
 		newLineItemIds = s.GenerateUuids(uuid.UUID_TYPE_DEFAULT, uint16(newLineItemCount))
 
 		if len(newLineItemIds) < newLineItemCount {
-			return nil, errs.ErrSystemIsBusy
+			return nil, 0, errs.ErrSystemIsBusy
 		}
 	}
 
+	var newTotalAmount int64 = 0
+
+	for i := 0; i < len(lineItems); i++ {
+		newTotalAmount += lineItems[i].Amount
+	}
+
 	updatedLineItems := make([]*models.TransactionReceiptLineItem, len(lineItems))
+	var transactionAmount int64 = 0
 
 	err := s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
 		transaction := &models.Transaction{}
@@ -1186,10 +1201,19 @@ func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, t
 		}
 
 		existingLineItemIds := make(map[int64]bool, len(existingLineItems))
+		var oldTotalAmount int64 = 0
 
 		for i := 0; i < len(existingLineItems); i++ {
 			existingLineItemIds[existingLineItems[i].LineItemId] = true
+			oldTotalAmount += existingLineItems[i].Amount
 		}
+
+		transactionAmount = transaction.Amount
+
+		followsLineItems := (transaction.Type == models.TRANSACTION_DB_TYPE_EXPENSE || transaction.Type == models.TRANSACTION_DB_TYPE_INCOME) &&
+			len(existingLineItems) > 0 && len(lineItems) > 0 &&
+			oldTotalAmount == transaction.Amount && newTotalAmount != transaction.Amount &&
+			newTotalAmount >= models.MinimumTransactionAmount && newTotalAmount <= models.MaximumTransactionAmount
 
 		// a position of another transaction, or one named twice in the same request, is a request
 		// that cannot be carried out as it reads rather than one to be made sense of
@@ -1277,14 +1301,53 @@ func (s *TransactionService) ModifyReceiptLineItems(c core.Context, uid int64, t
 			updatedLineItems[i] = lineItem
 		}
 
+		if !followsLineItems {
+			return nil
+		}
+
+		transactionUpdateModel := &models.Transaction{
+			Amount:          newTotalAmount,
+			UpdatedUnixTime: now,
+		}
+
+		updatedRows, err := sess.ID(transactionId).Cols("amount", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(transactionUpdateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrTransactionNotFound
+		}
+
+		// an expense takes its amount out of the account and an income puts it in, so the same
+		// correction moves the balance in opposite directions for the two
+		balanceExpression := fmt.Sprintf("balance+(%d)-(%d)", transaction.Amount, newTotalAmount)
+
+		if transaction.Type == models.TRANSACTION_DB_TYPE_INCOME {
+			balanceExpression = fmt.Sprintf("balance-(%d)+(%d)", transaction.Amount, newTotalAmount)
+		}
+
+		accountUpdateModel := &models.Account{
+			UpdatedUnixTime: now,
+		}
+
+		updatedRows, err = sess.ID(transaction.AccountId).SetExpr("balance", balanceExpression).Cols("updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(accountUpdateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrDatabaseOperationFailed
+		}
+
+		transactionAmount = newTotalAmount
+
 		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return updatedLineItems, nil
+	return updatedLineItems, transactionAmount, nil
 }
 
 // maximumScheduledTransactionLookbackDays bounds the walk back through the calendar that finds a

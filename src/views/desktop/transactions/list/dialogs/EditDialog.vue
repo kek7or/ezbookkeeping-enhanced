@@ -439,7 +439,7 @@
                                          :line-items="transactionLineItems"
                                          @error="(error) => snackbar?.showError(error)"
                                          @message="(message) => snackbar?.showMessage(message)"
-                                         @saved="(lineItems) => transaction.lineItems = lineItems"
+                                         @saved="onLineItemsSaved"
                                          v-if="activeTab === 'lineItems' && !!editId"/>
                         <div class="transaction-line-items mt-2" v-else-if="!editId && transactionLineItems.length">
                             <div class="d-flex align-center px-2 pb-1 text-caption text-medium-emphasis">
@@ -806,6 +806,13 @@ const isTransactionModified = computed<boolean>(() => {
         return false;
     }
 });
+
+// positions that added up to the transaction have just moved its amount on the server, and the
+// amount on screen follows so that saving the rest of the dialog does not put the old one back
+function onLineItemsSaved(lineItems: TransactionReceiptLineItem[], amount: number): void {
+    transaction.value.lineItems = lineItems;
+    transaction.value.sourceAmount = amount;
+}
 
 function getDisplayLineItemAmount(amount: number): string {
     return formatAmountToLocalizedNumeralsWithCurrency(parseBigDecimal(amount), sourceAccountCurrency.value);

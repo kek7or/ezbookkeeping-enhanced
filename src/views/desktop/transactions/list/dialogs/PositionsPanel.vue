@@ -109,7 +109,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'error', error: string | { message: string } | { error: ErrorResponse }): void;
     (e: 'message', message: string): void;
-    (e: 'saved', lineItems: TransactionReceiptLineItem[]): void;
+    (e: 'saved', lineItems: TransactionReceiptLineItem[], amount: number): void;
 }>();
 
 const { tt, formatNumberToLocalizedNumerals, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
@@ -206,11 +206,11 @@ function save(): void {
     transactionsStore.modifyTransactionLineItems({
         transactionId: props.transactionId,
         lineItems: lineItems
-    }).then(savedLineItems => {
+    }).then(result => {
         submitting.value = false;
-        positions.value = toPositions(savedLineItems);
+        positions.value = toPositions(result.lineItems);
 
-        emit('saved', savedLineItems);
+        emit('saved', result.lineItems, result.amount);
         emit('message', 'The positions have been saved');
     }).catch(error => {
         submitting.value = false;

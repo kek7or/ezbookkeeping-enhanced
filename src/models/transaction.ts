@@ -582,6 +582,13 @@ export interface TransactionReceiptLineItemModifyItem {
     readonly amount: number;
 }
 
+// TransactionReceiptLineItemModifyResponse is an itemization just saved, with the amount of its
+// transaction as it now stands: positions that added up to the transaction move its amount with them
+export interface TransactionReceiptLineItemModifyResponse {
+    readonly lineItems: TransactionReceiptLineItem[];
+    readonly amount: number;
+}
+
 // TransactionReceipt is the shopping trip a transaction was one category of: one visit to one shop,
 // paid once. Several transactions share it, which is what lets the list show them together instead of
 // as unrelated rows that happen to fall in the same second.

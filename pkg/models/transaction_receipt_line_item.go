@@ -60,6 +60,13 @@ type TransactionReceiptLineItemResponse struct {
 	Amount int64  `json:"amount"`
 }
 
+// TransactionReceiptLineItemModifyResponse represents the itemization of a transaction just saved,
+// together with the amount of that transaction, which follows its positions when they added up to it
+type TransactionReceiptLineItemModifyResponse struct {
+	LineItems []*TransactionReceiptLineItemResponse `json:"lineItems"`
+	Amount    int64                                 `json:"amount"`
+}
+
 // ToTransactionReceiptLineItemResponse returns a view-object according to this receipt line
 func (l *TransactionReceiptLineItem) ToTransactionReceiptLineItemResponse() *TransactionReceiptLineItemResponse {
 	return &TransactionReceiptLineItemResponse{

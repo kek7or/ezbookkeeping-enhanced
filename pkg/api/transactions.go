@@ -2733,7 +2733,8 @@ func (a *TransactionsApi) TransactionReceiptModifyHandler(c *core.WebContext) (a
 //
 // It answers with the positions rather than with a bare success, because a position that has just
 // been written cannot be pointed at until it has an id, and pointing at one is what the caller does
-// next: a position is what somebody is said to owe.
+// next: a position is what somebody is said to owe. The amount of the transaction comes with them,
+// as correcting a price can have moved it.
 func (a *TransactionsApi) TransactionReceiptLineItemModifyHandler(c *core.WebContext) (any, *errs.Error) {
 	var lineItemModifyReq models.TransactionReceiptLineItemModifyRequest
 	err := c.ShouldBindJSON(&lineItemModifyReq)
@@ -2753,7 +2754,7 @@ func (a *TransactionsApi) TransactionReceiptLineItemModifyHandler(c *core.WebCon
 		}
 	}
 
-	lineItems, err := a.transactions.ModifyReceiptLineItems(c, uid, lineItemModifyReq.TransactionId, lineItemModifyReq.LineItems)
+	lineItems, transactionAmount, err := a.transactions.ModifyReceiptLineItems(c, uid, lineItemModifyReq.TransactionId, lineItemModifyReq.LineItems)
 
 	if err != nil {
 		log.Errorf(c, "[transactions.TransactionReceiptLineItemModifyHandler] failed to itemize transaction \"id:%d\" for user \"uid:%d\", because %s", lineItemModifyReq.TransactionId, uid, err.Error())
@@ -2768,7 +2769,10 @@ func (a *TransactionsApi) TransactionReceiptLineItemModifyHandler(c *core.WebCon
 
 	log.Infof(c, "[transactions.TransactionReceiptLineItemModifyHandler] user \"uid:%d\" has itemized transaction \"id:%d\" into %d positions", uid, lineItemModifyReq.TransactionId, len(lineItems))
 
-	return lineItemResps, nil
+	return &models.TransactionReceiptLineItemModifyResponse{
+		LineItems: lineItemResps,
+		Amount:    transactionAmount,
+	}, nil
 }
 
 // TransactionImportHandler imports transactions by request parameters for current user

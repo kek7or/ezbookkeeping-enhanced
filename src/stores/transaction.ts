@@ -22,7 +22,7 @@ import {
     type TransactionDraft,
     type TransactionCreateRequest,
     type TransactionReceiptRequest,
-    type TransactionReceiptLineItem,
+    type TransactionReceiptLineItemModifyResponse,
     type TransactionReceiptLineItemModifyItem,
     type TransactionInfoResponse,
     type TransactionPageWrapper,
@@ -1476,7 +1476,7 @@ export const useTransactionsStore = defineStore('transactions', () => {
     // itemizing a transaction says what its amount is made of and changes nothing about the amount
     // itself, so nothing built from amounts is stale. The list is marked so only because a
     // transaction that has just been given positions is shown as the sum it now is.
-    function modifyTransactionLineItems({ transactionId, lineItems }: { transactionId: string, lineItems: TransactionReceiptLineItemModifyItem[] }): Promise<TransactionReceiptLineItem[]> {
+    function modifyTransactionLineItems({ transactionId, lineItems }: { transactionId: string, lineItems: TransactionReceiptLineItemModifyItem[] }): Promise<TransactionReceiptLineItemModifyResponse> {
         return new Promise((resolve, reject) => {
             services.modifyTransactionLineItems({
                 transactionId: transactionId,
@@ -1489,7 +1489,16 @@ export const useTransactionsStore = defineStore('transactions', () => {
                     return;
                 }
 
-                updateTransactionListInvalidState(true);
+                // correcting a price can move the amount of the transaction and the balance of its
+                // account, so everything that sums either is read again
+                updateStoreInvalidState({
+                    transactionList: true,
+                    reconciliationStatement: true,
+                    accountList: true,
+                    overview: true,
+                    statistics: true,
+                    explorer: true
+                });
 
                 resolve(data.result);
             }).catch(error => {
