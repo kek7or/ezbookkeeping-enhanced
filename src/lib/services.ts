@@ -86,6 +86,14 @@ import type {
     BudgetPlanWishModifyRequest,
     BudgetPlanWishAssignRequest,
     BudgetPlanWishUnassignRequest,
+    BudgetPlanWishAttachRequest,
+    BudgetPlanWishMoveRequest,
+    BudgetWishGroup,
+    BudgetWishGroupCreateRequest,
+    BudgetWishGroupModifyRequest,
+    BudgetWishGroupDeleteRequest,
+    BudgetWishGroupMoveRequest,
+    BudgetWishlistInfoResponse,
     BudgetPlanAdjustmentSetRequest,
     BudgetPlanExpectationSetRequest,
     BudgetPlanStandingExpectationSetRequest,
@@ -1018,6 +1026,27 @@ export default {
     },
     unassignBudgetPlanWish: (req: BudgetPlanWishUnassignRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/unassign.json', req);
+    },
+    attachBudgetPlanWish: (req: BudgetPlanWishAttachRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/attach.json', req);
+    },
+    moveBudgetPlanWishes: (req: BudgetPlanWishMoveRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/move.json', req);
+    },
+    getBudgetWishlist: (): ApiResponsePromise<BudgetWishlistInfoResponse> => {
+        return axios.get<ApiResponse<BudgetWishlistInfoResponse>>('v1/budget_plans/wishlist/get.json');
+    },
+    addBudgetWishGroup: (req: BudgetWishGroupCreateRequest): ApiResponsePromise<BudgetWishGroup> => {
+        return axios.post<ApiResponse<BudgetWishGroup>>('v1/budget_plans/wishlist/groups/add.json', req);
+    },
+    modifyBudgetWishGroup: (req: BudgetWishGroupModifyRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishlist/groups/modify.json', req);
+    },
+    moveBudgetWishGroups: (req: BudgetWishGroupMoveRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishlist/groups/move.json', req);
+    },
+    deleteBudgetWishGroup: (req: BudgetWishGroupDeleteRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishlist/groups/delete.json', req);
     },
     setBudgetPlanExpectation: (req: BudgetPlanExpectationSetRequest): ApiResponsePromise<BudgetPlanExpectationInfoResponse | null> => {
         return axios.post<ApiResponse<BudgetPlanExpectationInfoResponse | null>>('v1/budget_plans/expectations/set.json', req);

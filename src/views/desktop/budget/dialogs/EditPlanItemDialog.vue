@@ -6,7 +6,7 @@
             </template>
             <v-card-text>
                 <p class="text-body-2 text-medium-emphasis mb-4">
-                    {{ wished ? tt('Something you want but have not decided on. It belongs to no month and counts towards nothing until you put it in one.') : tt('Something expected this month that no schedule would produce. Nothing is written to the ledger.') }}
+                    {{ wished ? tt('Something you want but have not decided on. It counts towards nothing until you put it in a month.') : tt('Something expected this month that no schedule would produce. Nothing is written to the ledger.') }}
                 </p>
                 <v-row>
                     <!-- a wishlist is things somebody wants to buy, so there is no income to
@@ -39,7 +39,8 @@
                                       :placeholder="tt('What is expected')"
                                       v-model="name"/>
                     </v-col>
-                    <v-col cols="12" md="6">
+                    <!-- a wish is a name, a price and a description, and nothing more -->
+                    <v-col cols="12" md="6" v-if="!wished">
                         <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                            primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                            primary-hidden-field="hidden" primary-sub-items-field="subCategories"
@@ -48,12 +49,12 @@
                                            secondary-hidden-field="hidden"
                                            :disabled="submitting"
                                            :enable-filter="true" :filter-placeholder="tt('Find category')" :filter-no-items-text="tt('No available category')"
-                                           :label="tt('Category')" :placeholder="wished ? tt('Optional') : tt('Category')"
+                                           :label="tt('Category')" :placeholder="tt('Category')"
                                            :items="availableCategories"
                                            v-model="categoryId">
                         </two-column-select>
                     </v-col>
-                    <v-col cols="12" md="6">
+                    <v-col cols="12" md="6" v-if="!wished">
                         <two-column-select primary-key-field="id" primary-value-field="category"
                                            primary-title-field="name" primary-footer-field="displayBalance"
                                            primary-icon-field="icon" primary-icon-type="account"
@@ -63,7 +64,7 @@
                                            secondary-icon-field="icon" secondary-icon-type="account" secondary-color-field="color"
                                            :disabled="submitting"
                                            :enable-filter="true" :filter-placeholder="tt('Find account')" :filter-no-items-text="tt('No available account')"
-                                           :label="tt('Account')" :placeholder="wished ? tt('Optional') : tt('Account')"
+                                           :label="tt('Account')" :placeholder="tt('Account')"
                                            :items="allVisibleCategorizedAccounts"
                                            v-model="accountId">
                         </two-column-select>
@@ -189,8 +190,8 @@ const isInputValid = computed<boolean>(() => {
         return false;
     }
 
-    // a planned item is compared against the ledger and has to name what the ledger names; a wish is
-    // compared against nothing yet, so it may name neither
+    // a planned item is compared against the ledger and has to name what the ledger names; a wish
+    // names neither
     return wished.value || (!!categoryId.value && !!accountId.value);
 });
 

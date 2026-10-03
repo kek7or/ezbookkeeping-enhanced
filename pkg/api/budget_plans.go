@@ -96,7 +96,7 @@ func (a *BudgetPlansApi) BudgetPlanGetHandler(c *core.WebContext) (any, *errs.Er
 		standingResps[i] = standing[i].ToBudgetPlanStandingExpectationInfoResponse()
 	}
 
-	wishes, err := a.budgetPlans.GetWishes(c, uid)
+	wishes, err := a.budgetPlans.GetWishesByMonth(c, uid, planGetReq.Year, planGetReq.Month)
 
 	if err != nil {
 		log.Errorf(c, "[budget_plans.BudgetPlanGetHandler] failed to get wishes for user \"uid:%d\", because %s", uid, err.Error())
@@ -188,19 +188,24 @@ func (a *BudgetPlansApi) BudgetPlanWishCreateHandler(c *core.WebContext) (any, *
 		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
 	}
 
+	if (wishCreateReq.Year == 0) != (wishCreateReq.Month == 0) {
+		return nil, errs.ErrBudgetPlanWishMonthInvalid
+	}
+
 	uid := c.GetCurrentUid()
 
-	if err := a.verifyOptionalCategoryAndAccount(c, uid, wishCreateReq.CategoryId, wishCreateReq.AccountId); err != nil {
+	if err := a.verifyWishGroup(c, uid, wishCreateReq.GroupId); err != nil {
 		return nil, err
 	}
 
 	wish := &models.BudgetPlanItem{
-		Uid:        uid,
-		CategoryId: wishCreateReq.CategoryId,
-		AccountId:  wishCreateReq.AccountId,
-		Amount:     wishCreateReq.Amount,
-		Name:       wishCreateReq.Name,
-		Comment:    wishCreateReq.Comment,
+		Uid:         uid,
+		WishGroupId: wishCreateReq.GroupId,
+		Year:        wishCreateReq.Year,
+		Month:       wishCreateReq.Month,
+		Amount:      wishCreateReq.Amount,
+		Name:        wishCreateReq.Name,
+		Comment:     wishCreateReq.Comment,
 	}
 
 	if err := a.budgetPlans.CreateWish(c, wish); err != nil {
@@ -225,10 +230,6 @@ func (a *BudgetPlansApi) BudgetPlanWishModifyHandler(c *core.WebContext) (any, *
 
 	uid := c.GetCurrentUid()
 
-	if err := a.verifyOptionalCategoryAndAccount(c, uid, wishModifyReq.CategoryId, wishModifyReq.AccountId); err != nil {
-		return nil, err
-	}
-
 	wish, err := a.budgetPlans.GetItemByItemId(c, uid, wishModifyReq.Id)
 
 	if err != nil {
@@ -240,26 +241,233 @@ func (a *BudgetPlansApi) BudgetPlanWishModifyHandler(c *core.WebContext) (any, *
 		return nil, errs.ErrBudgetPlanWishNotFound
 	}
 
-	newWish := &models.BudgetPlanItem{
-		ItemId:     wishModifyReq.Id,
-		Uid:        uid,
-		CategoryId: wishModifyReq.CategoryId,
-		AccountId:  wishModifyReq.AccountId,
-		Amount:     wishModifyReq.Amount,
-		Name:       wishModifyReq.Name,
-		Comment:    wishModifyReq.Comment,
-	}
+	wish.Amount = wishModifyReq.Amount
+	wish.Name = wishModifyReq.Name
+	wish.Comment = wishModifyReq.Comment
 
-	if err := a.budgetPlans.ModifyWish(c, newWish); err != nil {
+	if err := a.budgetPlans.ModifyWish(c, wish); err != nil {
 		log.Errorf(c, "[budget_plans.BudgetPlanWishModifyHandler] failed to modify wish \"id:%d\" for user \"uid:%d\", because %s", wishModifyReq.Id, uid, err.Error())
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
 	log.Infof(c, "[budget_plans.BudgetPlanWishModifyHandler] user \"uid:%d\" has modified wish \"id:%d\"", uid, wishModifyReq.Id)
 
-	newWish.Wished = true
+	return wish.ToBudgetPlanItemInfoResponse(), nil
+}
 
-	return newWish.ToBudgetPlanItemInfoResponse(), nil
+// BudgetPlanWishAttachHandler tries one wish against one month for the current user, or against
+// none. It stays a wish either way.
+func (a *BudgetPlansApi) BudgetPlanWishAttachHandler(c *core.WebContext) (any, *errs.Error) {
+	var attachReq models.BudgetPlanWishAttachRequest
+	err := c.ShouldBindJSON(&attachReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishAttachHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	if (attachReq.Year == 0) != (attachReq.Month == 0) {
+		return nil, errs.ErrBudgetPlanWishMonthInvalid
+	}
+
+	uid := c.GetCurrentUid()
+	err = a.budgetPlans.AttachWish(c, uid, attachReq.Id, attachReq.Year, attachReq.Month)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishAttachHandler] failed to attach wish \"id:%d\" for user \"uid:%d\", because %s", attachReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishAttachHandler] user \"uid:%d\" has attached wish \"id:%d\" to %d-%d", uid, attachReq.Id, attachReq.Year, attachReq.Month)
+
+	return true, nil
+}
+
+// BudgetPlanWishMoveHandler saves the new group and order of wishes for the current user
+func (a *BudgetPlansApi) BudgetPlanWishMoveHandler(c *core.WebContext) (any, *errs.Error) {
+	var moveReq models.BudgetPlanWishMoveRequest
+	err := c.ShouldBindJSON(&moveReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishMoveHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	checkedGroups := make(map[int64]bool)
+	wishes := make([]*models.BudgetPlanItem, len(moveReq.NewDisplayOrders))
+
+	for i := 0; i < len(moveReq.NewDisplayOrders); i++ {
+		newOrder := moveReq.NewDisplayOrders[i]
+
+		if !checkedGroups[newOrder.GroupId] {
+			if err := a.verifyWishGroup(c, uid, newOrder.GroupId); err != nil {
+				return nil, err
+			}
+
+			checkedGroups[newOrder.GroupId] = true
+		}
+
+		wishes[i] = &models.BudgetPlanItem{
+			ItemId:       newOrder.Id,
+			Uid:          uid,
+			WishGroupId:  newOrder.GroupId,
+			DisplayOrder: newOrder.DisplayOrder,
+		}
+	}
+
+	if err := a.budgetPlans.MoveWishes(c, uid, wishes); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishMoveHandler] failed to move wishes for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishMoveHandler] user \"uid:%d\" has moved wishes", uid)
+
+	return true, nil
+}
+
+// BudgetWishlistGetHandler returns the whole wishlist page for the current user: every group and
+// every wish, attached to a month or not
+func (a *BudgetPlansApi) BudgetWishlistGetHandler(c *core.WebContext) (any, *errs.Error) {
+	uid := c.GetCurrentUid()
+
+	groups, err := a.budgetPlans.GetAllWishGroups(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishlistGetHandler] failed to get wishlist groups for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	wishes, err := a.budgetPlans.GetAllWishes(c, uid)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishlistGetHandler] failed to get wishes for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	groupResps := make([]*models.BudgetWishGroupInfoResponse, len(groups))
+
+	for i := 0; i < len(groups); i++ {
+		groupResps[i] = groups[i].ToBudgetWishGroupInfoResponse()
+	}
+
+	wishResps := make([]*models.BudgetPlanItemInfoResponse, len(wishes))
+
+	for i := 0; i < len(wishes); i++ {
+		wishResps[i] = wishes[i].ToBudgetPlanItemInfoResponse()
+	}
+
+	return &models.BudgetWishlistInfoResponse{
+		Groups: groupResps,
+		Wishes: wishResps,
+	}, nil
+}
+
+// BudgetWishGroupCreateHandler adds a wishlist group for the current user
+func (a *BudgetPlansApi) BudgetWishGroupCreateHandler(c *core.WebContext) (any, *errs.Error) {
+	var groupCreateReq models.BudgetWishGroupCreateRequest
+	err := c.ShouldBindJSON(&groupCreateReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetWishGroupCreateHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	group := &models.BudgetWishGroup{
+		Uid:  uid,
+		Name: groupCreateReq.Name,
+	}
+
+	if err := a.budgetPlans.CreateWishGroup(c, group); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishGroupCreateHandler] failed to create wishlist group for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetWishGroupCreateHandler] user \"uid:%d\" has created wishlist group \"id:%d\"", uid, group.GroupId)
+
+	return group.ToBudgetWishGroupInfoResponse(), nil
+}
+
+// BudgetWishGroupModifyHandler renames a wishlist group for the current user
+func (a *BudgetPlansApi) BudgetWishGroupModifyHandler(c *core.WebContext) (any, *errs.Error) {
+	var groupModifyReq models.BudgetWishGroupModifyRequest
+	err := c.ShouldBindJSON(&groupModifyReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetWishGroupModifyHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	group := &models.BudgetWishGroup{
+		GroupId: groupModifyReq.Id,
+		Uid:     uid,
+		Name:    groupModifyReq.Name,
+	}
+
+	if err := a.budgetPlans.ModifyWishGroup(c, group); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishGroupModifyHandler] failed to modify wishlist group \"id:%d\" for user \"uid:%d\", because %s", groupModifyReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetWishGroupModifyHandler] user \"uid:%d\" has renamed wishlist group \"id:%d\"", uid, groupModifyReq.Id)
+
+	return true, nil
+}
+
+// BudgetWishGroupMoveHandler saves the new order of wishlist groups for the current user
+func (a *BudgetPlansApi) BudgetWishGroupMoveHandler(c *core.WebContext) (any, *errs.Error) {
+	var moveReq models.BudgetWishGroupMoveRequest
+	err := c.ShouldBindJSON(&moveReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetWishGroupMoveHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	groups := make([]*models.BudgetWishGroup, len(moveReq.NewDisplayOrders))
+
+	for i := 0; i < len(moveReq.NewDisplayOrders); i++ {
+		groups[i] = &models.BudgetWishGroup{
+			GroupId:      moveReq.NewDisplayOrders[i].Id,
+			Uid:          uid,
+			DisplayOrder: moveReq.NewDisplayOrders[i].DisplayOrder,
+		}
+	}
+
+	if err := a.budgetPlans.MoveWishGroups(c, uid, groups); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishGroupMoveHandler] failed to move wishlist groups for user \"uid:%d\", because %s", uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetWishGroupMoveHandler] user \"uid:%d\" has moved wishlist groups", uid)
+
+	return true, nil
+}
+
+// BudgetWishGroupDeleteHandler removes a wishlist group for the current user. What was in it
+// becomes ungrouped.
+func (a *BudgetPlansApi) BudgetWishGroupDeleteHandler(c *core.WebContext) (any, *errs.Error) {
+	var groupDeleteReq models.BudgetWishGroupDeleteRequest
+	err := c.ShouldBindJSON(&groupDeleteReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetWishGroupDeleteHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+
+	if err := a.budgetPlans.DeleteWishGroup(c, uid, groupDeleteReq.Id); err != nil {
+		log.Errorf(c, "[budget_plans.BudgetWishGroupDeleteHandler] failed to delete wishlist group \"id:%d\" for user \"uid:%d\", because %s", groupDeleteReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetWishGroupDeleteHandler] user \"uid:%d\" has deleted wishlist group \"id:%d\"", uid, groupDeleteReq.Id)
+
+	return true, nil
 }
 
 // BudgetPlanWishAssignHandler puts one wish into one month's budget for the current user, which is
@@ -594,27 +802,22 @@ func (a *BudgetPlansApi) verifyCategoryAndAccount(c *core.WebContext, uid int64,
 	return nil
 }
 
-// verifyOptionalCategoryAndAccount is verifyCategoryAndAccount for a wish, where naming neither is
-// allowed. What is named still has to be the user's own; what is not named is not checked, there
-// being nothing to check.
-func (a *BudgetPlansApi) verifyOptionalCategoryAndAccount(c *core.WebContext, uid int64, categoryId int64, accountId int64) *errs.Error {
-	if categoryId > 0 {
-		if err := a.verifyCategory(c, uid, categoryId); err != nil {
-			return err
-		}
+// verifyWishGroup refuses a wish filed under a group that is not the user's own. Zero is no group
+// and is always allowed.
+func (a *BudgetPlansApi) verifyWishGroup(c *core.WebContext, uid int64, groupId int64) *errs.Error {
+	if groupId == 0 {
+		return nil
 	}
 
-	if accountId > 0 {
-		account, err := a.accounts.GetAccountByAccountId(c, uid, accountId)
+	exists, err := a.budgetPlans.WishGroupExists(c, uid, groupId)
 
-		if err != nil {
-			log.Errorf(c, "[budget_plans.verifyOptionalCategoryAndAccount] failed to get account \"id:%d\" for user \"uid:%d\", because %s", accountId, uid, err.Error())
-			return errs.Or(err, errs.ErrOperationFailed)
-		}
+	if err != nil {
+		log.Errorf(c, "[budget_plans.verifyWishGroup] failed to get wishlist group \"id:%d\" for user \"uid:%d\", because %s", groupId, uid, err.Error())
+		return errs.Or(err, errs.ErrOperationFailed)
+	}
 
-		if account == nil {
-			return errs.ErrAccountNotFound
-		}
+	if !exists {
+		return errs.ErrBudgetWishGroupNotFound
 	}
 
 	return nil

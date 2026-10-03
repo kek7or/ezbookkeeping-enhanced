@@ -266,6 +266,14 @@ func updateAllDatabaseTablesStructure(c *core.CliContext) error {
 
 	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] budget plan item table maintained successfully")
 
+	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetWishGroup))
+
+	if err != nil {
+		return err
+	}
+
+	log.BootInfof(c, "[database.updateAllDatabaseTablesStructure] budget wish group table maintained successfully")
+
 	err = datastore.Container.UserDataStore.SyncStructs(new(models.BudgetPlanScheduleAdjustment))
 
 	if err != nil {

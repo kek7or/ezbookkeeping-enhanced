@@ -613,23 +613,24 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         });
     }
 
-    function deleteBudgetPlanWish({ wish }: { wish: BudgetPlanItem }): Promise<void> {
-        return services.deleteBudgetPlanItem({ id: wish.id }).then(response => {
+    // Detaching takes a wish off this month and leaves it on the wishlist
+    function detachWishFromMonth({ wish }: { wish: BudgetPlanItem }): Promise<void> {
+        return services.attachBudgetPlanWish({ id: wish.id, year: 0, month: 0 }).then(response => {
             const data = response.data;
 
             if (!data || !data.success || !data.result) {
-                throw new Error('Unable to remove this wish');
+                throw new Error('Unable to take this off the month');
             }
 
             planWishes.value = planWishes.value.filter(existing => existing.id !== wish.id);
             previewedWishIds.value = previewedWishIds.value.filter(wishId => wishId !== wish.id);
         }).catch(error => {
-            logger.error('failed to delete budget plan wish', error);
+            logger.error('failed to detach budget plan wish', error);
 
             if (error.response && error.response.data && error.response.data.errorMessage) {
                 return Promise.reject({ error: error.response.data });
             } else if (!error.processed) {
-                return Promise.reject({ message: 'Unable to remove this wish' });
+                return Promise.reject({ message: 'Unable to take this off the month' });
             }
 
             return Promise.reject(error);
@@ -827,7 +828,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         deleteBudgetPlanItem,
         copyPreviousMonthItems,
         saveBudgetPlanWish,
-        deleteBudgetPlanWish,
+        detachWishFromMonth,
         assignWishToMonth,
         unassignWishFromMonth,
         setScheduleAdjustment,

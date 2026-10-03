@@ -489,21 +489,24 @@
             </v-card>
         </v-col>
 
-        <!-- The wishlist is not part of the month and sits below everything that is. A wish counts
-             towards nothing until it is put into a month; ticking one only asks what it would do,
-             which is the question the whole card exists to answer. -->
+        <!-- The wishes attached to this month sit below everything that is in it. A wish counts
+             towards nothing until it is put into the month; ticking one only asks what it would do,
+             which is the question the whole card exists to answer. The full wishlist, groups and
+             all, is its own page. -->
         <v-col cols="12">
             <v-card>
                 <template #title>
                     <div class="title-and-toolbar d-flex align-center">
                         <span>{{ tt('Wishlist') }}</span>
                         <v-spacer/>
+                        <v-btn class="me-2" color="default" variant="text" :prepend-icon="mdiHeartOutline"
+                               to="/budget/wishlist">{{ tt('Open Wishlist') }}</v-btn>
                         <v-btn color="primary" variant="tonal" :prepend-icon="mdiPlus"
                                :disabled="loading" @click="addWish">{{ tt('Add to Wishlist') }}</v-btn>
                     </div>
                 </template>
                 <v-card-text class="pt-0">
-                    <span class="text-body-2 text-medium-emphasis">{{ tt('Things you want but have not decided on. Tick one to see what it would do to this month, and put it in the month once you have decided.') }}</span>
+                    <span class="text-body-2 text-medium-emphasis">{{ tt('Wishes attached to this month. Tick one to see what it would do to this month, and put it in the month once you have decided.') }}</span>
                 </v-card-text>
 
                 <v-table class="budget-wish-table table-striped" :hover="!loading">
@@ -529,8 +532,8 @@
                     <tr>
                         <td colspan="5" class="py-6 text-center">
                             <v-icon class="mb-2" size="32" :icon="mdiHeartOutline" color="secondary"/>
-                            <div class="text-body-1">{{ tt('Nothing on the wishlist yet') }}</div>
-                            <div class="text-body-2 text-medium-emphasis mb-3">{{ tt('A sofa, a bike, a laptop - anything you are weighing up. Nothing here costs the month a penny until you say so.') }}</div>
+                            <div class="text-body-1">{{ tt('No wishes attached to this month') }}</div>
+                            <div class="text-body-2 text-medium-emphasis mb-3">{{ tt('Attach wishes to this month from the wishlist, or add one here. Nothing here costs the month a penny until you say so.') }}</div>
                             <v-btn color="primary" variant="tonal" :prepend-icon="mdiPlus" @click="addWish">{{ tt('Add to Wishlist') }}</v-btn>
                         </td>
                     </tr>
@@ -570,8 +573,8 @@
                                            :prepend-icon="mdiPencilOutline" :disabled="loading"
                                            @click="editWish(wish)">{{ tt('Edit') }}</v-btn>
                                     <v-btn class="px-2" density="comfortable" color="default" variant="text"
-                                           :prepend-icon="mdiDeleteOutline" :disabled="loading"
-                                           @click="removeWish(wish)">{{ tt('Delete') }}</v-btn>
+                                           :prepend-icon="mdiCalendarRemoveOutline" :disabled="loading"
+                                           @click="detachWish(wish)">{{ tt('Remove from Month') }}</v-btn>
                                 </div>
                             </div>
                         </td>
@@ -1294,7 +1297,7 @@ function categoryName(categoryId: string): string {
 }
 
 function addWish(): void {
-    editPlanItemDialog.value?.open(BudgetPlanItem.createNewWish()).then(() => {
+    editPlanItemDialog.value?.open(BudgetPlanItem.createNewWish(budgetPlanStore.year, budgetPlanStore.month)).then(() => {
         snackbar.value?.showMessage('You have added this to the wishlist');
     }).catch(() => {
         // dismissed
@@ -1326,17 +1329,14 @@ function assignWish(wish: BudgetPlanItem): void {
     });
 }
 
-function removeWish(wish: BudgetPlanItem): void {
-    confirmDialog.value?.open('Are you sure you want to remove this from the wishlist?').then(() => {
-        budgetPlanStore.deleteBudgetPlanWish({ wish: wish }).then(() => {
-            snackbar.value?.showMessage('You have removed this from the wishlist');
-        }).catch(error => {
-            if (!error.processed) {
-                snackbar.value?.showError(error);
-            }
-        });
-    }).catch(() => {
-        // dismissed
+// Taking a wish off the month keeps it on the wishlist; deleting it is done there
+function detachWish(wish: BudgetPlanItem): void {
+    budgetPlanStore.detachWishFromMonth({ wish: wish }).then(() => {
+        snackbar.value?.showMessage('You have taken this off the month');
+    }).catch(error => {
+        if (!error.processed) {
+            snackbar.value?.showError(error);
+        }
     });
 }
 

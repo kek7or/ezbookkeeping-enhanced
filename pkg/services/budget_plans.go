@@ -22,9 +22,12 @@ const maximumItemsCountOfBudgetPlanMonth = 200
 // how many categories a person keeps, and it is set well above any workable number of them.
 const maximumExpectationsCountOfBudgetPlanMonth = 500
 
-// maximumWishesCount is a ceiling on the wishlist. It is a list of things somebody is weighing up,
-// and a list too long to read through is one nothing is ever weighed against.
-const maximumWishesCount = 200
+// maximumWishesCount is a ceiling on the wishlist. It is a catalog sorted into groups, so it may be
+// long, but not without bound.
+const maximumWishesCount = 1000
+
+// maximumWishGroupsCount is a ceiling on how many groups the wishlist is sorted into
+const maximumWishGroupsCount = 100
 
 // BudgetPlanService represents the service of what a month is planned to cost
 type BudgetPlanService struct {
@@ -90,7 +93,8 @@ type plannedMonthKey struct {
 // It is safe to run at every start and is meant to be: it looks for months that have content and no
 // row, and once there are none it finds none.
 func (s *BudgetPlanService) BackfillPlannedMonths(c core.Context) (int, error) {
-	const plannedMonthsQuery = "SELECT uid, year, month FROM budget_plan_item WHERE deleted=? " +
+	// a wish carries the month it is tried against, which is not a month anybody planned
+	const plannedMonthsQuery = "SELECT uid, year, month FROM budget_plan_item WHERE deleted=? AND wished=? " +
 		"UNION SELECT uid, year, month FROM budget_plan_schedule_adjustment WHERE deleted=? " +
 		"UNION SELECT uid, year, month FROM budget_plan_category_expectation WHERE deleted=?"
 
@@ -100,7 +104,7 @@ func (s *BudgetPlanService) BackfillPlannedMonths(c core.Context) (int, error) {
 		db := s.UserDataDBByIndex(i)
 
 		var planned []*plannedMonthKey
-		err := db.NewSession(c).SQL(plannedMonthsQuery, false, false, false).Find(&planned)
+		err := db.NewSession(c).SQL(plannedMonthsQuery, false, false, false, false).Find(&planned)
 
 		if err != nil {
 			return backfilled, err
@@ -188,15 +192,26 @@ func (s *BudgetPlanService) GetItemsByMonth(c core.Context, uid int64, year int3
 	return items, err
 }
 
-// GetWishes returns the wishlist, which belongs to no month. A wish is tried against whichever
-// month is being looked at, so there is nothing to filter it by.
-func (s *BudgetPlanService) GetWishes(c core.Context, uid int64) ([]*models.BudgetPlanItem, error) {
+// GetAllWishes returns the whole wishlist, attached to a month or not
+func (s *BudgetPlanService) GetAllWishes(c core.Context, uid int64) ([]*models.BudgetPlanItem, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
 
 	var wishes []*models.BudgetPlanItem
 	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=?", uid, false, true).OrderBy("display_order asc").Find(&wishes)
+
+	return wishes, err
+}
+
+// GetWishesByMonth returns the wishes being tried against one month
+func (s *BudgetPlanService) GetWishesByMonth(c core.Context, uid int64, year int32, month int32) ([]*models.BudgetPlanItem, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var wishes []*models.BudgetPlanItem
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=? AND year=? AND month=?", uid, false, true, year, month).OrderBy("display_order asc").Find(&wishes)
 
 	return wishes, err
 }
@@ -300,8 +315,8 @@ func (s *BudgetPlanService) CreateItem(c core.Context, item *models.BudgetPlanIt
 	})
 }
 
-// CreateWish adds something to the wishlist. It is not planned for anything: no month, no
-// commitment, and nothing counts it until it is assigned to a month.
+// CreateWish adds something to the wishlist, in the group and attached to the month already set on
+// it. It is not planned for anything, and nothing counts it until it is assigned to a month.
 func (s *BudgetPlanService) CreateWish(c core.Context, wish *models.BudgetPlanItem) error {
 	if wish.Uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -329,15 +344,12 @@ func (s *BudgetPlanService) CreateWish(c core.Context, wish *models.BudgetPlanIt
 
 	wish.Deleted = false
 	wish.Wished = true
-	wish.Year = 0
-	wish.Month = 0
 	wish.Type = models.TRANSACTION_TYPE_EXPENSE
 	wish.DisplayOrder = maxOrder + 1
 	wish.CreatedUnixTime = time.Now().Unix()
 	wish.UpdatedUnixTime = time.Now().Unix()
 
-	// a wish is wanted and not planned, so it does not start the month - there is no month for it
-	// to start
+	// a wish is wanted and not planned, so it does not start the month even when attached to one
 	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
 		_, err := sess.Insert(wish)
 		return err
@@ -354,7 +366,7 @@ func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanIt
 	wish.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(wish.ItemId).Cols("category_id", "account_id", "amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
+		updatedRows, err := sess.ID(wish.ItemId).Cols("amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
 
 		if err != nil {
 			return err
@@ -363,6 +375,191 @@ func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanIt
 		}
 
 		return nil
+	})
+}
+
+// AttachWish tries one wish against one month, or against none when both are zero. It stays a wish
+// either way: attaching shows it on the month's page and counts it towards nothing.
+func (s *BudgetPlanService) AttachWish(c core.Context, uid int64, itemId int64, year int32, month int32) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	updateModel := &models.BudgetPlanItem{
+		Year:            year,
+		Month:           month,
+		UpdatedUnixTime: time.Now().Unix(),
+	}
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		updatedRows, err := sess.ID(itemId).Cols("year", "month", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", uid, false, true).Update(updateModel)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrBudgetPlanWishNotFound
+		}
+
+		return nil
+	})
+}
+
+// MoveWishes saves where each given wish now sits: its group and its order. Groups are checked by
+// the caller.
+func (s *BudgetPlanService) MoveWishes(c core.Context, uid int64, wishes []*models.BudgetPlanItem) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	now := time.Now().Unix()
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		for i := 0; i < len(wishes); i++ {
+			wishes[i].UpdatedUnixTime = now
+			updatedRows, err := sess.ID(wishes[i].ItemId).Cols("wish_group_id", "display_order", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", uid, false, true).Update(wishes[i])
+
+			if err != nil {
+				return err
+			} else if updatedRows < 1 {
+				return errs.ErrBudgetPlanWishNotFound
+			}
+		}
+
+		return nil
+	})
+}
+
+// GetAllWishGroups returns every wishlist group in display order
+func (s *BudgetPlanService) GetAllWishGroups(c core.Context, uid int64) ([]*models.BudgetWishGroup, error) {
+	if uid <= 0 {
+		return nil, errs.ErrUserIdInvalid
+	}
+
+	var groups []*models.BudgetWishGroup
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=?", uid, false).OrderBy("display_order asc").Find(&groups)
+
+	return groups, err
+}
+
+// WishGroupExists says whether the group is the user's own and not deleted
+func (s *BudgetPlanService) WishGroupExists(c core.Context, uid int64, groupId int64) (bool, error) {
+	if uid <= 0 {
+		return false, errs.ErrUserIdInvalid
+	}
+
+	return s.UserDataDB(uid).NewSession(c).ID(groupId).Where("uid=? AND deleted=?", uid, false).Exist(&models.BudgetWishGroup{})
+}
+
+// CreateWishGroup adds a group at the end of the wishlist
+func (s *BudgetPlanService) CreateWishGroup(c core.Context, group *models.BudgetWishGroup) error {
+	if group.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	count, err := s.UserDataDB(group.Uid).NewSession(c).Where("uid=? AND deleted=?", group.Uid, false).Count(&models.BudgetWishGroup{})
+
+	if err != nil {
+		return err
+	} else if count >= maximumWishGroupsCount {
+		return errs.ErrBudgetWishGroupHasTooManyGroups
+	}
+
+	last := &models.BudgetWishGroup{}
+	_, err = s.UserDataDB(group.Uid).NewSession(c).Cols("display_order").Where("uid=? AND deleted=?", group.Uid, false).OrderBy("display_order desc").Limit(1).Get(last)
+
+	if err != nil {
+		return err
+	}
+
+	group.GroupId = s.GenerateUuid(uuid.UUID_TYPE_DEFAULT)
+
+	if group.GroupId < 1 {
+		return errs.ErrSystemIsBusy
+	}
+
+	group.Deleted = false
+	group.DisplayOrder = last.DisplayOrder + 1
+	group.CreatedUnixTime = time.Now().Unix()
+	group.UpdatedUnixTime = time.Now().Unix()
+
+	return s.UserDataDB(group.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		_, err := sess.Insert(group)
+		return err
+	})
+}
+
+// ModifyWishGroup renames a group
+func (s *BudgetPlanService) ModifyWishGroup(c core.Context, group *models.BudgetWishGroup) error {
+	if group.Uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	group.UpdatedUnixTime = time.Now().Unix()
+
+	return s.UserDataDB(group.Uid).DoTransaction(c, func(sess *xorm.Session) error {
+		updatedRows, err := sess.ID(group.GroupId).Cols("name", "updated_unix_time").Where("uid=? AND deleted=?", group.Uid, false).Update(group)
+
+		if err != nil {
+			return err
+		} else if updatedRows < 1 {
+			return errs.ErrBudgetWishGroupNotFound
+		}
+
+		return nil
+	})
+}
+
+// MoveWishGroups saves the new order of the given groups
+func (s *BudgetPlanService) MoveWishGroups(c core.Context, uid int64, groups []*models.BudgetWishGroup) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	now := time.Now().Unix()
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		for i := 0; i < len(groups); i++ {
+			groups[i].UpdatedUnixTime = now
+			updatedRows, err := sess.ID(groups[i].GroupId).Cols("display_order", "updated_unix_time").Where("uid=? AND deleted=?", uid, false).Update(groups[i])
+
+			if err != nil {
+				return err
+			} else if updatedRows < 1 {
+				return errs.ErrBudgetWishGroupNotFound
+			}
+		}
+
+		return nil
+	})
+}
+
+// DeleteWishGroup removes a group. Whatever was filed under it - wishes, and planned items that
+// came from it - becomes ungrouped rather than going with it.
+func (s *BudgetPlanService) DeleteWishGroup(c core.Context, uid int64, groupId int64) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	now := time.Now().Unix()
+
+	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
+		deletedRows, err := sess.ID(groupId).Cols("deleted", "deleted_unix_time").Where("uid=? AND deleted=?", uid, false).Update(&models.BudgetWishGroup{
+			Deleted:         true,
+			DeletedUnixTime: now,
+		})
+
+		if err != nil {
+			return err
+		} else if deletedRows < 1 {
+			return errs.ErrBudgetWishGroupNotFound
+		}
+
+		_, err = sess.Cols("wish_group_id", "updated_unix_time").Where("uid=? AND deleted=? AND wish_group_id=?", uid, false, groupId).Update(&models.BudgetPlanItem{
+			WishGroupId:     0,
+			UpdatedUnixTime: now,
+		})
+
+		return err
 	})
 }
 
@@ -420,8 +617,8 @@ func (s *BudgetPlanService) AssignWish(c core.Context, uid int64, itemId int64, 
 }
 
 // UnassignWish takes something back off a month and returns it to the wishlist, for a purchase
-// decided on and then thought better of. It keeps everything about the thing and gives up only the
-// month.
+// decided on and then thought better of. It keeps everything about the thing, its group included,
+// and stays attached to the month it left - still tried against it, no longer counted in it.
 //
 // The month it leaves stays planned. Somebody planned it, and taking one thing back out of a month
 // is not a statement that the month was never planned - the same as removing a planned item, which
@@ -440,14 +637,12 @@ func (s *BudgetPlanService) UnassignWish(c core.Context, uid int64, itemId int64
 	now := time.Now().Unix()
 	updateModel := &models.BudgetPlanItem{
 		Wished:          true,
-		Year:            0,
-		Month:           0,
 		DisplayOrder:    maxOrder + 1,
 		UpdatedUnixTime: now,
 	}
 
 	return s.UserDataDB(uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(itemId).Cols("wished", "year", "month", "display_order", "updated_unix_time").
+		updatedRows, err := sess.ID(itemId).Cols("wished", "display_order", "updated_unix_time").
 			Where("uid=? AND deleted=? AND wished=?", uid, false, false).Update(updateModel)
 
 		if err != nil {

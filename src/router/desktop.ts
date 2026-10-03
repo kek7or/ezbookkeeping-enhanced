@@ -33,6 +33,7 @@ import AppSettingsPage from '@/views/desktop/app/AppSettingsPage.vue';
 
 import DebtListPage from '@/views/desktop/debts/ListPage.vue';
 import BudgetPlanPage from '@/views/desktop/budget/PlanPage.vue';
+import WishlistPage from '@/views/desktop/wishlist/WishlistPage.vue';
 import CryptoAssetListPage from '@/views/desktop/crypto/ListPage.vue';
 import UtilityMeterListPage from '@/views/desktop/utilities/ListPage.vue';
 import ExchangeRatesListPage from '@/views/desktop/exchangerates/ListPage.vue';
@@ -191,6 +192,11 @@ const router = createRouter({
                 {
                     path: '/budget/plan',
                     component: BudgetPlanPage,
+                    beforeEnter: checkLogin
+                },
+                {
+                    path: '/budget/wishlist',
+                    component: WishlistPage,
                     beforeEnter: checkLogin
                 },
                 {

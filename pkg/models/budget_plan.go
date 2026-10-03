@@ -54,8 +54,12 @@ type BudgetPlanMonth struct {
 // the two are the same thing at different moments. A sofa on the wishlist and a sofa planned for
 // October differ in whether a month has been chosen for it, not in what it is, and assigning one to
 // a month must not lose the name it was given or the comment explaining it. So a wish is this row
-// with Wished set and no month, and assigning it clears the flag and fills the month in. Nothing is
-// copied and nothing is left behind.
+// with Wished set, and assigning it clears the flag and fills the month in. Nothing is copied and
+// nothing is left behind.
+//
+// A wish is in one of two places. With no month it sits on the wishlist page only. With a month it
+// is also shown on that month's budget page, to be tried against the month - still counted towards
+// nothing, because it is still only wanted.
 type BudgetPlanItem struct {
 	ItemId int64 `xorm:"PK"`
 	Uid    int64 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) INDEX(IDX_budget_plan_item_uid_deleted_wished) NOT NULL"`
@@ -71,11 +75,13 @@ type BudgetPlanItem struct {
 	// without one cannot be added to a populated table.
 	Wished bool `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_wished) NOT NULL DEFAULT 0"`
 	// Year and Month are the month this is planned for, kept as two numbers rather than a timestamp
-	// because a plan belongs to a calendar month and to no particular instant inside it. Both are
-	// zero while the row is a wish, which has not been given a month yet - that being the whole
-	// difference between wanting a thing and planning for it.
+	// because a plan belongs to a calendar month and to no particular instant inside it. On a wish
+	// they are the month it is being tried against, and both are zero when it is tried against none.
 	Year  int32 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
 	Month int32 `xorm:"INDEX(IDX_budget_plan_item_uid_deleted_year_month) NOT NULL"`
+	// WishGroupId is the wishlist group this is filed under, zero for none. It is kept while the row
+	// is planned, so that a purchase sent back to the wishlist lands in the group it came from.
+	WishGroupId int64 `xorm:"NOT NULL DEFAULT 0"`
 	// Type is income or expense. A transfer is neither spent nor earned and has no place in a plan
 	// of what a month costs, so it is rejected rather than stored and ignored. A wish is always an
 	// expense: a wishlist is things somebody wants to buy.
@@ -91,6 +97,19 @@ type BudgetPlanItem struct {
 	Amount          int64  `xorm:"NOT NULL"`
 	Name            string `xorm:"VARCHAR(64) NOT NULL"`
 	Comment         string `xorm:"VARCHAR(255) NOT NULL"`
+	DisplayOrder    int32  `xorm:"NOT NULL"`
+	CreatedUnixTime int64
+	UpdatedUnixTime int64
+	DeletedUnixTime int64
+}
+
+// BudgetWishGroup is a heading on the wishlist page - "Home", "Hobby" - that wishes are sorted
+// under. It holds no money of its own; what a group comes to is its wishes added up.
+type BudgetWishGroup struct {
+	GroupId         int64  `xorm:"PK"`
+	Uid             int64  `xorm:"INDEX(IDX_budget_wish_group_uid_deleted) NOT NULL"`
+	Deleted         bool   `xorm:"INDEX(IDX_budget_wish_group_uid_deleted) NOT NULL"`
+	Name            string `xorm:"VARCHAR(64) NOT NULL"`
 	DisplayOrder    int32  `xorm:"NOT NULL"`
 	CreatedUnixTime int64
 	UpdatedUnixTime int64
@@ -228,27 +247,96 @@ type BudgetPlanItemModifyRequest struct {
 }
 
 // BudgetPlanWishCreateRequest represents all parameters of a request to add something to the
-// wishlist. It asks for less than planning something does: a wish is jotted down before it is
-// thought through, and demanding a category and an account for a thing somebody has only just
-// thought of is how a wishlist stops being used.
+// wishlist. It asks for less than planning something does - a name, a price and a description - so
+// that writing a wish down never takes longer than thinking of it.
 type BudgetPlanWishCreateRequest struct {
-	// CategoryId and AccountId are optional, and zero means none was named
-	CategoryId int64  `json:"categoryId,string" binding:"omitempty,min=1"`
-	AccountId  int64  `json:"accountId,string" binding:"omitempty,min=1"`
-	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
-	Name       string `json:"name" binding:"required,notBlank,max=64"`
-	Comment    string `json:"comment" binding:"max=255"`
+	// GroupId is zero for no group
+	GroupId int64  `json:"groupId,string" binding:"omitempty,min=1"`
+	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name    string `json:"name" binding:"required,notBlank,max=64"`
+	Comment string `json:"comment" binding:"max=255"`
+	// Year and Month attach the new wish to a month straight away, and are both zero for none
+	Year  int32 `json:"year" binding:"min=0,max=9999"`
+	Month int32 `json:"month" binding:"min=0,max=12"`
 }
 
 // BudgetPlanWishModifyRequest represents all parameters of a request to change something on the
-// wishlist
+// wishlist. The group is changed by moving the wish, not here.
 type BudgetPlanWishModifyRequest struct {
-	Id         int64  `json:"id,string" binding:"required,min=1"`
-	CategoryId int64  `json:"categoryId,string" binding:"omitempty,min=1"`
-	AccountId  int64  `json:"accountId,string" binding:"omitempty,min=1"`
-	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
-	Name       string `json:"name" binding:"required,notBlank,max=64"`
-	Comment    string `json:"comment" binding:"max=255"`
+	Id      int64  `json:"id,string" binding:"required,min=1"`
+	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name    string `json:"name" binding:"required,notBlank,max=64"`
+	Comment string `json:"comment" binding:"max=255"`
+}
+
+// BudgetPlanWishAttachRequest represents all parameters of a request to try one wish against one
+// month, or against none when both are zero
+type BudgetPlanWishAttachRequest struct {
+	Id    int64 `json:"id,string" binding:"required,min=1"`
+	Year  int32 `json:"year" binding:"min=0,max=9999"`
+	Month int32 `json:"month" binding:"min=0,max=12"`
+}
+
+// BudgetPlanWishMoveRequest represents all parameters of a request to reorder wishes, within a
+// group or across groups
+type BudgetPlanWishMoveRequest struct {
+	NewDisplayOrders []*BudgetPlanWishNewDisplayOrderRequest `json:"newDisplayOrders" binding:"required,min=1,max=1000"`
+}
+
+// BudgetPlanWishNewDisplayOrderRequest represents where one wish now sits
+type BudgetPlanWishNewDisplayOrderRequest struct {
+	Id           int64 `json:"id,string" binding:"required,min=1"`
+	GroupId      int64 `json:"groupId,string" binding:"min=0"`
+	DisplayOrder int32 `json:"displayOrder"`
+}
+
+// BudgetWishGroupCreateRequest represents all parameters of a wishlist group creation request
+type BudgetWishGroupCreateRequest struct {
+	Name string `json:"name" binding:"required,notBlank,max=64"`
+}
+
+// BudgetWishGroupModifyRequest represents all parameters of a wishlist group rename request
+type BudgetWishGroupModifyRequest struct {
+	Id   int64  `json:"id,string" binding:"required,min=1"`
+	Name string `json:"name" binding:"required,notBlank,max=64"`
+}
+
+// BudgetWishGroupDeleteRequest represents all parameters of a wishlist group deletion request
+type BudgetWishGroupDeleteRequest struct {
+	Id int64 `json:"id,string" binding:"required,min=1"`
+}
+
+// BudgetWishGroupMoveRequest represents all parameters of a request to reorder wishlist groups
+type BudgetWishGroupMoveRequest struct {
+	NewDisplayOrders []*BudgetWishGroupNewDisplayOrderRequest `json:"newDisplayOrders" binding:"required,min=1,max=100"`
+}
+
+// BudgetWishGroupNewDisplayOrderRequest represents where one wishlist group now sits
+type BudgetWishGroupNewDisplayOrderRequest struct {
+	Id           int64 `json:"id,string" binding:"required,min=1"`
+	DisplayOrder int32 `json:"displayOrder"`
+}
+
+// BudgetWishGroupInfoResponse represents a view-object of one wishlist group
+type BudgetWishGroupInfoResponse struct {
+	Id           int64  `json:"id,string"`
+	Name         string `json:"name"`
+	DisplayOrder int32  `json:"displayOrder"`
+}
+
+// BudgetWishlistInfoResponse is the whole wishlist page: every group and every wish
+type BudgetWishlistInfoResponse struct {
+	Groups []*BudgetWishGroupInfoResponse `json:"groups"`
+	Wishes []*BudgetPlanItemInfoResponse  `json:"wishes"`
+}
+
+// ToBudgetWishGroupInfoResponse returns a view-object according to database model
+func (g *BudgetWishGroup) ToBudgetWishGroupInfoResponse() *BudgetWishGroupInfoResponse {
+	return &BudgetWishGroupInfoResponse{
+		Id:           g.GroupId,
+		Name:         g.Name,
+		DisplayOrder: g.DisplayOrder,
+	}
 }
 
 // BudgetPlanWishAssignRequest represents all parameters of a request to put one wish into one
@@ -314,6 +402,7 @@ type BudgetPlanItemInfoResponse struct {
 	Year         int32           `json:"year"`
 	Month        int32           `json:"month"`
 	Wished       bool            `json:"wished"`
+	WishGroupId  int64           `json:"wishGroupId,string"`
 	Type         TransactionType `json:"type"`
 	CategoryId   int64           `json:"categoryId,string"`
 	AccountId    int64           `json:"accountId,string"`
@@ -361,9 +450,8 @@ type BudgetPlanInfoResponse struct {
 	Items        []*BudgetPlanItemInfoResponse        `json:"items"`
 	Adjustments  []*BudgetPlanAdjustmentInfoResponse  `json:"adjustments"`
 	Expectations []*BudgetPlanExpectationInfoResponse `json:"expectations"`
-	// Wishes belong to no month and are sent with every one, because a wish is tried against
-	// whichever month is being looked at. They are kept in a list of their own rather than mixed
-	// into Items so that nothing which totals a month can reach them by accident.
+	// Wishes are the wishes attached to this month. They are kept in a list of their own rather
+	// than mixed into Items so that nothing which totals a month can reach them by accident.
 	Wishes []*BudgetPlanItemInfoResponse `json:"wishes"`
 	// Standing is not month-specific, and is sent with every month because every month may need to
 	// fall back on it
@@ -377,6 +465,7 @@ func (i *BudgetPlanItem) ToBudgetPlanItemInfoResponse() *BudgetPlanItemInfoRespo
 		Year:         i.Year,
 		Month:        i.Month,
 		Wished:       i.Wished,
+		WishGroupId:  i.WishGroupId,
 		Type:         i.Type,
 		CategoryId:   i.CategoryId,
 		AccountId:    i.AccountId,

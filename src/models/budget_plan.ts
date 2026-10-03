@@ -17,6 +17,8 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public month: number;
     // wished says this is on the wishlist and in no month's budget
     public wished: boolean;
+    // the wishlist group this is filed under, empty for none
+    public wishGroupId: string;
     public type: number;
     public categoryId: string;
     public accountId: string;
@@ -25,11 +27,12 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public comment: string;
     public displayOrder: number;
 
-    private constructor(id: string, year: number, month: number, wished: boolean, type: number, categoryId: string, accountId: string, amount: number, name: string, comment: string, displayOrder: number) {
+    private constructor(id: string, year: number, month: number, wished: boolean, wishGroupId: string, type: number, categoryId: string, accountId: string, amount: number, name: string, comment: string, displayOrder: number) {
         this.id = id;
         this.year = year;
         this.month = month;
         this.wished = wished;
+        this.wishGroupId = wishGroupId;
         this.type = type;
         this.categoryId = categoryId;
         this.accountId = accountId;
@@ -64,24 +67,22 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
         };
     }
 
-    // A wish asks for less than a planned item does, so the two requests are not the same shape:
-    // there is no month, no type - a wishlist is things somebody wants to buy - and the category and
-    // the account may be left unnamed.
+    // A wish asks for less than a planned item does: a name, a price and a description. The month
+    // here is the one it is tried against, zero for none.
     public toWishCreateRequest(): BudgetPlanWishCreateRequest {
         return {
-            categoryId: this.categoryId || undefined,
-            accountId: this.accountId || undefined,
+            groupId: this.wishGroupId || undefined,
             amount: this.amount,
             name: this.name,
-            comment: this.comment
+            comment: this.comment,
+            year: this.year,
+            month: this.month
         };
     }
 
     public toWishModifyRequest(): BudgetPlanWishModifyRequest {
         return {
             id: this.id,
-            categoryId: this.categoryId || undefined,
-            accountId: this.accountId || undefined,
             amount: this.amount,
             name: this.name,
             comment: this.comment
@@ -89,7 +90,7 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     }
 
     public clone(): BudgetPlanItem {
-        return new BudgetPlanItem(this.id, this.year, this.month, this.wished, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.displayOrder);
+        return new BudgetPlanItem(this.id, this.year, this.month, this.wished, this.wishGroupId, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.displayOrder);
     }
 
     public static of(response: BudgetPlanItemInfoResponse): BudgetPlanItem {
@@ -97,7 +98,7 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
         // "0" is a perfectly true string, so left alone it would read as a category that is merely
         // missing rather than one that was never named. Emptied here, once, rather than guarded
         // against everywhere it is read.
-        return new BudgetPlanItem(response.id, response.year, response.month, !!response.wished, response.type, emptyIfZero(response.categoryId), emptyIfZero(response.accountId), response.amount, response.name, response.comment, response.displayOrder);
+        return new BudgetPlanItem(response.id, response.year, response.month, !!response.wished, emptyIfZero(response.wishGroupId ?? ''), response.type, emptyIfZero(response.categoryId), emptyIfZero(response.accountId), response.amount, response.name, response.comment, response.displayOrder);
     }
 
     public static ofMulti(responses: BudgetPlanItemInfoResponse[]): BudgetPlanItem[] {
@@ -105,13 +106,13 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     }
 
     public static createNew(year: number, month: number, type: number): BudgetPlanItem {
-        return new BudgetPlanItem('', year, month, false, type, '', '', 0, '', '', 0);
+        return new BudgetPlanItem('', year, month, false, '', type, '', '', 0, '', '', 0);
     }
 
-    // A new wish belongs to no month and is always an expense, both of which are decided here
-    // rather than asked for
-    public static createNewWish(): BudgetPlanItem {
-        return new BudgetPlanItem('', 0, 0, true, TransactionType.Expense, '', '', 0, '', '', 0);
+    // A new wish is always an expense, which is decided here rather than asked for. It is tried
+    // against the month given, or none when both are zero.
+    public static createNewWish(year: number = 0, month: number = 0, wishGroupId: string = ''): BudgetPlanItem {
+        return new BudgetPlanItem('', year, month, true, wishGroupId, TransactionType.Expense, '', '', 0, '', '', 0);
     }
 }
 
@@ -185,21 +186,65 @@ export interface BudgetPlanItemModifyRequest {
 }
 
 export interface BudgetPlanWishCreateRequest {
-    // both are optional: a wish is written down before it is thought through
-    readonly categoryId?: string;
-    readonly accountId?: string;
+    readonly groupId?: string;
+    readonly amount: number;
+    readonly name: string;
+    readonly comment: string;
+    // the month the wish is tried against, both zero for none
+    readonly year: number;
+    readonly month: number;
+}
+
+export interface BudgetPlanWishModifyRequest {
+    readonly id: string;
     readonly amount: number;
     readonly name: string;
     readonly comment: string;
 }
 
-export interface BudgetPlanWishModifyRequest {
+// Attaching tries a wish against a month without planning it. Both zero detaches it.
+export interface BudgetPlanWishAttachRequest {
     readonly id: string;
-    readonly categoryId?: string;
-    readonly accountId?: string;
-    readonly amount: number;
+    readonly year: number;
+    readonly month: number;
+}
+
+export interface BudgetPlanWishNewDisplayOrderRequest {
+    readonly id: string;
+    readonly groupId: string;
+    readonly displayOrder: number;
+}
+
+export interface BudgetPlanWishMoveRequest {
+    readonly newDisplayOrders: BudgetPlanWishNewDisplayOrderRequest[];
+}
+
+export interface BudgetWishGroup {
+    readonly id: string;
+    name: string;
+    displayOrder: number;
+}
+
+export interface BudgetWishGroupCreateRequest {
     readonly name: string;
-    readonly comment: string;
+}
+
+export interface BudgetWishGroupModifyRequest {
+    readonly id: string;
+    readonly name: string;
+}
+
+export interface BudgetWishGroupDeleteRequest {
+    readonly id: string;
+}
+
+export interface BudgetWishGroupMoveRequest {
+    readonly newDisplayOrders: { readonly id: string, readonly displayOrder: number }[];
+}
+
+export interface BudgetWishlistInfoResponse {
+    readonly groups: BudgetWishGroup[];
+    readonly wishes: BudgetPlanItemInfoResponse[];
 }
 
 // Assigning is the act of deciding to buy the thing: it stops being a wish and is planned for the
@@ -252,6 +297,7 @@ export interface BudgetPlanItemInfoResponse {
     readonly year: number;
     readonly month: number;
     readonly wished: boolean;
+    readonly wishGroupId?: string;
     readonly type: number;
     readonly categoryId: string;
     readonly accountId: string;
@@ -294,7 +340,6 @@ export interface BudgetPlanInfoResponse {
     readonly adjustments: BudgetPlanAdjustmentInfoResponse[];
     readonly expectations: BudgetPlanExpectationInfoResponse[];
     readonly standing: BudgetPlanStandingExpectationInfoResponse[];
-    // the wishlist belongs to no month and is sent with every one, because a wish is tried against
-    // whichever month is being looked at
+    // the wishes attached to this month
     readonly wishes: BudgetPlanItemInfoResponse[];
 }
