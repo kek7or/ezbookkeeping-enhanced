@@ -100,6 +100,7 @@ export interface ApplicationSettings extends BaseApplicationSetting {
         defaultAssetTrendsChartType: number;
         defaultAssetTrendsChartDataRangeType: number;
         paycheckCategoryIds: Record<string, boolean>;
+        hiddenCategoricalChartDataTypes: Record<string, boolean>;
     };
 }
 
@@ -189,6 +190,7 @@ export const ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES: Record<string, UserAp
     'statistics.defaultAssetTrendsChartType': UserApplicationCloudSettingType.Number,
     'statistics.defaultAssetTrendsChartDataRangeType': UserApplicationCloudSettingType.Number,
     'statistics.paycheckCategoryIds': UserApplicationCloudSettingType.StringBooleanMap,
+    'statistics.hiddenCategoricalChartDataTypes': UserApplicationCloudSettingType.StringBooleanMap,
 };
 
 export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
@@ -262,6 +264,7 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
         defaultAssetTrendsChartType: TrendChartType.Default.type,
         defaultAssetTrendsChartDataRangeType: DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE.type,
         paycheckCategoryIds: {},
+        hiddenCategoricalChartDataTypes: {},
     }
 };
 

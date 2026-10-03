@@ -133,7 +133,8 @@ export const ALL_APPLICATION_CLOUD_SETTINGS: CategorizedApplicationCloudSettingI
         categorySubName: 'Categorical Analysis Settings',
         items: [
             { settingKey: 'statistics.defaultCategoricalChartType', settingName: 'Default Chart Type', mobile: true, desktop: true },
-            { settingKey: 'statistics.defaultCategoricalChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true }
+            { settingKey: 'statistics.defaultCategoricalChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true },
+            { settingKey: 'statistics.hiddenCategoricalChartDataTypes', settingName: 'Hidden Chart Data Types', mobile: true, desktop: true }
         ]
     },
     {

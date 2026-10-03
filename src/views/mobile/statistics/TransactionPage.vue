@@ -24,6 +24,7 @@
                               :class="{ 'list-item-selected': analysisType === StatisticsAnalysisType.CategoricalAnalysis && query.chartDataType === dataType.type }"
                               :key="dataType.type"
                               v-for="dataType in ChartDataType.values(StatisticsAnalysisType.CategoricalAnalysis)"
+                              v-show="!isCategoricalChartDataTypeHidden(dataType.type)"
                               @click="setChartDataType(StatisticsAnalysisType.CategoricalAnalysis, dataType.type)">
                     <template #after>
                         <f7-icon class="list-item-checked-icon" f7="checkmark_alt" v-if="analysisType === StatisticsAnalysisType.CategoricalAnalysis && query.chartDataType === dataType.type"></f7-icon>
@@ -479,6 +480,7 @@ const {
     trendsAnalysisData,
     assetTrendsData,
     canShowCustomDateRange,
+    isCategoricalChartDataTypeHidden,
     getTransactionCategoricalAnalysisDataItemDisplayColor,
     getDisplayAmount
 } = useStatisticsTransactionPageBase();

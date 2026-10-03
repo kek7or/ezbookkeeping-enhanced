@@ -52,7 +52,7 @@
                                 :disabled="loading" v-model="queryChartDataType">
                             <v-tab class="tab-text-truncate" :key="dataType.type" :value="dataType.type"
                                    v-for="dataType in ChartDataType.values(undefined, true)"
-                                   v-show="dataType.isAvailableAnalysisType(queryAnalysisType)">
+                                   v-show="dataType.isAvailableAnalysisType(queryAnalysisType) && !(queryAnalysisType === StatisticsAnalysisType.CategoricalAnalysis && isCategoricalChartDataTypeHidden(dataType.type))">
                                 <span class="text-truncate">{{ tt(dataType.name) }}</span>
                                 <v-tooltip activator="parent" location="right">{{ tt(dataType.name) }}</v-tooltip>
                             </v-tab>
@@ -677,6 +677,7 @@ const {
     selectedPaycheckDate,
     paycheckPeriodRemainingDays,
     canShowCustomDateRange,
+    isCategoricalChartDataTypeHidden,
     getPaycheckPeriodDisplayName,
     getTransactionCategoricalAnalysisDataItemDisplayColor,
     getDisplayAmount

@@ -34,6 +34,7 @@ export function useStatisticsSettingPageBase() {
     const transactionCategoriesStore = useTransactionCategoriesStore();
 
     const allChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.CategoricalAnalysis));
+    const allCategoricalChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.CategoricalAnalysis, true));
     const allTimezoneTypesUsedForStatistics = computed<TypeAndDisplayName[]>(() => getAllTimezoneTypesUsedForStatistics());
     const allKeywordMatchModes = computed<TypeAndDisplayName[]>(() => getAllKeywordMatchModes());
     const allSortingTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsSortingTypes());
@@ -76,6 +77,11 @@ export function useStatisticsSettingPageBase() {
             statisticsStore.updatePaycheckPeriodsInvalidState(true);
             statisticsStore.updateTransactionStatisticsInvalidState(true);
         }
+    });
+
+    const hiddenCategoricalChartDataTypes = computed<number[]>({
+        get: () => objectFieldToArrayItem(settingsStore.appSettings.statistics.hiddenCategoricalChartDataTypes || {}).map(type => parseInt(type)),
+        set: (value: number[]) => settingsStore.setStatisticsHiddenCategoricalChartDataTypes(arrayItemToObjectField(value.map(type => type.toString()), true))
     });
 
     const defaultChartDataType = computed<number>({
@@ -131,6 +137,7 @@ export function useStatisticsSettingPageBase() {
     return {
         // computed states
         allChartDataTypes,
+        allCategoricalChartDataTypes,
         allTimezoneTypesUsedForStatistics,
         allKeywordMatchModes,
         allSortingTypes,
@@ -141,6 +148,7 @@ export function useStatisticsSettingPageBase() {
         allAssetTrendsChartDateRanges,
         allPaycheckCategories,
         paycheckCategoryIds,
+        hiddenCategoricalChartDataTypes,
         defaultChartDataType,
         defaultTimezoneType,
         defaultKeywordMatchMode,

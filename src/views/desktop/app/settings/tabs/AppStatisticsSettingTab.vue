@@ -113,6 +113,23 @@
                                     v-model="defaultCategoricalChartDateRange"
                                 />
                             </v-col>
+
+                            <v-col cols="12">
+                                <v-select
+                                    item-title="displayName"
+                                    item-value="type"
+                                    multiple
+                                    chips
+                                    closable-chips
+                                    persistent-placeholder
+                                    persistent-hint
+                                    :label="tt('Hidden Chart Data Types')"
+                                    :placeholder="tt('Hidden Chart Data Types')"
+                                    :hint="tt('These options are left out of the categorical analysis list. Remove one here to bring it back.')"
+                                    :items="allCategoricalChartDataTypes"
+                                    v-model="hiddenCategoricalChartDataTypes"
+                                />
+                            </v-col>
                         </v-row>
                     </v-card-text>
                 </v-form>
@@ -209,6 +226,7 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 const { tt } = useI18n();
 const {
     allChartDataTypes,
+    allCategoricalChartDataTypes,
     allTimezoneTypesUsedForStatistics,
     allKeywordMatchModes,
     allSortingTypes,
@@ -219,6 +237,7 @@ const {
     allAssetTrendsChartDateRanges,
     allPaycheckCategories,
     paycheckCategoryIds,
+    hiddenCategoricalChartDataTypes,
     defaultChartDataType,
     defaultTimezoneType,
     defaultKeywordMatchMode,

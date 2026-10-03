@@ -385,6 +385,11 @@ export function useStatisticsTransactionPageBase() {
         }
     }
 
+    // the chart data type being viewed stays listed, so hiding it does not leave the list without a selection
+    function isCategoricalChartDataTypeHidden(chartDataType: number): boolean {
+        return !!settingsStore.appSettings.statistics.hiddenCategoricalChartDataTypes?.[chartDataType] && query.value.chartDataType !== chartDataType;
+    }
+
     function getPaycheckPeriodDisplayName(period: PaycheckPeriod): string {
         return formatDateRange(DateRange.Custom.type, period.startTime, period.endTime);
     }
@@ -471,6 +476,7 @@ export function useStatisticsTransactionPageBase() {
         paycheckPeriodRemainingDays,
         // functions
         canShowCustomDateRange,
+        isCategoricalChartDataTypeHidden,
         getPaycheckPeriodDisplayName,
         getTransactionCategoricalAnalysisDataItemDisplayColor,
         getDisplayAmount
