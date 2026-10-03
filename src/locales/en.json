@@ -2505,7 +2505,7 @@
     "Paycheck Analysis Settings": "Paycheck Analysis Settings",
     "Paycheck Categories": "Paycheck Categories",
     "Hidden Chart Data Types": "Hidden Chart Data Types",
-    "These options are left out of the categorical analysis list. Remove one here to bring it back.": "These options are left out of the categorical analysis list. Remove one here to bring it back.",
+    "These options are left out of the list for this analysis. Remove one here to bring it back.": "These options are left out of the list for this analysis. Remove one here to bring it back.",
     "The income categories your pay arrives in. When none are selected, the largest income of each month is treated as the paycheck.": "The income categories your pay arrives in. When none are selected, the largest income of each month is treated as the paycheck.",
     "Chart Type": "Chart Type",
     "Default Chart Type": "Default Chart Type",

@@ -8,6 +8,7 @@ import {
     TransactionQuickAddButtonActionType
 } from './transaction.ts';
 import {
+    StatisticsAnalysisType,
     CategoricalChartType,
     TrendChartType,
     ChartDataType,
@@ -101,6 +102,8 @@ export interface ApplicationSettings extends BaseApplicationSetting {
         defaultAssetTrendsChartDataRangeType: number;
         paycheckCategoryIds: Record<string, boolean>;
         hiddenCategoricalChartDataTypes: Record<string, boolean>;
+        hiddenTrendChartDataTypes: Record<string, boolean>;
+        hiddenAssetTrendsChartDataTypes: Record<string, boolean>;
     };
 }
 
@@ -191,6 +194,16 @@ export const ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES: Record<string, UserAp
     'statistics.defaultAssetTrendsChartDataRangeType': UserApplicationCloudSettingType.Number,
     'statistics.paycheckCategoryIds': UserApplicationCloudSettingType.StringBooleanMap,
     'statistics.hiddenCategoricalChartDataTypes': UserApplicationCloudSettingType.StringBooleanMap,
+    'statistics.hiddenTrendChartDataTypes': UserApplicationCloudSettingType.StringBooleanMap,
+    'statistics.hiddenAssetTrendsChartDataTypes': UserApplicationCloudSettingType.StringBooleanMap,
+};
+
+export type HiddenChartDataTypesSettingKey = 'hiddenCategoricalChartDataTypes' | 'hiddenTrendChartDataTypes' | 'hiddenAssetTrendsChartDataTypes';
+
+export const HIDDEN_CHART_DATA_TYPES_SETTING_KEYS: Partial<Record<StatisticsAnalysisType, HiddenChartDataTypesSettingKey>> = {
+    [StatisticsAnalysisType.CategoricalAnalysis]: 'hiddenCategoricalChartDataTypes',
+    [StatisticsAnalysisType.TrendAnalysis]: 'hiddenTrendChartDataTypes',
+    [StatisticsAnalysisType.AssetTrends]: 'hiddenAssetTrendsChartDataTypes'
 };
 
 export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
@@ -265,6 +278,8 @@ export const DEFAULT_APPLICATION_SETTINGS: ApplicationSettings = {
         defaultAssetTrendsChartDataRangeType: DEFAULT_ASSET_TRENDS_CHART_DATA_RANGE.type,
         paycheckCategoryIds: {},
         hiddenCategoricalChartDataTypes: {},
+        hiddenTrendChartDataTypes: {},
+        hiddenAssetTrendsChartDataTypes: {},
     }
 };
 

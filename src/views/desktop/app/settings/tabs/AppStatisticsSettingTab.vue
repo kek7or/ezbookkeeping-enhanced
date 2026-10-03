@@ -125,7 +125,7 @@
                                     persistent-hint
                                     :label="tt('Hidden Chart Data Types')"
                                     :placeholder="tt('Hidden Chart Data Types')"
-                                    :hint="tt('These options are left out of the categorical analysis list. Remove one here to bring it back.')"
+                                    :hint="tt('These options are left out of the list for this analysis. Remove one here to bring it back.')"
                                     :items="allCategoricalChartDataTypes"
                                     v-model="hiddenCategoricalChartDataTypes"
                                 />
@@ -164,6 +164,23 @@
                                     v-model="defaultTrendChartDateRange"
                                 />
                             </v-col>
+
+                            <v-col cols="12">
+                                <v-select
+                                    item-title="displayName"
+                                    item-value="type"
+                                    multiple
+                                    chips
+                                    closable-chips
+                                    persistent-placeholder
+                                    persistent-hint
+                                    :label="tt('Hidden Chart Data Types')"
+                                    :placeholder="tt('Hidden Chart Data Types')"
+                                    :hint="tt('These options are left out of the list for this analysis. Remove one here to bring it back.')"
+                                    :items="allTrendChartDataTypes"
+                                    v-model="hiddenTrendChartDataTypes"
+                                />
+                            </v-col>
                         </v-row>
                     </v-card-text>
                 </v-form>
@@ -198,6 +215,23 @@
                                     v-model="defaultAssetTrendsChartDateRange"
                                 />
                             </v-col>
+
+                            <v-col cols="12">
+                                <v-select
+                                    item-title="displayName"
+                                    item-value="type"
+                                    multiple
+                                    chips
+                                    closable-chips
+                                    persistent-placeholder
+                                    persistent-hint
+                                    :label="tt('Hidden Chart Data Types')"
+                                    :placeholder="tt('Hidden Chart Data Types')"
+                                    :hint="tt('These options are left out of the list for this analysis. Remove one here to bring it back.')"
+                                    :items="allAssetTrendsChartDataTypes"
+                                    v-model="hiddenAssetTrendsChartDataTypes"
+                                />
+                            </v-col>
                         </v-row>
                     </v-card-text>
                 </v-form>
@@ -227,6 +261,8 @@ const { tt } = useI18n();
 const {
     allChartDataTypes,
     allCategoricalChartDataTypes,
+    allTrendChartDataTypes,
+    allAssetTrendsChartDataTypes,
     allTimezoneTypesUsedForStatistics,
     allKeywordMatchModes,
     allSortingTypes,
@@ -238,6 +274,8 @@ const {
     allPaycheckCategories,
     paycheckCategoryIds,
     hiddenCategoricalChartDataTypes,
+    hiddenTrendChartDataTypes,
+    hiddenAssetTrendsChartDataTypes,
     defaultChartDataType,
     defaultTimezoneType,
     defaultKeywordMatchMode,

@@ -142,7 +142,8 @@ export const ALL_APPLICATION_CLOUD_SETTINGS: CategorizedApplicationCloudSettingI
         categorySubName: 'Trend Analysis Settings',
         items: [
             { settingKey: 'statistics.defaultTrendChartType', settingName: 'Default Chart Type', mobile: false, desktop: true },
-            { settingKey: 'statistics.defaultTrendChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true }
+            { settingKey: 'statistics.defaultTrendChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true },
+            { settingKey: 'statistics.hiddenTrendChartDataTypes', settingName: 'Hidden Chart Data Types', mobile: true, desktop: true }
         ]
     },
     {
@@ -150,7 +151,8 @@ export const ALL_APPLICATION_CLOUD_SETTINGS: CategorizedApplicationCloudSettingI
         categorySubName: 'Asset Trends Settings',
         items: [
             { settingKey: 'statistics.defaultAssetTrendsChartType', settingName: 'Default Chart Type', mobile: false, desktop: true },
-            { settingKey: 'statistics.defaultAssetTrendsChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true }
+            { settingKey: 'statistics.defaultAssetTrendsChartDataRangeType', settingName: 'Default Date Range', mobile: true, desktop: true },
+            { settingKey: 'statistics.hiddenAssetTrendsChartDataTypes', settingName: 'Hidden Chart Data Types', mobile: true, desktop: true }
         ]
     },
     {

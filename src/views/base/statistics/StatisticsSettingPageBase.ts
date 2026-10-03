@@ -9,6 +9,7 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import type { TypeAndDisplayName } from '@/core/base.ts';
 import { type LocalizedDateRange, DateRangeScene } from '@/core/datetime.ts';
 import { StatisticsAnalysisType } from '@/core/statistics.ts';
+import type { HiddenChartDataTypesSettingKey } from '@/core/setting.ts';
 import { CategoryType } from '@/core/category.ts';
 
 import { objectFieldToArrayItem, arrayItemToObjectField } from '@/lib/common.ts';
@@ -35,6 +36,8 @@ export function useStatisticsSettingPageBase() {
 
     const allChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.CategoricalAnalysis));
     const allCategoricalChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.CategoricalAnalysis, true));
+    const allTrendChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.TrendAnalysis, true));
+    const allAssetTrendsChartDataTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsChartDataTypes(StatisticsAnalysisType.AssetTrends, true));
     const allTimezoneTypesUsedForStatistics = computed<TypeAndDisplayName[]>(() => getAllTimezoneTypesUsedForStatistics());
     const allKeywordMatchModes = computed<TypeAndDisplayName[]>(() => getAllKeywordMatchModes());
     const allSortingTypes = computed<TypeAndDisplayName[]>(() => getAllStatisticsSortingTypes());
@@ -79,10 +82,16 @@ export function useStatisticsSettingPageBase() {
         }
     });
 
-    const hiddenCategoricalChartDataTypes = computed<number[]>({
-        get: () => objectFieldToArrayItem(settingsStore.appSettings.statistics.hiddenCategoricalChartDataTypes || {}).map(type => parseInt(type)),
-        set: (value: number[]) => settingsStore.setStatisticsHiddenCategoricalChartDataTypes(arrayItemToObjectField(value.map(type => type.toString()), true))
-    });
+    function useHiddenChartDataTypes(key: HiddenChartDataTypesSettingKey) {
+        return computed<number[]>({
+            get: () => objectFieldToArrayItem(settingsStore.appSettings.statistics[key] || {}).map(type => parseInt(type)),
+            set: (value: number[]) => settingsStore.setStatisticsHiddenChartDataTypes(key, arrayItemToObjectField(value.map(type => type.toString()), true))
+        });
+    }
+
+    const hiddenCategoricalChartDataTypes = useHiddenChartDataTypes('hiddenCategoricalChartDataTypes');
+    const hiddenTrendChartDataTypes = useHiddenChartDataTypes('hiddenTrendChartDataTypes');
+    const hiddenAssetTrendsChartDataTypes = useHiddenChartDataTypes('hiddenAssetTrendsChartDataTypes');
 
     const defaultChartDataType = computed<number>({
         get: () => settingsStore.appSettings.statistics.defaultChartDataType,
@@ -138,6 +147,8 @@ export function useStatisticsSettingPageBase() {
         // computed states
         allChartDataTypes,
         allCategoricalChartDataTypes,
+        allTrendChartDataTypes,
+        allAssetTrendsChartDataTypes,
         allTimezoneTypesUsedForStatistics,
         allKeywordMatchModes,
         allSortingTypes,
@@ -149,6 +160,8 @@ export function useStatisticsSettingPageBase() {
         allPaycheckCategories,
         paycheckCategoryIds,
         hiddenCategoricalChartDataTypes,
+        hiddenTrendChartDataTypes,
+        hiddenAssetTrendsChartDataTypes,
         defaultChartDataType,
         defaultTimezoneType,
         defaultKeywordMatchMode,

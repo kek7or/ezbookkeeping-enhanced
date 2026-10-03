@@ -12,6 +12,7 @@ import type { BigDecimal } from '@/core/numeral.ts';
 import { type LocalizedDateRange, type WeekDayValue, DateRangeScene, DateRange } from '@/core/datetime.ts';
 import type { ColorStyleValue } from '@/core/color.ts';
 import type { PaycheckPeriod } from '@/core/paycheck.ts';
+import { HIDDEN_CHART_DATA_TYPES_SETTING_KEYS } from '@/core/setting.ts';
 import {
     StatisticsAnalysisType,
     ChartDataType,
@@ -386,8 +387,14 @@ export function useStatisticsTransactionPageBase() {
     }
 
     // the chart data type being viewed stays listed, so hiding it does not leave the list without a selection
-    function isCategoricalChartDataTypeHidden(chartDataType: number): boolean {
-        return !!settingsStore.appSettings.statistics.hiddenCategoricalChartDataTypes?.[chartDataType] && query.value.chartDataType !== chartDataType;
+    function isChartDataTypeHidden(chartAnalysisType: StatisticsAnalysisType, chartDataType: number): boolean {
+        const key = HIDDEN_CHART_DATA_TYPES_SETTING_KEYS[chartAnalysisType];
+
+        if (!key || !settingsStore.appSettings.statistics[key]?.[chartDataType]) {
+            return false;
+        }
+
+        return analysisType.value !== chartAnalysisType || query.value.chartDataType !== chartDataType;
     }
 
     function getPaycheckPeriodDisplayName(period: PaycheckPeriod): string {
@@ -476,7 +483,7 @@ export function useStatisticsTransactionPageBase() {
         paycheckPeriodRemainingDays,
         // functions
         canShowCustomDateRange,
-        isCategoricalChartDataTypeHidden,
+        isChartDataTypeHidden,
         getPaycheckPeriodDisplayName,
         getTransactionCategoricalAnalysisDataItemDisplayColor,
         getDisplayAmount

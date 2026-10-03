@@ -11,6 +11,7 @@ import {
     type ApplicationSettings,
     type ApplicationCloudSetting,
     type LocaleDefaultSettings,
+    type HiddenChartDataTypesSettingKey,
     UserApplicationCloudSettingType,
     ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES
 } from '@/core/setting.ts';
@@ -433,10 +434,10 @@ export const useSettingsStore = defineStore('settings', () => {
         updateUserApplicationCloudSettingValue('statistics.paycheckCategoryIds', value);
     }
 
-    function setStatisticsHiddenCategoricalChartDataTypes(value: Record<string, boolean>): void {
-        updateApplicationSettingsSubValue('statistics', 'hiddenCategoricalChartDataTypes', value);
-        appSettings.value.statistics.hiddenCategoricalChartDataTypes = value;
-        updateUserApplicationCloudSettingValue('statistics.hiddenCategoricalChartDataTypes', value);
+    function setStatisticsHiddenChartDataTypes(key: HiddenChartDataTypesSettingKey, value: Record<string, boolean>): void {
+        updateApplicationSettingsSubValue('statistics', key, value);
+        appSettings.value.statistics[key] = value;
+        updateUserApplicationCloudSettingValue(`statistics.${key}`, value);
     }
 
     function setStatisticsDefaultKeywordMatchMode(value: number): void {
@@ -665,7 +666,7 @@ export const useSettingsStore = defineStore('settings', () => {
         setStatisticsDefaultAccountFilter,
         setStatisticsDefaultTransactionCategoryFilter,
         setStatisticsPaycheckCategoryIds,
-        setStatisticsHiddenCategoricalChartDataTypes,
+        setStatisticsHiddenChartDataTypes,
         setStatisticsDefaultKeywordMatchMode,
         setStatisticsSortingType,
         setStatisticsDefaultCategoricalChartType,
