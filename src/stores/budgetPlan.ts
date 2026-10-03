@@ -5,7 +5,6 @@ import { useUserStore } from './user.ts';
 import { useAccountsStore } from './account.ts';
 import { useTransactionCategoriesStore } from './transactionCategory.ts';
 import { useTransactionTemplatesStore } from './transactionTemplate.ts';
-import { useTransactionTagsStore } from './transactionTag.ts';
 import { useExchangeRatesStore } from './exchangeRates.ts';
 
 import { CategoryType } from '@/core/category.ts';
@@ -17,7 +16,7 @@ import { KeywordMatchMode } from '@/core/text.ts';
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
 import { type BudgetPlanAdjustment, type BudgetPlanExpectation, type BudgetPlanStandingExpectation, BudgetPlanItem } from '@/models/budget_plan.ts';
-import type { TransactionStatisticResponseItem, TransactionInfoResponse } from '@/models/transaction.ts';
+import type { TransactionStatisticResponseItem } from '@/models/transaction.ts';
 
 import {
     type PlannedLine,
@@ -32,9 +31,7 @@ import {
     getPlannedTypesByCategory,
     buildCategoryBudgetTree,
     sumCategoryBudgets,
-    sumRemainingToSpend,
-    sumAmountsByTag,
-    sumAmountsByTagSet
+    sumRemainingToSpend
 } from '@/lib/budgetPlan.ts';
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { getYearMonthFirstUnixTime, getYearMonthLastUnixTime, getCurrentDateTime } from '@/lib/datetime.ts';
@@ -46,7 +43,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const accountsStore = useAccountsStore();
     const transactionCategoriesStore = useTransactionCategoriesStore();
     const transactionTemplatesStore = useTransactionTemplatesStore();
-    const transactionTagsStore = useTransactionTagsStore();
     const exchangeRatesStore = useExchangeRatesStore();
 
     const now = getCurrentDateTime();
@@ -66,9 +62,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // answered is not a decision. Deciding is assigning the wish to the month, which is a write.
     const previewedWishIds = ref<string[]>([]);
     const actualItems = ref<TransactionStatisticResponseItem[]>([]);
-    // the month's transactions one by one, which the statistics above cannot give: they are summed
-    // by category and account, and say nothing about tags
-    const actualTransactions = ref<TransactionInfoResponse[]>([]);
     const planStateInvalid = ref<boolean>(true);
 
     const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
@@ -217,23 +210,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
         return totals;
     });
-
-    const actualExpenseTagItems = computed<{ tagIds: string[], amount: BigDecimal | null }[]>(() => actualTransactions.value
-        .filter(transaction => transaction.type === TransactionType.Expense)
-        .map(transaction => {
-            const account = accountsStore.allAccountsMap[transaction.sourceAccountId];
-            return {
-                tagIds: transaction.tagIds || [],
-                amount: account ? convertToDefaultCurrency(parseBigDecimal(transaction.sourceAmount), account.currency) : null
-            };
-        }));
-
-    // What has been spent under each tag. The totals overlap - see sumAmountsByTag.
-    const actualExpenseByTag = computed<Record<string, BigDecimal>>(() => sumAmountsByTag(actualExpenseTagItems.value));
-
-    // What has been spent under each combination of tags, which do not overlap - see
-    // sumAmountsByTagSet. Keys list tag ids in the order the tags are kept in.
-    const actualExpenseByTagSet = computed<Record<string, BigDecimal>>(() => sumAmountsByTagSet(actualExpenseTagItems.value, transactionTagsStore.allTransactionTags.map(tag => tag.id)));
 
     // The tree is where the plan, the ledger and the expectations meet, and every figure the page
     // shows below the hero comes out of it.
@@ -400,7 +376,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Schedule.type, force: force }),
             transactionCategoriesStore.loadAllCategories({ force: false }),
             accountsStore.loadAllAccounts({ force: false }),
-            transactionTagsStore.loadAllTags({ force: false }),
             services.getBudgetPlan({ year: requestedYear, month: requestedMonth }),
             services.getTransactionStatistics({
                 startTime: getYearMonthFirstUnixTime({ year: requestedYear, month0base: requestedMonth - 1 }),
@@ -410,12 +385,8 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
                 matchMode: KeywordMatchMode.Default.type,
                 subscriptionFilter: 0,
                 useTransactionTimezone: false
-            }),
-            services.getAllTransactions({
-                startTime: getYearMonthFirstUnixTime({ year: requestedYear, month0base: requestedMonth - 1 }),
-                endTime: getYearMonthLastUnixTime({ year: requestedYear, month0base: requestedMonth - 1 })
             })
-        ]).then(([, , , , planResponse, statisticsResponse, transactionsResponse]) => {
+        ]).then(([, , , planResponse, statisticsResponse]) => {
             // a month stepped through while these were in flight must not be overwritten by the
             // answer to the month that was left
             if (requestedYear !== year.value || requestedMonth !== month.value) {
@@ -436,7 +407,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             planStandingExpectations.value = planData.result.standing || [];
             monthIsPlanned.value = !!planData.result.planned;
             actualItems.value = statisticsData && statisticsData.success && statisticsData.result ? (statisticsData.result.items || []) : [];
-            actualTransactions.value = transactionsResponse.data && transactionsResponse.data.success ? (transactionsResponse.data.result || []) : [];
             planStateInvalid.value = false;
         }).catch(error => {
             logger.error('failed to retrieve budget plan', error);
@@ -833,8 +803,6 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         plannedLineTotals,
         committedExpense,
         actualTotals,
-        actualExpenseByTag,
-        actualExpenseByTagSet,
         incomeBasis,
         remainingToSpend,
         projectedExpense,

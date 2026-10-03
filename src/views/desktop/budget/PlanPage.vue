@@ -55,7 +55,7 @@
 
                 <v-card-text v-if="loading || planActive">
                     <v-row>
-                        <v-col cols="12" md="4" lg="3">
+                        <v-col cols="12" md="4">
                             <!-- The hero is what has actually been saved - money in, less money
                                  out - because it is the one figure here that nothing merely
                                  foreseen can flatter. What the month is heading for, and what it
@@ -88,17 +88,7 @@
                                 </div>
                             </div>
                         </v-col>
-                        <v-col cols="12" md="8" lg="9">
-                            <!-- what the spent part of the bar is broken down by. The other parts
-                                 are forecasts against categories and carry no tags, so only what
-                                 has actually gone out is split. -->
-                            <v-btn-toggle class="toggle-buttons mb-3" density="compact" variant="outlined" color="primary"
-                                          divided mandatory v-model="flowBreakdown" v-if="!loading">
-                                <v-btn value="plain">{{ tt('Overview') }}</v-btn>
-                                <v-btn value="category">{{ tt('Categories') }}</v-btn>
-                                <v-btn value="tag">{{ tt('Tags') }}</v-btn>
-                            </v-btn-toggle>
-
+                        <v-col cols="12" md="8">
                             <!-- One bar, the three parts of the money: what has gone out, what
                                  is still to go out, and what survives the month. They do not
                                  overlap, so they add up to what is coming in. -->
@@ -108,11 +98,8 @@
                                          :key="segment.key"
                                          :style="{ flexGrow: segment.share, background: segment.color }"
                                          v-for="segment in flowSegments">
-                                        <ItemIcon class="budget-flow-segment-icon" size="14px" icon-type="category" :icon-id="segment.icon"
-                                                  :default-color="segment.labelColor as ColorStyleValue"
-                                                  v-if="segment.icon"/>
                                         <span class="budget-flow-inline-label" :style="{ color: segment.labelColor }"
-                                              v-else-if="segment.showInlineLabel">{{ segment.label }}</span>
+                                              v-if="segment.showInlineLabel">{{ segment.label }}</span>
                                         <v-tooltip activator="parent" location="top">
                                             {{ segment.label }} — {{ segment.displayAmount }} ({{ segment.displayShare }})
                                         </v-tooltip>
@@ -140,23 +127,12 @@
                             <v-skeleton-loader type="text" :loading="true" v-else-if="loading"/>
 
                             <div class="budget-flow-legend" v-if="!loading">
-                                <!-- a category's icon, in its segment's colour, is its swatch -->
-                                <div class="budget-flow-legend-item" :key="segment.key" v-for="segment in legendSegments">
-                                    <ItemIcon class="me-1" size="16px" icon-type="category" :icon-id="segment.icon"
-                                              :default-color="segment.color as ColorStyleValue" v-if="segment.icon"/>
-                                    <span class="budget-flow-swatch" :style="{ background: segment.color }" v-else></span>
+                                <div class="budget-flow-legend-item" :key="segment.key" v-for="segment in flowSegments">
+                                    <span class="budget-flow-swatch" :style="{ background: segment.color }"></span>
                                     <span class="text-body-2">{{ segment.label }}</span>
                                     <span class="text-body-2 text-medium-emphasis ms-2">{{ segment.displayAmount }}</span>
                                 </div>
-                                <!-- the bar splits by combination, so each tag's own total is
-                                     spread over several parts; this adds them back up -->
-                                <div class="budget-flow-legend-item text-medium-emphasis" v-if="flowBreakdown === 'tag'">
-                                    <span class="text-body-2" v-if="!spentTags.length">{{ tt('Nothing spent this month has a tag') }}</span>
-                                    <span class="text-body-2 me-4" :key="tag.id" v-for="tag in spentTags">
-                                        {{ tt('format.misc.budgetTagTotal', { name: tag.name, amount: displayAmount(tag.amount) }) }}
-                                    </span>
-                                </div>
-                                <div class="budget-flow-legend-item" v-if="planMarkerLeft && flowBreakdown === 'plain'">
+                                <div class="budget-flow-legend-item" v-if="planMarkerLeft">
                                     <span class="budget-flow-marker-swatch"></span>
                                     <span class="text-body-2">{{ tt('Planned to Spend') }}</span>
                                     <span class="text-body-2 text-medium-emphasis ms-2">{{ displayAmount(plannedTotals.expense) }}</span>
@@ -642,7 +618,6 @@
 
 <script setup lang="ts">
 import AmountInput from '@/components/desktop/AmountInput.vue';
-import ItemIcon from '@/components/desktop/ItemIcon.vue';
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import EditPlanItemDialog from './dialogs/EditPlanItemDialog.vue';
@@ -656,11 +631,8 @@ import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { type CategoryBudgetNode, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
 import { useDebtsStore } from '@/stores/debt.ts';
-import { useSettingsStore } from '@/stores/setting.ts';
-import { useTransactionTagsStore } from '@/stores/transactionTag.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
-import type { ColorStyleValue } from '@/core/color.ts';
 import { TransactionType } from '@/core/transaction.ts';
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 import { type PlannedLine, PlannedLineSource, hasCategoryBudgetActivity } from '@/lib/budgetPlan.ts';
@@ -719,8 +691,6 @@ interface FlowSegment {
     displayAmount: string;
     displayShare: string;
     showInlineLabel: boolean;
-    // a category's icon, drawn in place of the label wherever the segment can hold it
-    icon: string;
 }
 
 // PlanGap is the distance between where the month is heading and where it was meant to head,
@@ -774,16 +744,12 @@ const METER_TRACK_OVER = 'rgba(var(--v-theme-error), 0.16)';
 
 const NEAR_PLAN_RATIO = 0.85;
 
-type FlowBreakdown = 'plain' | 'category' | 'tag';
-
 const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatNumberToLocalizedNumerals, formatPercentToLocalizedNumerals, formatDateTimeToGregorianLikeLongYearMonth, formatGregorianTextualMonthDayToGregorianLikeLongMonthDay } = useI18n();
 
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const budgetPlanStore = useBudgetPlanStore();
 const debtsStore = useDebtsStore();
-const settingsStore = useSettingsStore();
-const transactionTagsStore = useTransactionTagsStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
@@ -812,16 +778,6 @@ const editingExpectation = ref<number>(0);
 const showAllCategories = ref<boolean>(false);
 const hoveredWishId = ref<string>('');
 const assigningWishId = ref<string>('');
-const flowBreakdown = ref<FlowBreakdown>('plain');
-
-// the tags anything was spent under this month, in the order the tags are kept in
-const spentTags = computed<{ id: string, name: string, amount: BigDecimal }[]>(() => {
-    const byTag = budgetPlanStore.actualExpenseByTag;
-
-    return transactionTagsStore.allTransactionTags
-        .filter(tag => byTag[tag.id]?.isPositive())
-        .map(tag => ({ id: tag.id, name: tag.name, amount: byTag[tag.id] as BigDecimal }));
-});
 
 // Whether this month has a plan to show at all. See the store for why a past month that was never
 // planned shows nothing rather than a plan assembled out of the standing figures and the schedules.
@@ -927,7 +883,7 @@ const flowSegments = computed<FlowSegment[]>(() => {
     // and what survives. Every part is money the income has to cover, and no part is counted twice,
     // so the three of them are the income - which is what makes the last one believable.
     const segments: FlowSegment[] = [
-        ...buildSpentSegments(total),
+        buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, actualTotals.value.expense, total),
         buildSegment('still-to-come', remainingLabel.value, FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
         buildSegment('left', tt('On Track to Save'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
@@ -936,12 +892,6 @@ const flowSegments = computed<FlowSegment[]>(() => {
     // the bar one of its gaps and read as a sliver that means something
     return segments.filter(segment => segment.share > 0);
 });
-
-// Broken down, the legend is about the breakdown alone. The parts after it are labelled on the bar
-// and stated again in the figures underneath, and listing them as well is what crowds it.
-const legendSegments = computed<FlowSegment[]>(() => flowBreakdown.value === 'plain'
-    ? flowSegments.value
-    : flowSegments.value.filter(segment => segment.key !== 'still-to-come' && segment.key !== 'left'));
 
 // The plan marker says where the spending was meant to stop. It is left off when it would land on
 // one of the bar's own ends, where a line marks nothing: a month with nothing planned, and a month
@@ -1117,64 +1067,8 @@ function buildSegment(key: string, label: string, color: string, labelColor: str
         displayShare: formatPercentToLocalizedNumerals(share * 100, 0, '<1'),
         // a label only goes inside a segment when the segment is wide enough to hold it without
         // being clipped; the legend and the tooltip carry the rest
-        showInlineLabel: share >= 0.25,
-        icon: ''
+        showInlineLabel: share >= 0.25
     };
-}
-
-// The spent part, whole or broken down, largest part first. Categories do not overlap, and neither
-// do combinations of tags - "Anna" and "Anna + Locked" are separate parts - so either breakdown is
-// laid side by side, with what it does not cover as one more part. The parts come to exactly what
-// was spent and the rest of the bar does not move.
-function buildSpentSegments(total: BigDecimal): FlowSegment[] {
-    const spent = actualTotals.value.expense;
-    const colors = settingsStore.chartColorList;
-    const segments: FlowSegment[] = [];
-    let rest = spent;
-
-    if (flowBreakdown.value === 'category') {
-        const nodes = budgetPlanStore.categoryBudgetTree
-            .filter(node => node.type !== TransactionType.Income && node.actual.isPositive())
-            .sort((a, b) => b.actual.toDoubleNumber() - a.actual.toDoubleNumber());
-
-        nodes.forEach((node, index) => {
-            const color = colors[index % colors.length] as string;
-            const segment = buildSegment(`category-${node.categoryId}`, getCategoryName(node.categoryId), `#${color}`, getLabelColorOn(color), node.actual, total);
-            segment.icon = transactionCategoriesStore.allTransactionCategoriesMap[node.categoryId]?.icon ?? '';
-            segment.showInlineLabel = false;
-            segments.push(segment);
-            rest = rest.subtract(node.actual);
-        });
-    } else if (flowBreakdown.value === 'tag') {
-        const byTagSet = budgetPlanStore.actualExpenseByTagSet;
-        const keys = Object.keys(byTagSet).sort((a, b) => (byTagSet[b] as BigDecimal).toDoubleNumber() - (byTagSet[a] as BigDecimal).toDoubleNumber());
-
-        keys.forEach((key, index) => {
-            const amount = byTagSet[key] as BigDecimal;
-            const label = key.split(',').map(tagId => transactionTagsStore.allTransactionTagsMap[tagId]?.name ?? '').join(' + ');
-            const color = colors[index % colors.length] as string;
-            segments.push(buildSegment(`tags-${key}`, label, `#${color}`, getLabelColorOn(color), amount, total));
-            rest = rest.subtract(amount);
-        });
-    } else {
-        return [buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, spent, total)];
-    }
-
-    if (rest.isPositive()) {
-        segments.push(buildSegment('spent-rest', flowBreakdown.value === 'tag' ? tt('Without Tags') : tt('Other'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, rest, total));
-    }
-
-    return segments;
-}
-
-// black or white, whichever reads on a chart colour: the palette is the user's to change, and runs
-// from dark blues to a pale yellow that white text disappears on
-function getLabelColorOn(hexColor: string): string {
-    const red = parseInt(hexColor.substring(0, 2), 16);
-    const green = parseInt(hexColor.substring(2, 4), 16);
-    const blue = parseInt(hexColor.substring(4, 6), 16);
-
-    return red * 0.299 + green * 0.587 + blue * 0.114 > 150 ? '#000000' : '#ffffff';
 }
 
 function lineKey(groupKey: string, line: PlannedLine): string {
@@ -1746,16 +1640,6 @@ onMounted(() => {
     justify-content: center;
     transition: flex-grow 0.35s ease;
     cursor: default;
-    /* so the icon inside can ask how wide its own segment is */
-    container-type: inline-size;
-}
-
-/* An icon is drawn wherever its segment is wide enough to hold it, measured in pixels rather than
-   as a share of the bar, so a wider screen shows more of them. */
-@container (max-width: 17px) {
-    .budget-flow-segment-icon {
-        display: none;
-    }
 }
 
 .budget-flow-segment:first-child {

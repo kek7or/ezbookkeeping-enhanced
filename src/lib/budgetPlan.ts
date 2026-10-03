@@ -265,48 +265,6 @@ export function sumPlannedLines(lines: PlannedLine[], convert: (amount: BigDecim
     };
 }
 
-// sumAmountsByTag is what was spent under each tag. A transaction carrying several tags counts in
-// full under every one of them, because a tag answers "how much went on this" on its own - so the
-// totals overlap and are never meant to be added together.
-export function sumAmountsByTag(items: { tagIds: string[], amount: BigDecimal | null }[]): Record<string, BigDecimal> {
-    const totals: Record<string, BigDecimal> = {};
-
-    for (const item of items) {
-        if (!item.amount) {
-            continue;
-        }
-
-        for (const tagId of new Set(item.tagIds)) {
-            totals[tagId] = (totals[tagId] ?? BIG_DECIMAL_ZERO).add(item.amount);
-        }
-    }
-
-    return totals;
-}
-
-// sumAmountsByTagSet puts each transaction under the exact set of tags it carries, so "Anna" and
-// "Anna + Locked" are two different parts. Unlike the per-tag totals these never overlap, which is
-// what lets them share one bar. A set is keyed by its tag ids in tagOrder, joined by commas, so the
-// same tags in any order are one set; ids not in tagOrder are ignored, and untagged money is left
-// out - it is whatever the totals leave over.
-export function sumAmountsByTagSet(items: { tagIds: string[], amount: BigDecimal | null }[], tagOrder: string[]): Record<string, BigDecimal> {
-    const totals: Record<string, BigDecimal> = {};
-
-    for (const item of items) {
-        if (!item.amount) {
-            continue;
-        }
-
-        const key = tagOrder.filter(tagId => item.tagIds.includes(tagId)).join(',');
-
-        if (key) {
-            totals[key] = (totals[key] ?? BIG_DECIMAL_ZERO).add(item.amount);
-        }
-    }
-
-    return totals;
-}
-
 // getPlannedTypesByCategory says, for each category the plan names, whether what is planned in it
 // is money coming in or going out. It is only consulted for a category that is no longer in the
 // tree, where there is nothing else left to read the type off.
