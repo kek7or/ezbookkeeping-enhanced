@@ -117,6 +117,7 @@
         "misc": {
             "budgetOfEarnedSoFar": "von bisher {amount} Einnahmen",
             "budgetAheadOfPlan": "{amount} besser als geplant",
+            "budgetTagTotal": "{name} insgesamt: {amount}",
             "budgetWishesPicked": "{count} ausgewählt",
             "budgetWishesAlreadyBudgeted": "{amount} davon sind bereits eingeplant",
             "budgetBehindPlan": "{amount} schlechter als geplant",
@@ -1037,6 +1038,9 @@
     "Spent": "Ausgegeben",
     "Still to Come": "Noch ausstehend",
     "Left Unspent": "Nicht ausgegeben",
+    "Categories": "Kategorien",
+    "Nothing spent this month has a tag": "Nichts, was diesen Monat ausgegeben wurde, hat ein Tag",
+    "Other": "Sonstiges",
     "Left of What You Earned": "Rest von dem, was Sie verdient haben",
     "Short By": "Fehlbetrag",
     "Coming In": "Einnahmen",

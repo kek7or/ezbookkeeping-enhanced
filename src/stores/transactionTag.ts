@@ -805,6 +805,7 @@ export const useTransactionTagsStore = defineStore('transactionTags', () => {
         // states
         allTransactionTagGroups,
         allTransactionTagGroupsMap,
+        allTransactionTags,
         allTransactionTagsMap,
         allTransactionTagsByGroupMap,
         transactionTagGroupListStateInvalid,

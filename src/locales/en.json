@@ -117,6 +117,7 @@
         "misc": {
             "budgetOfEarnedSoFar": "of {amount} earned so far",
             "budgetAheadOfPlan": "{amount} ahead of plan",
+            "budgetTagTotal": "{name} in total: {amount}",
             "budgetWishesPicked": "{count} picked",
             "budgetWishesAlreadyBudgeted": "{amount} of that is already budgeted for",
             "budgetBehindPlan": "{amount} behind plan",
@@ -1062,6 +1063,8 @@
     "Spent": "Spent",
     "Still to Come": "Still to Come",
     "Left Unspent": "Left Unspent",
+    "Categories": "Categories",
+    "Nothing spent this month has a tag": "Nothing spent this month has a tag",
     "Left of What You Earned": "Left of What You Earned",
     "Short By": "Short By",
     "Coming In": "Coming In",
