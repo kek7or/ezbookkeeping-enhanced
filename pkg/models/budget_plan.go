@@ -93,10 +93,13 @@ type BudgetPlanItem struct {
 	// AccountId is which account this is expected to move through, and is what gives the amount its
 	// currency - the same way a scheduled template takes its currency from its account. It is zero
 	// on a wish that names no account, whose amount is then read in the user's own currency.
-	AccountId       int64  `xorm:"NOT NULL"`
-	Amount          int64  `xorm:"NOT NULL"`
-	Name            string `xorm:"VARCHAR(64) NOT NULL"`
-	Comment         string `xorm:"VARCHAR(255) NOT NULL"`
+	AccountId int64  `xorm:"NOT NULL"`
+	Amount    int64  `xorm:"NOT NULL"`
+	Name      string `xorm:"VARCHAR(64) NOT NULL"`
+	Comment   string `xorm:"VARCHAR(255) NOT NULL"`
+	// Url is where a wish can be bought or looked at, empty for none. It carries a default for the
+	// same reason Wished does.
+	Url             string `xorm:"VARCHAR(1024) NOT NULL DEFAULT ''"`
 	DisplayOrder    int32  `xorm:"NOT NULL"`
 	CreatedUnixTime int64
 	UpdatedUnixTime int64
@@ -255,6 +258,7 @@ type BudgetPlanWishCreateRequest struct {
 	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
 	Name    string `json:"name" binding:"required,notBlank,max=64"`
 	Comment string `json:"comment" binding:"max=255"`
+	Url     string `json:"url" binding:"omitempty,max=1024,url"`
 	// Year and Month attach the new wish to a month straight away, and are both zero for none
 	Year  int32 `json:"year" binding:"min=0,max=9999"`
 	Month int32 `json:"month" binding:"min=0,max=12"`
@@ -267,6 +271,7 @@ type BudgetPlanWishModifyRequest struct {
 	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
 	Name    string `json:"name" binding:"required,notBlank,max=64"`
 	Comment string `json:"comment" binding:"max=255"`
+	Url     string `json:"url" binding:"omitempty,max=1024,url"`
 }
 
 // BudgetPlanWishAttachRequest represents all parameters of a request to try one wish against one
@@ -409,7 +414,10 @@ type BudgetPlanItemInfoResponse struct {
 	Amount       int64           `json:"amount"`
 	Name         string          `json:"name"`
 	Comment      string          `json:"comment"`
+	Url          string          `json:"url"`
 	DisplayOrder int32           `json:"displayOrder"`
+	CreatedTime  int64           `json:"createdTime"`
+	UpdatedTime  int64           `json:"updatedTime"`
 }
 
 // BudgetPlanAdjustmentInfoResponse represents a view-object of one schedule adjustment
@@ -472,7 +480,10 @@ func (i *BudgetPlanItem) ToBudgetPlanItemInfoResponse() *BudgetPlanItemInfoRespo
 		Amount:       i.Amount,
 		Name:         i.Name,
 		Comment:      i.Comment,
+		Url:          i.Url,
 		DisplayOrder: i.DisplayOrder,
+		CreatedTime:  i.CreatedUnixTime,
+		UpdatedTime:  i.UpdatedUnixTime,
 	}
 }
 

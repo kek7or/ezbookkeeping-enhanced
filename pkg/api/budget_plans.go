@@ -206,6 +206,7 @@ func (a *BudgetPlansApi) BudgetPlanWishCreateHandler(c *core.WebContext) (any, *
 		Amount:      wishCreateReq.Amount,
 		Name:        wishCreateReq.Name,
 		Comment:     wishCreateReq.Comment,
+		Url:         wishCreateReq.Url,
 	}
 
 	if err := a.budgetPlans.CreateWish(c, wish); err != nil {
@@ -244,6 +245,7 @@ func (a *BudgetPlansApi) BudgetPlanWishModifyHandler(c *core.WebContext) (any, *
 	wish.Amount = wishModifyReq.Amount
 	wish.Name = wishModifyReq.Name
 	wish.Comment = wishModifyReq.Comment
+	wish.Url = wishModifyReq.Url
 
 	if err := a.budgetPlans.ModifyWish(c, wish); err != nil {
 		log.Errorf(c, "[budget_plans.BudgetPlanWishModifyHandler] failed to modify wish \"id:%d\" for user \"uid:%d\", because %s", wishModifyReq.Id, uid, err.Error())

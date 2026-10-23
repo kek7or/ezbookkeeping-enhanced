@@ -36,6 +36,16 @@
                                     :label="tt('Description')"
                                     v-model="comment"/>
                     </v-col>
+                    <v-col cols="12">
+                        <v-text-field type="url" persistent-placeholder
+                                      :disabled="submitting"
+                                      :label="tt('Web Link')"
+                                      placeholder="https://"
+                                      v-model="url"/>
+                    </v-col>
+                    <v-col cols="12" class="text-caption text-medium-emphasis pt-0" v-if="original.createdTime">
+                        {{ tt('Created') }}: {{ displayTime(original.createdTime) }} · {{ tt('Updated') }}: {{ displayTime(original.updatedTime) }}
+                    </v-col>
                 </v-row>
             </v-card-text>
             <v-card-text>
@@ -69,9 +79,11 @@ import { useWishlistStore } from '@/stores/wishlist.ts';
 
 import { BudgetPlanItem } from '@/models/budget_plan.ts';
 
+import { parseDateTimeFromUnixTime } from '@/lib/datetime.ts';
+
 type SnackBarType = InstanceType<typeof SnackBar>;
 
-const { tt } = useI18n();
+const { tt, formatDateTimeToShortDateTime } = useI18n();
 
 const userStore = useUserStore();
 const accountsStore = useAccountsStore();
@@ -85,6 +97,7 @@ const original = ref<BudgetPlanItem>(BudgetPlanItem.createNewWish());
 const name = ref<string>('');
 const amount = ref<number>(0);
 const comment = ref<string>('');
+const url = ref<string>('');
 const groupId = ref<string>('');
 
 let resolveFunc: ((wish: BudgetPlanItem) => void) | null = null;
@@ -99,6 +112,10 @@ const groupOptions = computed<{ id: string, name: string }[]>(() => [{ id: '', n
 
 const isInputValid = computed<boolean>(() => !!name.value.trim() && amount.value > 0);
 
+function displayTime(unixTime: number): string {
+    return formatDateTimeToShortDateTime(parseDateTimeFromUnixTime(unixTime));
+}
+
 function open(wish: BudgetPlanItem): Promise<BudgetPlanItem> {
     showState.value = true;
     submitting.value = false;
@@ -106,6 +123,7 @@ function open(wish: BudgetPlanItem): Promise<BudgetPlanItem> {
     name.value = wish.name;
     amount.value = wish.amount;
     comment.value = wish.comment;
+    url.value = wish.url;
     groupId.value = wish.wishGroupId;
 
     return new Promise((resolve, reject) => {
@@ -125,6 +143,9 @@ function save(): void {
     wish.name = name.value.trim();
     wish.amount = amount.value;
     wish.comment = comment.value;
+    // a link pasted without its scheme ("shop.com/sofa") is still meant as a web address
+    const link = url.value.trim();
+    wish.url = link && !/^[a-z][a-z0-9+.-]*:\/\//i.test(link) ? 'https://' + link : link;
     wish.wishGroupId = groupId.value;
 
     wishlistStore.saveWish({ wish: wish }).then(saved => {

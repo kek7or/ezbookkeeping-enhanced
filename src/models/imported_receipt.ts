@@ -1,4 +1,5 @@
 import { TransactionType } from '@/core/transaction.ts';
+import { TRANSACTION_MAX_COMMENT_LENGTH } from '@/consts/transaction.ts';
 
 import type { TransactionReceiptRequest } from './transaction.ts';
 import {
@@ -79,8 +80,23 @@ export class ImportReceiptCategoryGroup {
 
     // the description always follows the lines it is made of, so that a line moved to another category
     // is named in the transaction it now belongs to and nowhere else
+    // a long receipt lists more names than a comment can hold, and an over-long comment makes the
+    // transaction invalid - so the list stops at the last whole name that fits, the lines themselves
+    // travel with the transaction anyway
     public get description(): string {
-        return this.lineItems.map(lineItem => lineItem.name).filter(name => !!name).join(', ');
+        let description = '';
+
+        for (const name of this.lineItems.map(lineItem => lineItem.name).filter(name => !!name)) {
+            const next = description ? `${description}, ${name}` : name;
+
+            if (next.length > TRANSACTION_MAX_COMMENT_LENGTH) {
+                break;
+            }
+
+            description = next;
+        }
+
+        return description;
     }
 
     // a group that came to nothing has nothing to import, but one that came to less than nothing does:

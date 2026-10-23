@@ -15,7 +15,10 @@
                 <v-card class="wish-card" variant="flat"
                         @mouseenter="hoveredWishId = element.id" @mouseleave="hoveredWishId = ''">
                     <div class="d-flex align-start">
-                        <span class="text-body-1 font-weight-medium wish-card-name">{{ element.name }}</span>
+                        <span class="text-body-1 font-weight-medium wish-card-name" @click="copy(element.name, 'name:' + element.id)">
+                            {{ element.name }}
+                            <v-tooltip activator="parent" location="top">{{ copiedKey === 'name:' + element.id ? tt('Copied') : tt('Copy Name') }}</v-tooltip>
+                        </span>
                         <v-spacer/>
                         <span class="text-body-1 text-no-wrap ms-2">{{ displayAmount(element) }}</span>
                     </div>
@@ -26,10 +29,17 @@
                         </template>
                     </div>
                     <div class="d-flex align-center mt-1 wish-card-footer">
-                        <v-chip size="x-small" color="primary" variant="tonal" closable
+                        <v-chip size="x-small" color="primary" variant="tonal" closable class="me-2"
                                 v-if="element.year" @click:close="emit('detach', element)">{{ displayMonth(element) }}</v-chip>
+                        <template v-if="element.url">
+                            <a class="text-caption" :href="element.url" target="_blank" rel="noopener noreferrer" @mousedown.stop>{{ tt('Web Link') }}</a>
+                            <v-btn density="compact" size="x-small" variant="text" :icon="true" @mousedown.stop @click="copy(element.url, 'url:' + element.id)">
+                                <v-icon size="14" :icon="copiedKey === 'url:' + element.id ? mdiCheck : mdiContentCopy"/>
+                                <v-tooltip activator="parent">{{ copiedKey === 'url:' + element.id ? tt('Copied') : tt('Copy Link') }}</v-tooltip>
+                            </v-btn>
+                        </template>
                         <v-spacer/>
-                        <div class="wish-card-buttons" :class="{ 'wish-card-buttons-shown': hoveredWishId === element.id }">
+                        <div class="wish-card-buttons" v-if="hoveredWishId === element.id">
                             <v-btn density="compact" size="small" variant="text" :icon="true" @click="emit('attach', element)">
                                 <v-icon size="18" :icon="mdiCalendarHeart"/>
                                 <v-tooltip activator="parent">{{ tt('Attach to Month') }}</v-tooltip>
@@ -64,7 +74,9 @@ import { useI18n } from '@/locales/helpers.ts';
 
 import type { BudgetPlanItem } from '@/models/budget_plan.ts';
 
-import { mdiPencilOutline, mdiDeleteOutline, mdiCalendarHeart, mdiCalendarCheck } from '@mdi/js';
+import { copyTextToClipboard } from '@/lib/ui/common.ts';
+
+import { mdiPencilOutline, mdiDeleteOutline, mdiCalendarHeart, mdiCalendarCheck, mdiContentCopy, mdiCheck } from '@mdi/js';
 
 // one group's wishes in display order; dragging moves wishes between these arrays
 export interface WishList {
@@ -93,6 +105,18 @@ const emit = defineEmits<{
 const { tt } = useI18n();
 
 const hoveredWishId = ref<string>('');
+// which copy was just made, "name:<id>" or "url:<id>", to say so for a moment
+const copiedKey = ref<string>('');
+
+function copy(text: string, key: string): void {
+    copyTextToClipboard(text);
+    copiedKey.value = key;
+    setTimeout(() => {
+        if (copiedKey.value === key) {
+            copiedKey.value = '';
+        }
+    }, 1500);
+}
 
 // a description often carries the shop link, which is worth one click
 function splitLinks(text: string): { text: string, link: boolean }[] {
@@ -126,6 +150,7 @@ function splitLinks(text: string): { text: string, link: boolean }[] {
 }
 
 .wish-card-name {
+    cursor: copy;
     word-break: break-word;
 }
 
@@ -143,13 +168,7 @@ function splitLinks(text: string): { text: string, link: boolean }[] {
     min-height: 28px;
 }
 
-/* the buttons are always laid out and only shown on hover, so the card does not jump */
 .wish-card-buttons {
     display: inline-flex;
-    visibility: hidden;
-}
-
-.wish-card-buttons-shown {
-    visibility: visible;
 }
 </style>

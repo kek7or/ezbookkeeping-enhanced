@@ -286,55 +286,55 @@ export default defineConfig(() => {
         },
         server: {
             host: '0.0.0.0',
-            // 5173 is Vite's default. Avoid the 1000-1400 range on Windows:
-            // Hyper-V/WSL reserve blocks in there, and a bind lands on EACCES
-            // even though nothing is listening.
+            // Kept above 15000 on purpose. This machine has its TCP dynamic port range
+            // at 1024-15000, and Hyper-V/WSL reserve random blocks inside it, so a bind
+            // there lands on EACCES even though nothing is listening.
             // Check with: netsh interface ipv4 show excludedportrange protocol=tcp
-            port: 5173,
+            port: 25173,
             strictPort: true,
             proxy: {
                 '/server_settings.js': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/mobile/server_settings.js': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/desktop/server_settings.js': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/oauth2': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/api': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/mcp': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/avatar': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/pictures': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/qrcode': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/proxy': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 },
                 '/_AMapService': {
-                    target: 'http://127.0.0.1:4242/',
+                    target: 'http://127.0.0.1:24242/',
                     changeOrigin: true
                 }
             }

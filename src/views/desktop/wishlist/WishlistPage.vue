@@ -74,6 +74,7 @@
                                     <v-icon :icon="mdiDotsVertical"/>
                                     <v-menu activator="parent">
                                         <v-list>
+                                            <v-list-item :prepend-icon="mdiContentCopy" :title="tt('Copy as Text')" :disabled="!listOf(group.id).wishes.length" @click="copyGroup(group)"/>
                                             <v-list-item :prepend-icon="mdiPencilOutline" :title="tt('Rename')" @click="renameGroup(group)"/>
                                             <v-list-item :prepend-icon="mdiDeleteOutline" :title="tt('Delete')" @click="removeGroup(group)"/>
                                         </v-list>
@@ -123,6 +124,7 @@ import { type BudgetWishGroup, BudgetPlanItem } from '@/models/budget_plan.ts';
 
 import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { getCurrentDateTime, parseDateTimeFromUnixTime, getYearMonthFirstUnixTime } from '@/lib/datetime.ts';
+import { copyTextToClipboard } from '@/lib/ui/common.ts';
 
 import {
     mdiRefresh,
@@ -131,6 +133,7 @@ import {
     mdiDotsVertical,
     mdiPencilOutline,
     mdiDeleteOutline,
+    mdiContentCopy,
     mdiCalendarArrowLeft,
     mdiFolderPlusOutline,
     mdiCalculatorVariantOutline
@@ -225,6 +228,24 @@ function displayWishAmount(wish: BudgetPlanItem): string {
 
 function displayWishMonth(wish: BudgetPlanItem): string {
     return formatDateTimeToGregorianLikeLongYearMonth(parseDateTimeFromUnixTime(getYearMonthFirstUnixTime({ year: wish.year, month0base: wish.month - 1 })));
+}
+
+// A group as plain text to paste into a message: the heading with its total, then each wish with its
+// price and link. Descriptions are left out, since they are often notes meant for nobody else.
+function copyGroup(group: BudgetWishGroup): void {
+    const wishes = listOf(group.id).wishes;
+    const lines = [`${group.name} — ${displayAmount(totalOf(wishes))}`, ''];
+
+    for (const wish of wishes) {
+        lines.push(`• ${wish.name} — ${displayWishAmount(wish)}`);
+
+        if (wish.url) {
+            lines.push(`  ${wish.url}`);
+        }
+    }
+
+    copyTextToClipboard(lines.join('\n'));
+    snackbar.value?.showMessage('Copied');
 }
 
 // the stores reject with what the snack bar shows, marked processed when it has been shown already

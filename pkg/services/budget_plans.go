@@ -366,7 +366,7 @@ func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanIt
 	wish.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(wish.ItemId).Cols("amount", "name", "comment", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
+		updatedRows, err := sess.ID(wish.ItemId).Cols("amount", "name", "comment", "url", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
 
 		if err != nil {
 			return err

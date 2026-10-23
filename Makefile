@@ -20,8 +20,8 @@ MINGW_BIN := C:/Users/Viktor/AppData/Local/Microsoft/WinGet/Packages/BrechtSande
 OLLAMA    := C:/Users/Viktor/AppData/Local/Programs/Ollama/ollama.exe
 
 BINARY       := ezbookkeeping.exe
-API_PORT     := 4242
-WEB_PORT     := 5173
+API_PORT     := 24242
+WEB_PORT     := 25173
 # Not Ollama's default 11434: Windows reserves 11250-11649 for dynamic port
 # allocation (WinNAT grabs the range, and the reservation survives reboots), so
 # a bind there fails with "forbidden by its access permissions" and Ollama dies
@@ -158,11 +158,11 @@ apk-where: ## Print where the last built APK is
 ## ---------------------------------------------------------------- run
 
 .PHONY: server
-server: $(BINARY) dirs ## Run the backend in the foreground (:4242)
+server: $(BINARY) dirs ## Run the backend in the foreground (:24242)
 	./$(BINARY) server run
 
 .PHONY: web
-web: ## Run the Vite dev server in the foreground (:5173)
+web: ## Run the Vite dev server in the foreground (:25173)
 	npm run serve
 
 # Everything the app needs is started and stopped together, because receipt
