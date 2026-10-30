@@ -89,9 +89,10 @@
                             </div>
                         </v-col>
                         <v-col cols="12" md="8">
-                            <!-- One bar, the three parts of the money: what has gone out, what
-                                 is still to go out, and what survives the month. They do not
-                                 overlap, so they add up to what is coming in. -->
+                            <!-- One bar, the parts of the money: what has gone out (and how much
+                                 of that the plan never had), what is still to go out, and what
+                                 survives the month. They do not overlap, so they add up to what
+                                 is coming in. -->
                             <div class="budget-flow-bar-wrapper" v-if="!loading && flowSegments.length">
                                 <div class="budget-flow-bar">
                                     <div class="budget-flow-segment"
@@ -729,14 +730,16 @@ interface CategorySection {
     rows: CategoryRow[];
 }
 
-// The three parts of one income are told apart by identity, so they take the app's own two accent
-// hues plus a neutral for the part that is not allocated at all. The status colours are left alone
-// for the meters below, where they mean over and near-over rather than "the third series".
+// The parts of one income are told apart by identity, so they take the app's own two accent hues
+// plus a neutral for the part that is not allocated at all. The one exception is what was spent past
+// the plan, which takes the meters' over colour because over the plan is exactly what it is.
 const FLOW_COLOR_SPENT = 'rgb(var(--v-theme-primary))';
+const FLOW_COLOR_UNPLANNED = 'rgb(var(--v-theme-error))';
 const FLOW_COLOR_STILL_TO_COME = 'rgb(var(--v-theme-teal))';
 const FLOW_COLOR_LEFT = 'rgba(var(--v-theme-on-surface), 0.14)';
 
 const FLOW_LABEL_ON_FILL = 'rgb(var(--v-theme-on-primary))';
+const FLOW_LABEL_ON_ERROR = 'rgb(var(--v-theme-on-error))';
 const FLOW_LABEL_ON_SURFACE = 'rgb(var(--v-theme-on-surface))';
 
 const METER_COLOR_UNDER = 'rgb(var(--v-theme-primary))';
@@ -888,9 +891,15 @@ const flowSegments = computed<FlowSegment[]>(() => {
 
     // The bar reads left to right the way the month runs: money already gone, money still to go,
     // and what survives. Every part is money the income has to cover, and no part is counted twice,
-    // so the three of them are the income - which is what makes the last one believable.
+    // so together they are the income - which is what makes the last one believable. What has gone
+    // out past the plan is split off the spent part, starting where the plan marker stands.
+    const spent = actualTotals.value.expense;
+    const planned = plannedTotals.value.expense;
+    const unplanned = spent.greaterThan(planned) ? spent.subtract(planned) : BIG_DECIMAL_ZERO;
+
     const segments: FlowSegment[] = [
-        buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, actualTotals.value.expense, total),
+        buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, spent.subtract(unplanned), total),
+        buildSegment('unplanned', tt('Unplanned'), FLOW_COLOR_UNPLANNED, FLOW_LABEL_ON_ERROR, unplanned, total),
         buildSegment('still-to-come', remainingLabel.value, FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
         buildSegment('left', tt('On Track to Save'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
     ];
