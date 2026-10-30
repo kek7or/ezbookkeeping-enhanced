@@ -52,6 +52,17 @@ func updateDatabaseStructure(c *core.CliContext) error {
 		log.CliInfof(c, "[database.updateDatabaseStructure] marked %d month(s) as planned that were planned before there was a row to say so", backfilled)
 	}
 
+	backfilledWishes, err := services.BudgetPlans.BackfillPlannedWishes(c)
+
+	if err != nil {
+		log.CliErrorf(c, "[database.updateDatabaseStructure] backfill planned wishes failed, because %s", err.Error())
+		return err
+	}
+
+	if backfilledWishes > 0 {
+		log.CliInfof(c, "[database.updateDatabaseStructure] put %d planned wish(es) back on the wishlist", backfilledWishes)
+	}
+
 	return nil
 }
 

@@ -306,9 +306,10 @@
                                             <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                                    :prepend-icon="mdiHeartOutline" :disabled="loading"
                                                    @click="returnToWishlist(line)">{{ tt('Back to Wishlist') }}</v-btn>
+                                            <!-- something from the wishlist is only deleted there -->
                                             <v-btn class="px-2" color="default" density="comfortable" variant="text"
                                                    :prepend-icon="mdiDeleteOutline" :disabled="loading"
-                                                   @click="removeItem(line)">{{ tt('Delete') }}</v-btn>
+                                                   @click="removeItem(line)" v-if="!isFromWishlist(line)">{{ tt('Delete') }}</v-btn>
                                         </template>
                                     </div>
 
@@ -565,10 +566,13 @@
                             <div class="d-flex align-center justify-end">
                                 <div class="budget-wish-operation-buttons"
                                      :class="{ 'budget-wish-operation-buttons-shown': hoveredWishId === wish.id && !loading }">
-                                    <v-btn class="px-2" density="comfortable" color="primary" variant="text"
-                                           :prepend-icon="mdiCalendarPlus" :disabled="loading || assigningWishId === wish.id"
-                                           :loading="assigningWishId === wish.id"
-                                           @click="assignWish(wish)">{{ tt('Put in This Month') }}</v-btn>
+                                    <span>
+                                        <v-btn class="px-2" density="comfortable" color="primary" variant="text"
+                                               :prepend-icon="mdiCalendarPlus" :disabled="loading || assigningWishId === wish.id || !wish.categoryId"
+                                               :loading="assigningWishId === wish.id"
+                                               @click="assignWish(wish)">{{ tt('Put in This Month') }}</v-btn>
+                                        <v-tooltip activator="parent" v-if="!wish.categoryId">{{ tt('Choose a category to plan this for a month') }}</v-tooltip>
+                                    </span>
                                     <v-btn class="px-2" density="comfortable" color="default" variant="text"
                                            :prepend-icon="mdiPencilOutline" :disabled="loading"
                                            @click="editWish(wish)">{{ tt('Edit') }}</v-btn>
@@ -1312,8 +1316,8 @@ function editWish(wish: BudgetPlanItem): void {
     });
 }
 
-// Putting a wish in the month is the decision to buy it: it leaves the wishlist and is planned for
-// the month, which is why the whole plan is read back afterwards.
+// Putting a wish in the month is the decision to buy it: it is planned for the month and stays on the
+// wishlist as planned, and the whole plan is read back afterwards.
 function assignWish(wish: BudgetPlanItem): void {
     assigningWishId.value = wish.id;
 
@@ -1422,6 +1426,10 @@ function editItem(line: PlannedLine): void {
     }).catch(() => {
         // dismissed
     });
+}
+
+function isFromWishlist(line: PlannedLine): boolean {
+    return !!budgetPlanStore.planItems.find(planItem => planItem.id === line.id)?.fromWishlist;
 }
 
 function removeItem(line: PlannedLine): void {

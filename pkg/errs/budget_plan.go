@@ -19,4 +19,6 @@ var (
 	ErrBudgetWishGroupNotFound            = NewNormalError(NormalSubcategoryBudgetPlan, 12, http.StatusBadRequest, "wishlist group not found")
 	ErrBudgetWishGroupHasTooManyGroups    = NewNormalError(NormalSubcategoryBudgetPlan, 13, http.StatusBadRequest, "the wishlist already has too many groups")
 	ErrBudgetPlanWishMonthInvalid         = NewNormalError(NormalSubcategoryBudgetPlan, 14, http.StatusBadRequest, "a wish needs both a year and a month, or neither")
+	ErrBudgetPlanWishCategoryRequired     = NewNormalError(NormalSubcategoryBudgetPlan, 15, http.StatusBadRequest, "choose a category before planning this for a month")
+	ErrBudgetPlanItemFromWishlist         = NewNormalError(NormalSubcategoryBudgetPlan, 16, http.StatusBadRequest, "this was planned from the wishlist; send it back to the wishlist and delete it there")
 )

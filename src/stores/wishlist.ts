@@ -74,14 +74,12 @@ export const useWishlistStore = defineStore('wishlist', () => {
         });
     }
 
-    // Planning a wish is the decision to buy it: it leaves the wishlist and counts in the month
+    // Planning a wish is the decision to buy it: it counts in the month and stays here, shown as planned
     function planWish({ wish, year, month }: { wish: BudgetPlanItem, year: number, month: number }): Promise<void> {
-        return call(services.assignBudgetPlanWish({ id: wish.id, year: year, month: month }), 'Unable to put this into the month').then(() => {
-            wishes.value = wishes.value.filter(existing => existing.id !== wish.id);
-        });
+        return call(services.assignBudgetPlanWish({ id: wish.id, year: year, month: month }), 'Unable to put this into the month').then(() => loadWishlist());
     }
 
-    // Grabbing takes a planned item back out of its month and onto the wishlist
+    // Grabbing takes a planned item back out of its month and onto the wishlist, planned from here or not
     function grabPlannedItem({ item }: { item: BudgetPlanItem }): Promise<void> {
         return call(services.unassignBudgetPlanWish({ id: item.id }), 'Unable to return this to the wishlist').then(() => loadWishlist());
     }

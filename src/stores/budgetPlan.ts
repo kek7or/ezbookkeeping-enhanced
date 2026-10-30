@@ -84,7 +84,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
     const scheduleLines = computed<PlannedLine[]>(() => buildScheduleLines(scheduledTemplates.value, adjustmentsByTemplateId.value, year.value, month.value, getAccountCurrency));
 
-    const itemLines = computed<PlannedLine[]>(() => buildItemLines(planItems.value, getAccountCurrency));
+    const itemLines = computed<PlannedLine[]>(() => buildItemLines(planItems.value, getAccountCurrency, defaultCurrency.value));
 
     // Every wish, as the line it would be if it were planned. Nothing counts these until they are
     // ticked; they are built for all of them because each row has to show what it would do.

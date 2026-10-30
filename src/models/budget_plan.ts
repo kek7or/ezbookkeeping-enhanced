@@ -19,6 +19,8 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public wished: boolean;
     // the wishlist group this is filed under, empty for none
     public wishGroupId: string;
+    // fromWishlist says this was planned from the wishlist, which keeps showing it as planned
+    public fromWishlist: boolean = false;
     public type: number;
     public categoryId: string;
     public accountId: string;
@@ -79,6 +81,7 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public toWishCreateRequest(): BudgetPlanWishCreateRequest {
         return {
             groupId: this.wishGroupId || undefined,
+            categoryId: this.categoryId || '0',
             amount: this.amount,
             name: this.name,
             comment: this.comment,
@@ -91,6 +94,7 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     public toWishModifyRequest(): BudgetPlanWishModifyRequest {
         return {
             id: this.id,
+            categoryId: this.categoryId || '0',
             amount: this.amount,
             name: this.name,
             comment: this.comment,
@@ -99,7 +103,9 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
     }
 
     public clone(): BudgetPlanItem {
-        return new BudgetPlanItem(this.id, this.year, this.month, this.wished, this.wishGroupId, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.url, this.displayOrder, this.createdTime, this.updatedTime);
+        const item = new BudgetPlanItem(this.id, this.year, this.month, this.wished, this.wishGroupId, this.type, this.categoryId, this.accountId, this.amount, this.name, this.comment, this.url, this.displayOrder, this.createdTime, this.updatedTime);
+        item.fromWishlist = this.fromWishlist;
+        return item;
     }
 
     public static of(response: BudgetPlanItemInfoResponse): BudgetPlanItem {
@@ -107,7 +113,9 @@ export class BudgetPlanItem implements BudgetPlanItemInfoResponse {
         // "0" is a perfectly true string, so left alone it would read as a category that is merely
         // missing rather than one that was never named. Emptied here, once, rather than guarded
         // against everywhere it is read.
-        return new BudgetPlanItem(response.id, response.year, response.month, !!response.wished, emptyIfZero(response.wishGroupId ?? ''), response.type, emptyIfZero(response.categoryId), emptyIfZero(response.accountId), response.amount, response.name, response.comment, response.url ?? '', response.displayOrder, response.createdTime ?? 0, response.updatedTime ?? 0);
+        const item = new BudgetPlanItem(response.id, response.year, response.month, !!response.wished, emptyIfZero(response.wishGroupId ?? ''), response.type, emptyIfZero(response.categoryId), emptyIfZero(response.accountId), response.amount, response.name, response.comment, response.url ?? '', response.displayOrder, response.createdTime ?? 0, response.updatedTime ?? 0);
+        item.fromWishlist = !!response.fromWishlist;
+        return item;
     }
 
     public static ofMulti(responses: BudgetPlanItemInfoResponse[]): BudgetPlanItem[] {
@@ -196,6 +204,8 @@ export interface BudgetPlanItemModifyRequest {
 
 export interface BudgetPlanWishCreateRequest {
     readonly groupId?: string;
+    // '0' for none
+    readonly categoryId: string;
     readonly amount: number;
     readonly name: string;
     readonly comment: string;
@@ -207,6 +217,8 @@ export interface BudgetPlanWishCreateRequest {
 
 export interface BudgetPlanWishModifyRequest {
     readonly id: string;
+    // '0' for none
+    readonly categoryId: string;
     readonly amount: number;
     readonly name: string;
     readonly comment: string;
@@ -309,6 +321,7 @@ export interface BudgetPlanItemInfoResponse {
     readonly month: number;
     readonly wished: boolean;
     readonly wishGroupId?: string;
+    readonly fromWishlist?: boolean;
     readonly type: number;
     readonly categoryId: string;
     readonly accountId: string;

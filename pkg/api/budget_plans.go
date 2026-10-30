@@ -198,9 +198,16 @@ func (a *BudgetPlansApi) BudgetPlanWishCreateHandler(c *core.WebContext) (any, *
 		return nil, err
 	}
 
+	if wishCreateReq.CategoryId != 0 {
+		if err := a.verifyCategory(c, uid, wishCreateReq.CategoryId); err != nil {
+			return nil, err
+		}
+	}
+
 	wish := &models.BudgetPlanItem{
 		Uid:         uid,
 		WishGroupId: wishCreateReq.GroupId,
+		CategoryId:  wishCreateReq.CategoryId,
 		Year:        wishCreateReq.Year,
 		Month:       wishCreateReq.Month,
 		Amount:      wishCreateReq.Amount,
@@ -238,10 +245,21 @@ func (a *BudgetPlansApi) BudgetPlanWishModifyHandler(c *core.WebContext) (any, *
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	if !wish.Wished {
+	if !wish.Wished && !wish.FromWishlist {
 		return nil, errs.ErrBudgetPlanWishNotFound
 	}
 
+	if !wish.Wished && wishModifyReq.CategoryId == 0 {
+		return nil, errs.ErrBudgetPlanWishCategoryRequired
+	}
+
+	if wishModifyReq.CategoryId != 0 && wishModifyReq.CategoryId != wish.CategoryId {
+		if err := a.verifyCategory(c, uid, wishModifyReq.CategoryId); err != nil {
+			return nil, err
+		}
+	}
+
+	wish.CategoryId = wishModifyReq.CategoryId
 	wish.Amount = wishModifyReq.Amount
 	wish.Name = wishModifyReq.Name
 	wish.Comment = wishModifyReq.Comment
@@ -484,6 +502,20 @@ func (a *BudgetPlansApi) BudgetPlanWishAssignHandler(c *core.WebContext) (any, *
 	}
 
 	uid := c.GetCurrentUid()
+
+	// a planned item is shown in the budget under its category, so without one it would be counted
+	// in the month's total and appear nowhere
+	wish, err := a.budgetPlans.GetItemByItemId(c, uid, assignReq.Id)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishAssignHandler] failed to get wish \"id:%d\" for user \"uid:%d\", because %s", assignReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	if wish.CategoryId == 0 {
+		return nil, errs.ErrBudgetPlanWishCategoryRequired
+	}
+
 	err = a.budgetPlans.AssignWish(c, uid, assignReq.Id, assignReq.Year, assignReq.Month)
 
 	if err != nil {
@@ -634,6 +666,18 @@ func (a *BudgetPlansApi) BudgetPlanItemDeleteHandler(c *core.WebContext) (any, *
 	}
 
 	uid := c.GetCurrentUid()
+
+	item, err := a.budgetPlans.GetItemByItemId(c, uid, itemDeleteReq.Id)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanItemDeleteHandler] failed to get plan item \"id:%d\" for user \"uid:%d\", because %s", itemDeleteReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	// something planned from the wishlist only ever goes back to it; a wish is deleted from there
+	if item.FromWishlist && !item.Wished {
+		return nil, errs.ErrBudgetPlanItemFromWishlist
+	}
 
 	if err := a.budgetPlans.DeleteItem(c, uid, itemDeleteReq.Id); err != nil {
 		log.Errorf(c, "[budget_plans.BudgetPlanItemDeleteHandler] failed to delete plan item \"id:%d\" for user \"uid:%d\", because %s", itemDeleteReq.Id, uid, err.Error())

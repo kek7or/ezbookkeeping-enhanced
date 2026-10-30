@@ -219,7 +219,7 @@ describe('sumPlannedLines', () => {
             createSchedule(ScheduledTemplateFrequencyType.Monthly.type, '1', { amount: 94930, name: 'Apartment payment', id: '2' })
         ], {}, 2026, 8, currencyOf).concat(buildItemLines([
             BudgetPlanItem.of({ id: '10', year: 2026, month: 8, wished: false, type: TransactionType.Expense, categoryId: '11', accountId: '1001', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
-        ], currencyOf));
+        ], currencyOf, 'EUR'));
 
         const totals = sumPlannedLines(lines, amount => amount);
 
@@ -228,8 +228,7 @@ describe('sumPlannedLines', () => {
         expect(inEuros(totals.net)).toBe(300000 - 94930 - 45000);
     });
 
-    // a wish is jotted down before it is thought through, so it must survive naming no account -
-    // unlike a planned item, which is dropped for the same omission
+    // a wish is jotted down before it is thought through, so it must survive naming no account
     test('should price a wish with no account in the user own currency', () => {
         const lines = buildWishLines([
             BudgetPlanItem.of({ id: '20', year: 0, month: 0, wished: true, type: TransactionType.Expense, categoryId: '', accountId: '', amount: 80000, name: 'Sofa', comment: '', displayOrder: 1 })
@@ -252,9 +251,20 @@ describe('sumPlannedLines', () => {
     test('should drop a line it cannot price rather than counting it as nothing', () => {
         const lines = buildItemLines([
             BudgetPlanItem.of({ id: '10', year: 2026, month: 8, wished: false, type: TransactionType.Expense, categoryId: '11', accountId: '9999', amount: 45000, name: 'Flight', comment: '', displayOrder: 1 })
-        ], currencyOf);
+        ], currencyOf, 'EUR');
 
         expect(lines.length).toBe(0);
+    });
+
+    // a wish planned for the month keeps naming no account, and must still be shown and counted
+    test('should price a planned item with no account in the user own currency', () => {
+        const lines = buildItemLines([
+            BudgetPlanItem.of({ id: '11', year: 2026, month: 8, wished: false, type: TransactionType.Expense, categoryId: '11', accountId: '', amount: 13000, name: 'Carpet', comment: '', displayOrder: 1 })
+        ], currencyOf, 'EUR');
+
+        expect(lines.length).toBe(1);
+        expect(lines[0]?.currency).toBe('EUR');
+        expect(inEuros(lines[0]?.amount as BigDecimal)).toBe(13000);
     });
 });
 

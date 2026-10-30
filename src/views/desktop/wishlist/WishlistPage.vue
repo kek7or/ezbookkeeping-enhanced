@@ -27,7 +27,7 @@
                 <v-card-text class="pt-0">
                     <span class="text-body-2 text-medium-emphasis">{{ tt('Everything you want, sorted into groups. Drag to reorder or move between groups. Attach a wish to a month to try it there, or plan it to count it.') }}</span>
                     <div class="text-body-1 mt-2" v-if="!loading">
-                        {{ tt('Total') }}: <span class="font-weight-medium">{{ displayAmount(totalOf(allWishes)) }}</span>
+                        {{ tt('Total') }}: <span class="font-weight-medium">{{ displayAmount(totalOf(openWishes)) }}</span>
                     </div>
                 </v-card-text>
             </v-card>
@@ -42,10 +42,10 @@
         <v-col cols="12" v-if="!loading">
             <div class="wishlist-board">
                 <wish-column :title="tt('Ungrouped')" :total="displayAmount(totalOf(ungroupedList.wishes))"
-                             :list="ungroupedList" :display-amount="displayWishAmount" :display-month="displayWishMonth"
+                             :list="ungroupedList" :planned="plannedOf('')" :display-amount="displayWishAmount" :display-month="displayWishMonth" :category-name="categoryName"
                              @update="ungroupedList.wishes = $event"
                              @moved="onWishListChange" @attach="pickMonth($event, 'attach')" @plan="pickMonth($event, 'plan')"
-                             @detach="detach" @edit="editWish" @remove="removeWish">
+                             @detach="detach" @unplan="unplan" @edit="editWish" @remove="removeWish">
                     <template #actions>
                         <v-btn density="comfortable" size="small" variant="text" :icon="true" @click="addWish('')">
                             <v-icon :icon="mdiPlus"/>
@@ -58,10 +58,10 @@
                                 v-model="wishlistStore.groups" @change="onGroupsChange">
                     <template #item="{ element: group }">
                         <wish-column :title="group.name" :total="displayAmount(totalOf(listOf(group.id).wishes))"
-                                     :list="listOf(group.id)" :display-amount="displayWishAmount" :display-month="displayWishMonth"
+                                     :list="listOf(group.id)" :planned="plannedOf(group.id)" :display-amount="displayWishAmount" :display-month="displayWishMonth" :category-name="categoryName"
                                      @update="listOf(group.id).wishes = $event"
                                      @moved="onWishListChange" @attach="pickMonth($event, 'attach')" @plan="pickMonth($event, 'plan')"
-                                     @detach="detach" @edit="editWish" @remove="removeWish">
+                                     @detach="detach" @unplan="unplan" @edit="editWish" @remove="removeWish">
                             <template #handle>
                                 <v-icon class="group-drag-handle me-1" size="20" :icon="mdiDrag"/>
                             </template>
@@ -91,7 +91,7 @@
     <edit-wish-dialog ref="editWishDialog"/>
     <grab-from-budget-dialog ref="grabFromBudgetDialog"/>
     <month-selection-dialog :title="monthAction === 'plan' ? tt('Plan for Month') : tt('Attach to Month')"
-                            :hint="monthAction === 'plan' ? tt('The wish leaves the wishlist and counts in that month\'s budget.') : tt('The wish shows on that month\'s budget page to be tried against it, and counts towards nothing.')"
+                            :hint="monthAction === 'plan' ? tt('The wish counts in that month\'s budget and stays on the wishlist, shown as planned.') : tt('The wish shows on that month\'s budget page to be tried against it, and counts towards nothing.')"
                             :model-value="monthPickerValue"
                             v-model:show="showMonthPicker"
                             @update:model-value="onMonthPicked"
@@ -116,6 +116,7 @@ import { useI18n } from '@/locales/helpers.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useExchangeRatesStore } from '@/stores/exchangeRates.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useWishlistStore } from '@/stores/wishlist.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
@@ -150,6 +151,7 @@ const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatDateTimeToGregori
 const userStore = useUserStore();
 const accountsStore = useAccountsStore();
 const exchangeRatesStore = useExchangeRatesStore();
+const transactionCategoriesStore = useTransactionCategoriesStore();
 const wishlistStore = useWishlistStore();
 
 const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
@@ -161,6 +163,8 @@ const grabFromBudgetDialog = useTemplateRef<GrabFromBudgetDialogType>('grabFromB
 const loading = ref<boolean>(true);
 const ungroupedList = ref<WishList>({ groupId: '', wishes: [] });
 const groupLists = ref<Record<string, WishList>>({});
+// what was planned from the wishlist, by group, shown under each group and kept out of dragging
+const plannedLists = ref<Record<string, BudgetPlanItem[]>>({});
 
 const showMonthPicker = ref<boolean>(false);
 const monthAction = ref<'attach' | 'plan'>('attach');
@@ -168,32 +172,62 @@ const monthPickerWish = ref<BudgetPlanItem | null>(null);
 const monthPickerValue = ref<Year0BasedMonth | undefined>(undefined);
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
-const allWishes = computed<BudgetPlanItem[]>(() => wishlistStore.wishes);
+// the total is what is still only wanted; what is planned already counts in its month
+const openWishes = computed<BudgetPlanItem[]>(() => wishlistStore.wishes.filter(wish => wish.wished));
 
 // The draggable lists need arrays of their own to move items between, so they are rebuilt from the
 // store whenever it changes rather than computed from it. A wish whose group is gone is ungrouped.
 function rebuildLists(): void {
     const lists: Record<string, WishList> = {};
     const ungrouped: WishList = { groupId: '', wishes: [] };
+    const ungroupedPlanned: BudgetPlanItem[] = [];
+    const planned: Record<string, BudgetPlanItem[]> = { '': ungroupedPlanned };
 
     for (const group of wishlistStore.groups) {
         lists[group.id] = { groupId: group.id, wishes: [] };
+        planned[group.id] = [];
     }
 
     const sorted = [...wishlistStore.wishes].sort((a, b) => a.displayOrder - b.displayOrder);
 
     for (const wish of sorted) {
-        (lists[wish.wishGroupId] ?? ungrouped).wishes.push(wish);
+        if (wish.wished) {
+            (lists[wish.wishGroupId] ?? ungrouped).wishes.push(wish);
+        } else {
+            (planned[wish.wishGroupId] ?? ungroupedPlanned).push(wish);
+        }
+    }
+
+    for (const list of Object.values(planned)) {
+        list.sort((a, b) => a.year - b.year || a.month - b.month);
     }
 
     groupLists.value = lists;
     ungroupedList.value = ungrouped;
+    plannedLists.value = planned;
 }
 
 watch(() => [wishlistStore.groups.length, wishlistStore.wishes], rebuildLists, { deep: true });
 
 function listOf(groupId: string): WishList {
     return groupLists.value[groupId] ?? { groupId: groupId, wishes: [] };
+}
+
+function plannedOf(groupId: string): BudgetPlanItem[] {
+    return plannedLists.value[groupId] ?? [];
+}
+
+// a subcategory is shown under its parent, since "Furniture" alone may sit under more than one
+function categoryName(categoryId: string): string {
+    const category = transactionCategoriesStore.allTransactionCategoriesMap[categoryId];
+
+    if (!category) {
+        return tt('Unknown Category');
+    }
+
+    const parent = category.parentId && category.parentId !== '0' ? transactionCategoriesStore.allTransactionCategoriesMap[category.parentId] : undefined;
+
+    return parent ? `${parent.name} / ${category.name}` : category.name;
 }
 
 function wishCurrency(wish: BudgetPlanItem): string {
@@ -260,6 +294,7 @@ function load(): void {
 
     Promise.all([
         accountsStore.loadAllAccounts({ force: false }),
+        transactionCategoriesStore.loadAllCategories({ force: false }),
         wishlistStore.loadWishlist()
     ]).then(() => {
         rebuildLists();
@@ -327,6 +362,12 @@ function removeWish(wish: BudgetPlanItem): void {
 
 function detach(wish: BudgetPlanItem): void {
     wishlistStore.attachWish({ wish: wish, year: 0, month: 0 }).catch(showError);
+}
+
+function unplan(wish: BudgetPlanItem): void {
+    wishlistStore.grabPlannedItem({ item: wish }).then(() => {
+        snackbar.value?.showMessage('You have taken this back out of the month');
+    }).catch(showError);
 }
 
 function pickMonth(wish: BudgetPlanItem, action: 'attach' | 'plan'): void {

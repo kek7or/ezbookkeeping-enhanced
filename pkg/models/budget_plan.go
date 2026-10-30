@@ -55,7 +55,8 @@ type BudgetPlanMonth struct {
 // October differ in whether a month has been chosen for it, not in what it is, and assigning one to
 // a month must not lose the name it was given or the comment explaining it. So a wish is this row
 // with Wished set, and assigning it clears the flag and fills the month in. Nothing is copied and
-// nothing is left behind.
+// nothing is left behind. FromWishlist remembers where it came from, so the wishlist keeps showing
+// it - as planned - instead of losing it the moment it is decided on.
 //
 // A wish is in one of two places. With no month it sits on the wishlist page only. With a month it
 // is also shown on that month's budget page, to be tried against the month - still counted towards
@@ -82,6 +83,9 @@ type BudgetPlanItem struct {
 	// WishGroupId is the wishlist group this is filed under, zero for none. It is kept while the row
 	// is planned, so that a purchase sent back to the wishlist lands in the group it came from.
 	WishGroupId int64 `xorm:"NOT NULL DEFAULT 0"`
+	// FromWishlist says this was planned from the wishlist, which keeps showing it as planned. It
+	// carries a default for the same reason Wished does.
+	FromWishlist bool `xorm:"NOT NULL DEFAULT 0"`
 	// Type is income or expense. A transfer is neither spent nor earned and has no place in a plan
 	// of what a month costs, so it is rejected rather than stored and ignored. A wish is always an
 	// expense: a wishlist is things somebody wants to buy.
@@ -254,11 +258,13 @@ type BudgetPlanItemModifyRequest struct {
 // that writing a wish down never takes longer than thinking of it.
 type BudgetPlanWishCreateRequest struct {
 	// GroupId is zero for no group
-	GroupId int64  `json:"groupId,string" binding:"omitempty,min=1"`
-	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
-	Name    string `json:"name" binding:"required,notBlank,max=64"`
-	Comment string `json:"comment" binding:"max=255"`
-	Url     string `json:"url" binding:"omitempty,max=1024,url"`
+	GroupId int64 `json:"groupId,string" binding:"omitempty,min=1"`
+	// CategoryId is zero for none
+	CategoryId int64  `json:"categoryId,string" binding:"min=0"`
+	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name       string `json:"name" binding:"required,notBlank,max=64"`
+	Comment    string `json:"comment" binding:"max=255"`
+	Url        string `json:"url" binding:"omitempty,max=1024,url"`
 	// Year and Month attach the new wish to a month straight away, and are both zero for none
 	Year  int32 `json:"year" binding:"min=0,max=9999"`
 	Month int32 `json:"month" binding:"min=0,max=12"`
@@ -267,11 +273,13 @@ type BudgetPlanWishCreateRequest struct {
 // BudgetPlanWishModifyRequest represents all parameters of a request to change something on the
 // wishlist. The group is changed by moving the wish, not here.
 type BudgetPlanWishModifyRequest struct {
-	Id      int64  `json:"id,string" binding:"required,min=1"`
-	Amount  int64  `json:"amount" binding:"min=0,max=999999999999999"`
-	Name    string `json:"name" binding:"required,notBlank,max=64"`
-	Comment string `json:"comment" binding:"max=255"`
-	Url     string `json:"url" binding:"omitempty,max=1024,url"`
+	Id int64 `json:"id,string" binding:"required,min=1"`
+	// CategoryId is zero for none
+	CategoryId int64  `json:"categoryId,string" binding:"min=0"`
+	Amount     int64  `json:"amount" binding:"min=0,max=999999999999999"`
+	Name       string `json:"name" binding:"required,notBlank,max=64"`
+	Comment    string `json:"comment" binding:"max=255"`
+	Url        string `json:"url" binding:"omitempty,max=1024,url"`
 }
 
 // BudgetPlanWishAttachRequest represents all parameters of a request to try one wish against one
@@ -408,6 +416,7 @@ type BudgetPlanItemInfoResponse struct {
 	Month        int32           `json:"month"`
 	Wished       bool            `json:"wished"`
 	WishGroupId  int64           `json:"wishGroupId,string"`
+	FromWishlist bool            `json:"fromWishlist"`
 	Type         TransactionType `json:"type"`
 	CategoryId   int64           `json:"categoryId,string"`
 	AccountId    int64           `json:"accountId,string"`
@@ -474,6 +483,7 @@ func (i *BudgetPlanItem) ToBudgetPlanItemInfoResponse() *BudgetPlanItemInfoRespo
 		Month:        i.Month,
 		Wished:       i.Wished,
 		WishGroupId:  i.WishGroupId,
+		FromWishlist: i.FromWishlist,
 		Type:         i.Type,
 		CategoryId:   i.CategoryId,
 		AccountId:    i.AccountId,

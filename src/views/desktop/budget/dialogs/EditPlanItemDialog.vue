@@ -39,8 +39,8 @@
                                       :placeholder="tt('What is expected')"
                                       v-model="name"/>
                     </v-col>
-                    <!-- a wish is a name, a price and a description, and nothing more -->
-                    <v-col cols="12" md="6" v-if="!wished">
+                    <!-- a wish names no account; its category is optional until it is planned -->
+                    <v-col cols="12" :md="wished ? 12 : 6">
                         <two-column-select primary-key-field="id" primary-value-field="id" primary-title-field="name"
                                            primary-icon-field="icon" primary-icon-type="category" primary-color-field="color"
                                            primary-hidden-field="hidden" primary-sub-items-field="subCategories"

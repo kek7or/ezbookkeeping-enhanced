@@ -168,12 +168,13 @@ export function buildScheduleLines(templates: TransactionTemplate[], adjustments
 }
 
 // buildItemLines turns what was planned by hand into the same shape the schedules produce, so that
-// the two can be totalled and compared without either being a special case.
-export function buildItemLines(items: BudgetPlanItem[], getCurrency: (accountId: string) => string | undefined): PlannedLine[] {
+// the two can be totalled and compared without either being a special case. An item planned from
+// the wishlist may name no account, and is then priced in the user's own currency, as a wish is.
+export function buildItemLines(items: BudgetPlanItem[], getCurrency: (accountId: string) => string | undefined, defaultCurrency: string): PlannedLine[] {
     const lines: PlannedLine[] = [];
 
     for (const item of items) {
-        const currency = getCurrency(item.accountId);
+        const currency = item.accountId ? getCurrency(item.accountId) : defaultCurrency;
 
         if (!currency) {
             continue;

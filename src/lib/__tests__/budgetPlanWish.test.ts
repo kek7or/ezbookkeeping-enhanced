@@ -191,7 +191,7 @@ describe('what a wish would do to the month', () => {
     // so the two share the money set aside rather than each taking it
     test('should share the expectation with what is already planned under it', () => {
         const expectations = { '11': parseBigDecimal(100000) };
-        const planned = buildItemLines([plannedItem('9', '11', 60000)], currencyOf);
+        const planned = buildItemLines([plannedItem('9', '11', 60000)], currencyOf, 'USD');
         const withWish = planned.concat(buildWishLines([wish('1', '11', 30000)], currencyOf, 'EUR'));
 
         expect(euros(netForLines(planned, expectations, income))).toBe(300000 - 100000);

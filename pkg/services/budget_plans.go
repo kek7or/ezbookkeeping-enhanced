@@ -180,6 +180,29 @@ func (s *BudgetPlanService) BackfillPlannedMonths(c core.Context) (int, error) {
 	return backfilled, nil
 }
 
+// BackfillPlannedWishes puts back on the wishlist what was planned from it before FromWishlist
+// existed. Such a row is recognised by what an item added straight to a month never has: a wishlist
+// group, or no category or no account.
+// ponytail: an ungrouped wish planned and then given a category and account on the budget page is
+// indistinguishable from a planned item and stays off the wishlist
+func (s *BudgetPlanService) BackfillPlannedWishes(c core.Context) (int64, error) {
+	var backfilled int64
+
+	for i := 0; i < s.UserDataDBCount(); i++ {
+		updated, err := s.UserDataDBByIndex(i).NewSession(c).Cols("from_wishlist").
+			Where("deleted=? AND wished=? AND from_wishlist=? AND (wish_group_id<>0 OR category_id=0 OR account_id=0)", false, false, false).
+			Update(&models.BudgetPlanItem{FromWishlist: true})
+
+		if err != nil {
+			return backfilled, err
+		}
+
+		backfilled += updated
+	}
+
+	return backfilled, nil
+}
+
 // GetItemsByMonth returns everything planned by hand for one month
 func (s *BudgetPlanService) GetItemsByMonth(c core.Context, uid int64, year int32, month int32) ([]*models.BudgetPlanItem, error) {
 	if uid <= 0 {
@@ -192,14 +215,14 @@ func (s *BudgetPlanService) GetItemsByMonth(c core.Context, uid int64, year int3
 	return items, err
 }
 
-// GetAllWishes returns the whole wishlist, attached to a month or not
+// GetAllWishes returns the whole wishlist, attached to a month or not, and what was planned from it
 func (s *BudgetPlanService) GetAllWishes(c core.Context, uid int64) ([]*models.BudgetPlanItem, error) {
 	if uid <= 0 {
 		return nil, errs.ErrUserIdInvalid
 	}
 
 	var wishes []*models.BudgetPlanItem
-	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND wished=?", uid, false, true).OrderBy("display_order asc").Find(&wishes)
+	err := s.UserDataDB(uid).NewSession(c).Where("uid=? AND deleted=? AND (wished=? OR from_wishlist=?)", uid, false, true, true).OrderBy("display_order asc").Find(&wishes)
 
 	return wishes, err
 }
@@ -357,7 +380,8 @@ func (s *BudgetPlanService) CreateWish(c core.Context, wish *models.BudgetPlanIt
 }
 
 // ModifyWish changes something on the wishlist. Whether it is a wish is not among the things that
-// can change: that is what assigning and unassigning are for.
+// can change: that is what assigning and unassigning are for. Something planned from the wishlist is
+// still edited from there.
 func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanItem) error {
 	if wish.Uid <= 0 {
 		return errs.ErrUserIdInvalid
@@ -366,7 +390,7 @@ func (s *BudgetPlanService) ModifyWish(c core.Context, wish *models.BudgetPlanIt
 	wish.UpdatedUnixTime = time.Now().Unix()
 
 	return s.UserDataDB(wish.Uid).DoTransaction(c, func(sess *xorm.Session) error {
-		updatedRows, err := sess.ID(wish.ItemId).Cols("amount", "name", "comment", "url", "updated_unix_time").Where("uid=? AND deleted=? AND wished=?", wish.Uid, false, true).Update(wish)
+		updatedRows, err := sess.ID(wish.ItemId).Cols("category_id", "amount", "name", "comment", "url", "updated_unix_time").Where("uid=? AND deleted=? AND (wished=? OR from_wishlist=?)", wish.Uid, false, true, true).Update(wish)
 
 		if err != nil {
 			return err
@@ -566,7 +590,7 @@ func (s *BudgetPlanService) DeleteWishGroup(c core.Context, uid int64, groupId i
 // AssignWish puts one wish into one month's budget, which is the act of deciding to buy the thing.
 // The row stops being a wish and becomes what it always was going to be - something planned for a
 // month - keeping its name, its comment and its amount, because nothing about the thing itself has
-// changed. Only the decision has.
+// changed. Only the decision has. It stays on the wishlist, shown as planned.
 //
 // The month it lands in is planned by its landing there, the same as if the item had been added to
 // that month directly.
@@ -592,6 +616,7 @@ func (s *BudgetPlanService) AssignWish(c core.Context, uid int64, itemId int64, 
 	now := time.Now().Unix()
 	updateModel := &models.BudgetPlanItem{
 		Wished:          false,
+		FromWishlist:    true,
 		Year:            year,
 		Month:           month,
 		DisplayOrder:    maxOrder + 1,
@@ -603,7 +628,7 @@ func (s *BudgetPlanService) AssignWish(c core.Context, uid int64, itemId int64, 
 			return err
 		}
 
-		updatedRows, err := sess.ID(itemId).Cols("wished", "year", "month", "display_order", "updated_unix_time").
+		updatedRows, err := sess.ID(itemId).Cols("wished", "from_wishlist", "year", "month", "display_order", "updated_unix_time").
 			Where("uid=? AND deleted=? AND wished=?", uid, false, true).Update(updateModel)
 
 		if err != nil {
