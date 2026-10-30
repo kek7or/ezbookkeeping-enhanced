@@ -56,7 +56,7 @@
                     </div>
 
                     <v-row>
-                        <v-col cols="12" md="4">
+                        <v-col cols="12" :md="assetColumnWidth">
                             <div class="d-flex align-center">
                                 <div class="me-3">
                                     <v-avatar rounded color="grey" size="42" class="elevation-1">
@@ -72,7 +72,7 @@
                             </div>
                         </v-col>
 
-                        <v-col cols="12" md="4">
+                        <v-col cols="12" :md="assetColumnWidth">
                             <div class="d-flex align-center">
                                 <div class="me-3">
                                     <v-avatar rounded color="expense" size="42" class="elevation-1">
@@ -88,7 +88,7 @@
                             </div>
                         </v-col>
 
-                        <v-col cols="12" md="4">
+                        <v-col cols="12" :md="assetColumnWidth">
                             <div class="d-flex align-center">
                                 <div class="me-3">
                                     <v-avatar rounded color="primary" size="42" class="elevation-1">
@@ -100,6 +100,24 @@
                                     <span class="text-caption">{{ tt('Net assets') }}</span>
                                     <span class="text-h5" v-if="!loadingOverview || (allAccounts && allAccounts.length)">{{ netAssets }}</span>
                                     <v-skeleton-loader class="skeleton-no-margin mt-3 mb-2" width="120px" type="text" :loading="true" v-else-if="loadingOverview && (!allAccounts || !allAccounts.length)"></v-skeleton-loader>
+                                </div>
+                            </div>
+                        </v-col>
+
+                        <!-- what the last few planned months spent past their plans, on average. It
+                             is only shown once there is a finished planned month to average. -->
+                        <v-col cols="12" :md="assetColumnWidth" v-if="unplannedMonths.length">
+                            <div class="d-flex align-center">
+                                <div class="me-3">
+                                    <v-avatar rounded color="error" size="42" class="elevation-1">
+                                        <v-icon size="24" :icon="mdiCashMinus"/>
+                                    </v-avatar>
+                                </div>
+
+                                <div class="d-flex flex-column">
+                                    <span class="text-caption">{{ tt('Unplanned, monthly avg') }}</span>
+                                    <span class="text-h5">{{ getDisplayAmount(unplannedAverage, false) }}</span>
+                                    <span class="text-caption text-medium-emphasis">{{ tt('format.misc.budgetOverPlanMonths', { over: formatNumberToLocalizedNumerals(unplannedOverCount), total: formatNumberToLocalizedNumerals(unplannedMonths.length) }) }}</span>
                                 </div>
                             </div>
                         </v-col>
@@ -201,7 +219,9 @@ import { useHomePageBase } from '@/views/base/HomePageBase.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
+import { type UnplannedMonth, useBudgetPlanStore } from '@/stores/budgetPlan.ts';
 
+import type { BigDecimal } from '@/core/numeral.ts';
 import { DateRange } from '@/core/datetime.ts';
 import { ThemeType } from '@/core/theme.ts';
 import {
@@ -220,6 +240,7 @@ import {
     mdiBankOutline,
     mdiCreditCardOutline,
     mdiPiggyBankOutline,
+    mdiCashMinus,
     mdiCalendarTodayOutline,
     mdiCalendarWeekOutline,
     mdiCalendarMonthOutline,
@@ -228,6 +249,8 @@ import {
 } from '@mdi/js';
 
 type SnackBarType = InstanceType<typeof SnackBar>;
+
+const UNPLANNED_HISTORY_MONTHS = 6;
 
 const router = useRouter();
 const theme = useTheme();
@@ -241,6 +264,7 @@ const {
     totalLiabilities,
     displayDateRange,
     transactionOverview,
+    getDisplayAmount,
     getDisplayIncomeAmount,
     getDisplayExpenseAmount
 } = useHomePageBase();
@@ -248,10 +272,28 @@ const {
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const overviewStore = useOverviewStore();
+const budgetPlanStore = useBudgetPlanStore();
 
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
 const loadingOverview = ref<boolean>(true);
+const unplannedMonths = ref<UnplannedMonth[]>([]);
+
+const assetColumnWidth = computed<number>(() => unplannedMonths.value.length ? 3 : 4);
+
+// Months that came in under their plan count as nothing rather than as a credit, so one careful
+// month does not hide an overspent one.
+const unplannedAverage = computed<BigDecimal>(() => {
+    let total = BIG_DECIMAL_ZERO;
+
+    for (const item of unplannedMonths.value) {
+        total = total.add(item.unplanned);
+    }
+
+    return unplannedMonths.value.length ? total.divide(unplannedMonths.value.length).truncate() : BIG_DECIMAL_ZERO;
+});
+
+const unplannedOverCount = computed<number>(() => unplannedMonths.value.filter(item => item.unplanned.isPositive()).length);
 
 const isDarkMode = computed<boolean>(() => theme.global.name.value === ThemeType.Dark);
 
@@ -306,6 +348,13 @@ function reload(force: boolean): void {
         transactionCategoriesStore.loadAllCategories({ force: false }),
         overviewStore.loadTransactionOverview({ force: force, loadLast11Months: true })
     ];
+
+    // kept apart from the overview, so a budget plan that fails to load costs only its own figure
+    budgetPlanStore.loadUnplannedHistory({ months: UNPLANNED_HISTORY_MONTHS }).then(months => {
+        unplannedMonths.value = months;
+    }).catch(() => {
+        unplannedMonths.value = [];
+    });
 
     Promise.all(promises).then(() => {
         loadingOverview.value = false;

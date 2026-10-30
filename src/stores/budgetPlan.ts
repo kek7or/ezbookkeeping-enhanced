@@ -15,7 +15,7 @@ import { KeywordMatchMode } from '@/core/text.ts';
 
 import { TransactionTemplate } from '@/models/transaction_template.ts';
 import { TransactionCategory } from '@/models/transaction_category.ts';
-import { type BudgetPlanAdjustment, type BudgetPlanExpectation, type BudgetPlanStandingExpectation, BudgetPlanItem } from '@/models/budget_plan.ts';
+import { type BudgetPlanAdjustment, type BudgetPlanExpectation, type BudgetPlanStandingExpectation, type BudgetPlanInfoResponse, BudgetPlanItem } from '@/models/budget_plan.ts';
 import type { TransactionStatisticResponseItem } from '@/models/transaction.ts';
 
 import {
@@ -37,6 +37,12 @@ import { BIG_DECIMAL_ZERO, parseBigDecimal } from '@/lib/numeral.ts';
 import { getYearMonthFirstUnixTime, getYearMonthLastUnixTime, getCurrentDateTime } from '@/lib/datetime.ts';
 import services from '@/lib/services.ts';
 import logger from '@/lib/logger.ts';
+
+export interface UnplannedMonth {
+    readonly year: number;
+    readonly month: number;
+    readonly unplanned: BigDecimal;
+}
 
 export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     const userStore = useUserStore();
@@ -130,28 +136,10 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
     // month that says something gets what it said. Neither row knows about the other, so overriding
     // one month never disturbs the standing figure and clearing the override brings it straight
     // back.
-    const expectationByCategory = computed<Record<string, BigDecimal>>(() => {
-        const totals: Record<string, BigDecimal> = {};
-
-        for (const standing of planStandingExpectations.value) {
-            totals[standing.categoryId] = parseBigDecimal(standing.amount);
-        }
-
-        for (const expectation of planExpectations.value) {
-            totals[expectation.categoryId] = parseBigDecimal(expectation.amount);
-        }
-
-        return totals;
-    });
+    const expectationByCategory = computed<Record<string, BigDecimal>>(() => mergeExpectations(planStandingExpectations.value, planExpectations.value));
 
     // which of the figures above are the standing ones, for the page to say so on the row
-    const standingCategoryIds = computed<Set<string>>(() => {
-        const overridden = new Set<string>(planExpectations.value.map(expectation => expectation.categoryId));
-
-        return new Set<string>(planStandingExpectations.value
-            .filter(standing => !overridden.has(standing.categoryId))
-            .map(standing => standing.categoryId));
-    });
+    const standingCategoryIds = computed<Set<string>>(() => getStandingCategoryIds(planStandingExpectations.value, planExpectations.value));
 
     // planActive is whether this month has a plan worth showing, and it is exactly whether the month
     // was planned. No month is exempt, in either direction.
@@ -183,10 +171,45 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         return expense.concat(income);
     });
 
-    const actualByCategory = computed<Record<string, BigDecimal>>(() => {
+    const actualByCategory = computed<Record<string, BigDecimal>>(() => sumActualByCategory(actualItems.value));
+
+    // The tree is where the plan, the ledger and the expectations meet, and every figure the page
+    // shows below the hero comes out of it.
+    const categoryBudgetTree = computed<CategoryBudgetNode[]>(() => buildCategoryBudgetTree(primaryCategories.value, plannedByCategory.value, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(allLines.value), standingCategoryIds.value));
+
+    // What the month is planned to cost is the tree's own total, not the sum of the lines: a
+    // category expected to come to more than what is listed under it costs the more. With no
+    // expectation set anywhere the two are the same figure.
+    const plannedTotals = computed<PlanTotals>(() => sumCategoryBudgets(categoryBudgetTree.value));
+
+    const actualTotals = computed<PlanTotals>(() => sumActualTotals(actualByCategory.value));
+
+    function mergeExpectations(standingExpectations: BudgetPlanStandingExpectation[], monthExpectations: BudgetPlanExpectation[]): Record<string, BigDecimal> {
         const totals: Record<string, BigDecimal> = {};
 
-        for (const item of actualItems.value) {
+        for (const standing of standingExpectations) {
+            totals[standing.categoryId] = parseBigDecimal(standing.amount);
+        }
+
+        for (const expectation of monthExpectations) {
+            totals[expectation.categoryId] = parseBigDecimal(expectation.amount);
+        }
+
+        return totals;
+    }
+
+    function getStandingCategoryIds(standingExpectations: BudgetPlanStandingExpectation[], monthExpectations: BudgetPlanExpectation[]): Set<string> {
+        const overridden = new Set<string>(monthExpectations.map(expectation => expectation.categoryId));
+
+        return new Set<string>(standingExpectations
+            .filter(standing => !overridden.has(standing.categoryId))
+            .map(standing => standing.categoryId));
+    }
+
+    function sumActualByCategory(items: TransactionStatisticResponseItem[]): Record<string, BigDecimal> {
+        const totals: Record<string, BigDecimal> = {};
+
+        for (const item of items) {
             // a transfer names a related account and is neither spent nor earned, so it is left out
             // for the same reason it is left out of the plan
             if (item.relatedAccountId && item.relatedAccountId !== '0') {
@@ -209,23 +232,14 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         }
 
         return totals;
-    });
+    }
 
-    // The tree is where the plan, the ledger and the expectations meet, and every figure the page
-    // shows below the hero comes out of it.
-    const categoryBudgetTree = computed<CategoryBudgetNode[]>(() => buildCategoryBudgetTree(primaryCategories.value, plannedByCategory.value, actualByCategory.value, expectationByCategory.value, getPlannedTypesByCategory(allLines.value), standingCategoryIds.value));
-
-    // What the month is planned to cost is the tree's own total, not the sum of the lines: a
-    // category expected to come to more than what is listed under it costs the more. With no
-    // expectation set anywhere the two are the same figure.
-    const plannedTotals = computed<PlanTotals>(() => sumCategoryBudgets(categoryBudgetTree.value));
-
-    const actualTotals = computed<PlanTotals>(() => {
+    function sumActualTotals(byCategory: Record<string, BigDecimal>): PlanTotals {
         let income = BIG_DECIMAL_ZERO;
         let expense = BIG_DECIMAL_ZERO;
 
-        for (const categoryId in actualByCategory.value) {
-            const amount = actualByCategory.value[categoryId] as BigDecimal;
+        for (const categoryId in byCategory) {
+            const amount = byCategory[categoryId] as BigDecimal;
             const category = transactionCategoriesStore.allTransactionCategoriesMap[categoryId];
 
             if (category && category.type === CategoryType.Income) {
@@ -240,7 +254,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             expense: expense,
             net: income.subtract(expense)
         };
-    });
+    }
 
     // incomeBasis is the income the month actually has, foreseen or not.
     //
@@ -377,15 +391,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
             transactionCategoriesStore.loadAllCategories({ force: false }),
             accountsStore.loadAllAccounts({ force: false }),
             services.getBudgetPlan({ year: requestedYear, month: requestedMonth }),
-            services.getTransactionStatistics({
-                startTime: getYearMonthFirstUnixTime({ year: requestedYear, month0base: requestedMonth - 1 }),
-                endTime: getYearMonthLastUnixTime({ year: requestedYear, month0base: requestedMonth - 1 }),
-                tagFilter: '',
-                keyword: '',
-                matchMode: KeywordMatchMode.Default.type,
-                subscriptionFilter: 0,
-                useTransactionTimezone: false
-            })
+            getMonthStatistics(requestedYear, requestedMonth)
         ]).then(([, , , planResponse, statisticsResponse]) => {
             // a month stepped through while these were in flight must not be overwritten by the
             // answer to the month that was left
@@ -419,6 +425,80 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
 
             return Promise.reject(error);
         });
+    }
+
+    function getMonthStatistics(statisticsYear: number, statisticsMonth: number) {
+        return services.getTransactionStatistics({
+            startTime: getYearMonthFirstUnixTime({ year: statisticsYear, month0base: statisticsMonth - 1 }),
+            endTime: getYearMonthLastUnixTime({ year: statisticsYear, month0base: statisticsMonth - 1 }),
+            tagFilter: '',
+            keyword: '',
+            matchMode: KeywordMatchMode.Default.type,
+            subscriptionFilter: 0,
+            useTransactionTimezone: false
+        });
+    }
+
+    // What a finished month spent past its plan - the Unplanned part of the page's bar, and nothing
+    // when the month came in under. It runs the same tree the page does, without touching the month
+    // the page is showing.
+    function getMonthUnplanned(plan: BudgetPlanInfoResponse, items: TransactionStatisticResponseItem[]): BigDecimal {
+        const adjustments: Record<string, BudgetPlanAdjustment> = {};
+
+        for (const adjustment of plan.adjustments || []) {
+            adjustments[adjustment.templateId] = adjustment;
+        }
+
+        const lines = buildScheduleLines(scheduledTemplates.value, adjustments, plan.year, plan.month, getAccountCurrency)
+            .concat(buildItemLines(BudgetPlanItem.ofMulti(plan.items || []), getAccountCurrency, defaultCurrency.value));
+        const standing = plan.standing || [];
+        const expectations = plan.expectations || [];
+        const actual = sumActualByCategory(items);
+        const tree = buildCategoryBudgetTree(primaryCategories.value, sumPlannedLinesByCategory(lines, convertToDefaultCurrency), actual, mergeExpectations(standing, expectations), getPlannedTypesByCategory(lines), getStandingCategoryIds(standing, expectations));
+        const unplanned = sumActualTotals(actual).expense.subtract(sumCategoryBudgets(tree).expense);
+
+        return unplanned.isPositive() ? unplanned : BIG_DECIMAL_ZERO;
+    }
+
+    // The unplanned spending of each of the last few finished months that was planned. A month never
+    // planned has no plan to be over, and the current month is not over yet, so neither is counted.
+    // The plans are fetched first so that only the planned months cost a statistics request.
+    function loadUnplannedHistory({ months }: { months: number }): Promise<UnplannedMonth[]> {
+        const today = getCurrentDateTime();
+        const requested: { year: number, month: number }[] = [];
+        let requestedYear = today.getGregorianCalendarYear();
+        let requestedMonth = today.getGregorianCalendarMonth();
+
+        for (let i = 0; i < months; i++) {
+            requestedMonth--;
+
+            if (requestedMonth < 1) {
+                requestedMonth = 12;
+                requestedYear--;
+            }
+
+            requested.push({ year: requestedYear, month: requestedMonth });
+        }
+
+        return Promise.all([
+            transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Schedule.type, force: false }),
+            transactionCategoriesStore.loadAllCategories({ force: false }),
+            accountsStore.loadAllAccounts({ force: false })
+        ]).then(() => Promise.all(requested.map(item => services.getBudgetPlan(item))))
+            .then(responses => {
+                const plans = responses
+                    .map(response => response.data && response.data.success ? response.data.result : null)
+                    .filter((plan): plan is BudgetPlanInfoResponse => !!plan && plan.planned);
+
+                return Promise.all(plans.map(plan => getMonthStatistics(plan.year, plan.month).then(response => ({
+                    year: plan.year,
+                    month: plan.month,
+                    unplanned: getMonthUnplanned(plan, response.data && response.data.success && response.data.result ? (response.data.result.items || []) : [])
+                }))));
+            }).catch(error => {
+                logger.error('failed to retrieve unplanned spending history', error);
+                return Promise.reject(error);
+            });
     }
 
     function saveBudgetPlanItem({ item }: { item: BudgetPlanItem }): Promise<BudgetPlanItem> {
@@ -822,6 +902,7 @@ export const useBudgetPlanStore = defineStore('budgetPlan', () => {
         convertToDefaultCurrency,
         setMonth,
         loadBudgetPlan,
+        loadUnplannedHistory,
         startPlanningMonth,
         stopPlanningMonth,
         saveBudgetPlanItem,

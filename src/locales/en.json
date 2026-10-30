@@ -117,6 +117,7 @@
         "misc": {
             "budgetOfEarnedSoFar": "of {amount} earned so far",
             "budgetAheadOfPlan": "{amount} ahead of plan",
+            "budgetOverPlanMonths": "over plan in {over} of {total} months",
             "budgetWishesPicked": "{count} picked",
             "budgetWishesAlreadyBudgeted": "{amount} of that is already budgeted for",
             "budgetBehindPlan": "{amount} behind plan",
@@ -1086,6 +1087,8 @@
     "Over Plan": "Over Plan",
     "Over plan": "Over plan",
     "Unplanned": "Unplanned",
+    "Spent as Planned": "Spent as Planned",
+    "Unplanned, monthly avg": "Unplanned, monthly avg",
     "Progress": "Progress",
     "Skipped": "Skipped",
     "Adjusted": "Adjusted",

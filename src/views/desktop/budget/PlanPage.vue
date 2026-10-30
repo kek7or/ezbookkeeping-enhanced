@@ -115,6 +115,15 @@
                                         {{ tt('Planned to Spend') }} — {{ displayAmount(plannedTotals.expense) }}
                                     </v-tooltip>
                                 </div>
+                                <!-- where the actual spending stops. The Spent segment only goes up
+                                     to the plan once anything is unplanned, so this is the one place
+                                     the bar shows the whole figure. -->
+                                <div class="budget-flow-spent-marker" :style="{ left: spentMarkerLeft }"
+                                     v-if="spentMarkerLeft">
+                                    <v-tooltip activator="parent" location="bottom">
+                                        {{ monthOver ? tt('Spent') : tt('Spent so far') }} — {{ displayAmount(actualTotals.expense) }}
+                                    </v-tooltip>
+                                </div>
                                 <!-- where the income runs out. It is only drawn when the month
                                      spends past it, because otherwise it sits on the bar's own end
                                      and marks nothing. -->
@@ -137,6 +146,11 @@
                                     <span class="budget-flow-marker-swatch"></span>
                                     <span class="text-body-2">{{ tt('Planned to Spend') }}</span>
                                     <span class="text-body-2 text-medium-emphasis ms-2">{{ displayAmount(plannedTotals.expense) }}</span>
+                                </div>
+                                <div class="budget-flow-legend-item" v-if="spentMarkerLeft">
+                                    <span class="budget-flow-marker-swatch budget-flow-marker-swatch-solid"></span>
+                                    <span class="text-body-2">{{ monthOver ? tt('Spent') : tt('Spent so far') }}</span>
+                                    <span class="text-body-2 text-medium-emphasis ms-2">{{ displayAmount(actualTotals.expense) }}</span>
                                 </div>
                             </div>
 
@@ -898,7 +912,7 @@ const flowSegments = computed<FlowSegment[]>(() => {
     const unplanned = spent.greaterThan(planned) ? spent.subtract(planned) : BIG_DECIMAL_ZERO;
 
     const segments: FlowSegment[] = [
-        buildSegment('spent', tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, spent.subtract(unplanned), total),
+        buildSegment('spent', unplanned.isPositive() ? tt('Spent as Planned') : tt('Spent'), FLOW_COLOR_SPENT, FLOW_LABEL_ON_FILL, spent.subtract(unplanned), total),
         buildSegment('unplanned', tt('Unplanned'), FLOW_COLOR_UNPLANNED, FLOW_LABEL_ON_ERROR, unplanned, total),
         buildSegment('still-to-come', remainingLabel.value, FLOW_COLOR_STILL_TO_COME, FLOW_LABEL_ON_FILL, remainingToSpend.value, total),
         buildSegment('left', tt('On Track to Save'), FLOW_COLOR_LEFT, FLOW_LABEL_ON_SURFACE, monthNet.value, total)
@@ -920,6 +934,24 @@ const planMarkerLeft = computed<string>(() => {
     }
 
     const share = planned.toDoubleNumber() / flowTotal.value.toDoubleNumber();
+
+    if (share >= 0.995) {
+        return '';
+    }
+
+    return `${share * 100}%`;
+});
+
+// Where the actual spending stops, left off at the bar's own ends for the same reason as the plan
+// marker.
+const spentMarkerLeft = computed<string>(() => {
+    const spent = actualTotals.value.expense;
+
+    if (!spent.isPositive() || !flowTotal.value.isPositive()) {
+        return '';
+    }
+
+    const share = spent.toDoubleNumber() / flowTotal.value.toDoubleNumber();
 
     if (share >= 0.995) {
         return '';
@@ -1616,6 +1648,31 @@ onMounted(() => {
     border-inline-start: 4px solid transparent;
     border-inline-end: 4px solid transparent;
     border-top: 5px solid rgb(var(--v-theme-on-surface));
+}
+
+/* The spent marker is solid like the income marker, and carries its caret at the bottom so the
+   two are not confused when both are drawn. */
+.budget-flow-spent-marker {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    width: 2px;
+    margin-inline-start: -1px;
+    background: rgb(var(--v-theme-on-surface));
+}
+
+.budget-flow-spent-marker::after {
+    content: '';
+    position: absolute;
+    bottom: -4px;
+    inset-inline-start: -3px;
+    border-inline-start: 4px solid transparent;
+    border-inline-end: 4px solid transparent;
+    border-bottom: 5px solid rgb(var(--v-theme-on-surface));
+}
+
+.budget-flow-marker-swatch-solid::before {
+    background: rgb(var(--v-theme-on-surface)) !important;
 }
 
 .budget-flow-marker-swatch {
