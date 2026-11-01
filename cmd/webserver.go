@@ -485,6 +485,7 @@ func startWebServer(c *core.CliContext) error {
 			apiV1Route.POST("/budget_plans/wishes/modify.json", bindApi(api.BudgetPlans.BudgetPlanWishModifyHandler, config))
 			apiV1Route.POST("/budget_plans/wishes/assign.json", bindApi(api.BudgetPlans.BudgetPlanWishAssignHandler, config))
 			apiV1Route.POST("/budget_plans/wishes/unassign.json", bindApi(api.BudgetPlans.BudgetPlanWishUnassignHandler, config))
+			apiV1Route.POST("/budget_plans/wishes/buy.json", bindApi(api.BudgetPlans.BudgetPlanWishBuyHandler, config))
 			apiV1Route.POST("/budget_plans/wishes/attach.json", bindApi(api.BudgetPlans.BudgetPlanWishAttachHandler, config))
 			apiV1Route.POST("/budget_plans/wishes/move.json", bindApi(api.BudgetPlans.BudgetPlanWishMoveHandler, config))
 			apiV1Route.GET("/budget_plans/wishlist/get.json", bindApi(api.BudgetPlans.BudgetWishlistGetHandler, config))

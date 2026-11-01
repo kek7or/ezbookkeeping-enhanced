@@ -366,6 +366,13 @@ type BudgetPlanWishUnassignRequest struct {
 	Id int64 `json:"id,string" binding:"required,min=1"`
 }
 
+// BudgetPlanWishBuyRequest represents all parameters of a request to take something planned from the
+// wishlist off it, once the transaction that bought it has been recorded
+type BudgetPlanWishBuyRequest struct {
+	Id            int64 `json:"id,string" binding:"required,min=1"`
+	TransactionId int64 `json:"transactionId,string" binding:"required,min=1"`
+}
+
 // BudgetPlanItemDeleteRequest represents all parameters of a plan item deletion request
 type BudgetPlanItemDeleteRequest struct {
 	Id int64 `json:"id,string" binding:"required,min=1"`

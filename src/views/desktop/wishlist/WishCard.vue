@@ -58,6 +58,10 @@
                         <v-tooltip activator="parent">{{ wish.categoryId ? tt('Plan for Month') : tt('Choose a category to plan this for a month') }}</v-tooltip>
                     </span>
                 </template>
+                <v-btn density="compact" size="small" variant="text" color="primary" :icon="true" v-else @click="emit('buy', wish)">
+                    <v-icon size="18" :icon="mdiCartCheck"/>
+                    <v-tooltip activator="parent">{{ tt('Bought: Add Transaction') }}</v-tooltip>
+                </v-btn>
                 <v-btn density="compact" size="small" variant="text" :icon="true" @click="emit('edit', wish)">
                     <v-icon size="18" :icon="mdiPencilOutline"/>
                     <v-tooltip activator="parent">{{ tt('Edit') }}</v-tooltip>
@@ -81,7 +85,7 @@ import type { BudgetPlanItem } from '@/models/budget_plan.ts';
 
 import { copyTextToClipboard } from '@/lib/ui/common.ts';
 
-import { mdiPencilOutline, mdiDeleteOutline, mdiCalendarHeart, mdiCalendarCheck, mdiContentCopy, mdiCheck, mdiShapeOutline, mdiAlertOutline } from '@mdi/js';
+import { mdiPencilOutline, mdiDeleteOutline, mdiCalendarHeart, mdiCalendarCheck, mdiContentCopy, mdiCheck, mdiShapeOutline, mdiAlertOutline, mdiCartCheck } from '@mdi/js';
 
 const props = defineProps<{
     wish: BudgetPlanItem;
@@ -95,6 +99,7 @@ const emit = defineEmits<{
     (e: 'detach', wish: BudgetPlanItem): void;
     (e: 'plan', wish: BudgetPlanItem): void;
     (e: 'unplan', wish: BudgetPlanItem): void;
+    (e: 'buy', wish: BudgetPlanItem): void;
     (e: 'edit', wish: BudgetPlanItem): void;
     (e: 'remove', wish: BudgetPlanItem): void;
 }>();

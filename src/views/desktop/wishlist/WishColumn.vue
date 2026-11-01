@@ -23,9 +23,13 @@
 
         <!-- what was planned from this group stays here, out of the drag order, which is its month's -->
         <div class="wish-column-list pt-0" v-if="planned.length">
-            <div class="text-caption text-medium-emphasis">{{ tt('Planned') }}</div>
+            <div class="text-caption text-medium-emphasis d-flex">
+                <span>{{ tt('Planned') }}</span>
+                <v-spacer/>
+                <span class="font-weight-medium text-no-wrap me-1">{{ plannedTotal }}</span>
+            </div>
             <wish-card :key="wish.id" :wish="wish" :display-amount="displayAmount" :display-month="displayMonth" :category-name="categoryName"
-                       @unplan="emit('unplan', $event)" @edit="emit('edit', $event)"
+                       @unplan="emit('unplan', $event)" @buy="emit('buy', $event)" @edit="emit('edit', $event)"
                        v-for="wish in planned"/>
         </div>
     </v-card>
@@ -47,6 +51,7 @@ export interface WishList {
 defineProps<{
     title: string;
     total: string;
+    plannedTotal: string;
     list: WishList;
     planned: BudgetPlanItem[];
     displayAmount: (wish: BudgetPlanItem) => string;
@@ -61,6 +66,7 @@ const emit = defineEmits<{
     (e: 'detach', wish: BudgetPlanItem): void;
     (e: 'plan', wish: BudgetPlanItem): void;
     (e: 'unplan', wish: BudgetPlanItem): void;
+    (e: 'buy', wish: BudgetPlanItem): void;
     (e: 'edit', wish: BudgetPlanItem): void;
     (e: 'remove', wish: BudgetPlanItem): void;
 }>();

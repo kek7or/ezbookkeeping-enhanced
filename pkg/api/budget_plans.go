@@ -12,17 +12,19 @@ import (
 
 // BudgetPlansApi represents the api of what a month is planned to cost
 type BudgetPlansApi struct {
-	budgetPlans *services.BudgetPlanService
-	accounts    *services.AccountService
-	categories  *services.TransactionCategoryService
+	budgetPlans  *services.BudgetPlanService
+	accounts     *services.AccountService
+	categories   *services.TransactionCategoryService
+	transactions *services.TransactionService
 }
 
 // Initialize a budget plan api singleton instance
 var (
 	BudgetPlans = &BudgetPlansApi{
-		budgetPlans: services.BudgetPlans,
-		accounts:    services.Accounts,
-		categories:  services.TransactionCategories,
+		budgetPlans:  services.BudgetPlans,
+		accounts:     services.Accounts,
+		categories:   services.TransactionCategories,
+		transactions: services.Transactions,
 	}
 )
 
@@ -548,6 +550,37 @@ func (a *BudgetPlansApi) BudgetPlanWishUnassignHandler(c *core.WebContext) (any,
 	}
 
 	log.Infof(c, "[budget_plans.BudgetPlanWishUnassignHandler] user \"uid:%d\" has returned item \"id:%d\" to the wishlist", uid, unassignReq.Id)
+
+	return true, nil
+}
+
+// BudgetPlanWishBuyHandler takes something planned from the current user's wishlist off it once the
+// transaction that bought it has been recorded. It stays planned in its month.
+func (a *BudgetPlansApi) BudgetPlanWishBuyHandler(c *core.WebContext) (any, *errs.Error) {
+	var buyReq models.BudgetPlanWishBuyRequest
+	err := c.ShouldBindJSON(&buyReq)
+
+	if err != nil {
+		log.Warnf(c, "[budget_plans.BudgetPlanWishBuyHandler] parse request failed, because %s", err.Error())
+		return nil, errs.NewIncompleteOrIncorrectSubmissionError(err)
+	}
+
+	uid := c.GetCurrentUid()
+	transaction, err := a.transactions.GetTransactionByTransactionId(c, uid, buyReq.TransactionId)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishBuyHandler] failed to get transaction \"id:%d\" for user \"uid:%d\", because %s", buyReq.TransactionId, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	err = a.budgetPlans.BuyWish(c, uid, buyReq.Id, transaction.CategoryId, transaction.AccountId)
+
+	if err != nil {
+		log.Errorf(c, "[budget_plans.BudgetPlanWishBuyHandler] failed to mark item \"id:%d\" bought for user \"uid:%d\", because %s", buyReq.Id, uid, err.Error())
+		return nil, errs.Or(err, errs.ErrOperationFailed)
+	}
+
+	log.Infof(c, "[budget_plans.BudgetPlanWishBuyHandler] user \"uid:%d\" has bought item \"id:%d\" with transaction \"id:%d\"", uid, buyReq.Id, buyReq.TransactionId)
 
 	return true, nil
 }

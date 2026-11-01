@@ -282,6 +282,11 @@ export interface BudgetPlanWishUnassignRequest {
     readonly id: string;
 }
 
+export interface BudgetPlanWishBuyRequest {
+    readonly id: string;
+    readonly transactionId: string;
+}
+
 export interface BudgetPlanItemDeleteRequest {
     readonly id: string;
 }

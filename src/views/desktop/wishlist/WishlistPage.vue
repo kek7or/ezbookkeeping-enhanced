@@ -42,10 +42,11 @@
         <v-col cols="12" v-if="!loading">
             <div class="wishlist-board">
                 <wish-column :title="tt('Ungrouped')" :total="displayAmount(totalOf(ungroupedList.wishes))"
+                             :planned-total="displayAmount(totalOf(plannedOf('')))"
                              :list="ungroupedList" :planned="plannedOf('')" :display-amount="displayWishAmount" :display-month="displayWishMonth" :category-name="categoryName"
                              @update="ungroupedList.wishes = $event"
                              @moved="onWishListChange" @attach="pickMonth($event, 'attach')" @plan="pickMonth($event, 'plan')"
-                             @detach="detach" @unplan="unplan" @edit="editWish" @remove="removeWish">
+                             @detach="detach" @unplan="unplan" @buy="buy" @edit="editWish" @remove="removeWish">
                     <template #actions>
                         <v-btn density="comfortable" size="small" variant="text" :icon="true" @click="addWish('')">
                             <v-icon :icon="mdiPlus"/>
@@ -58,10 +59,11 @@
                                 v-model="wishlistStore.groups" @change="onGroupsChange">
                     <template #item="{ element: group }">
                         <wish-column :title="group.name" :total="displayAmount(totalOf(listOf(group.id).wishes))"
+                                     :planned-total="displayAmount(totalOf(plannedOf(group.id)))"
                                      :list="listOf(group.id)" :planned="plannedOf(group.id)" :display-amount="displayWishAmount" :display-month="displayWishMonth" :category-name="categoryName"
                                      @update="listOf(group.id).wishes = $event"
                                      @moved="onWishListChange" @attach="pickMonth($event, 'attach')" @plan="pickMonth($event, 'plan')"
-                                     @detach="detach" @unplan="unplan" @edit="editWish" @remove="removeWish">
+                                     @detach="detach" @unplan="unplan" @buy="buy" @edit="editWish" @remove="removeWish">
                             <template #handle>
                                 <v-icon class="group-drag-handle me-1" size="20" :icon="mdiDrag"/>
                             </template>
@@ -89,6 +91,7 @@
     </v-row>
 
     <edit-wish-dialog ref="editWishDialog"/>
+    <edit-dialog ref="editTransactionDialog" :type="TransactionEditPageType.Transaction"/>
     <grab-from-budget-dialog ref="grabFromBudgetDialog"/>
     <month-selection-dialog :title="monthAction === 'plan' ? tt('Plan for Month') : tt('Attach to Month')"
                             :hint="monthAction === 'plan' ? tt('The wish counts in that month\'s budget and stays on the wishlist, shown as planned.') : tt('The wish shows on that month\'s budget page to be tried against it, and counts towards nothing.')"
@@ -105,6 +108,7 @@
 import ConfirmDialog from '@/components/desktop/ConfirmDialog.vue';
 import RenameDialog from '@/components/desktop/RenameDialog.vue';
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import EditDialog from '@/views/desktop/transactions/list/dialogs/EditDialog.vue';
 import EditWishDialog from './dialogs/EditWishDialog.vue';
 import GrabFromBudgetDialog from './dialogs/GrabFromBudgetDialog.vue';
 import WishColumn, { type WishList } from './WishColumn.vue';
@@ -120,6 +124,8 @@ import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useWishlistStore } from '@/stores/wishlist.ts';
 
 import type { BigDecimal } from '@/core/numeral.ts';
+import { TransactionType } from '@/core/transaction.ts';
+import { TransactionEditPageType } from '@/views/base/transactions/TransactionEditPageBase.ts';
 import type { Year0BasedMonth } from '@/core/datetime.ts';
 import { type BudgetWishGroup, BudgetPlanItem } from '@/models/budget_plan.ts';
 
@@ -144,6 +150,7 @@ type ConfirmDialogType = InstanceType<typeof ConfirmDialog>;
 type RenameDialogType = InstanceType<typeof RenameDialog>;
 type SnackBarType = InstanceType<typeof SnackBar>;
 type EditWishDialogType = InstanceType<typeof EditWishDialog>;
+type EditDialogType = InstanceType<typeof EditDialog>;
 type GrabFromBudgetDialogType = InstanceType<typeof GrabFromBudgetDialog>;
 
 const { tt, formatAmountToLocalizedNumeralsWithCurrency, formatDateTimeToGregorianLikeLongYearMonth } = useI18n();
@@ -158,6 +165,7 @@ const confirmDialog = useTemplateRef<ConfirmDialogType>('confirmDialog');
 const renameDialog = useTemplateRef<RenameDialogType>('renameDialog');
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const editWishDialog = useTemplateRef<EditWishDialogType>('editWishDialog');
+const editTransactionDialog = useTemplateRef<EditDialogType>('editTransactionDialog');
 const grabFromBudgetDialog = useTemplateRef<GrabFromBudgetDialogType>('grabFromBudgetDialog');
 
 const loading = ref<boolean>(true);
@@ -368,6 +376,29 @@ function unplan(wish: BudgetPlanItem): void {
     wishlistStore.grabPlannedItem({ item: wish }).then(() => {
         snackbar.value?.showMessage('You have taken this back out of the month');
     }).catch(showError);
+}
+
+// Opens the transaction editor filled in from the wish, and takes the wish off the wishlist only once
+// the transaction is saved. It stays planned in its month, to measure the purchase against.
+function buy(wish: BudgetPlanItem): void {
+    editTransactionDialog.value?.open({
+        type: TransactionType.Expense,
+        categoryId: wish.categoryId || undefined,
+        accountId: wish.accountId || undefined,
+        amount: wish.amount,
+        comment: wish.name,
+        noTransactionDraft: true
+    }).then(result => {
+        if (!result || !result.transactionId) {
+            return;
+        }
+
+        wishlistStore.buyWish({ item: wish, transactionId: result.transactionId }).then(() => {
+            snackbar.value?.showMessage('You have added the transaction and taken this off the wishlist');
+        }).catch(showError);
+    }).catch(() => {
+        // dismissed
+    });
 }
 
 function pickMonth(wish: BudgetPlanItem, action: 'attach' | 'plan'): void {

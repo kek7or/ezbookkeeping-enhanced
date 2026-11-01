@@ -84,6 +84,13 @@ export const useWishlistStore = defineStore('wishlist', () => {
         return call(services.unassignBudgetPlanWish({ id: item.id }), 'Unable to return this to the wishlist').then(() => loadWishlist());
     }
 
+    // Buying takes a planned item off the wishlist; it stays planned in its month to measure the purchase against
+    function buyWish({ item, transactionId }: { item: BudgetPlanItem, transactionId: string }): Promise<void> {
+        return call(services.buyBudgetPlanWish({ id: item.id, transactionId: transactionId }), 'Unable to take this off the wishlist').then(() => {
+            wishes.value = wishes.value.filter(existing => existing.id !== item.id);
+        });
+    }
+
     // Saves where every wish in the given lists now sits. Each list is one group, in order.
     function moveWishes(lists: { groupId: string, wishes: BudgetPlanItem[] }[]): Promise<void> {
         const newDisplayOrders = lists.flatMap(list => list.wishes.map((wish, index) => {
@@ -149,6 +156,7 @@ export const useWishlistStore = defineStore('wishlist', () => {
         attachWish,
         planWish,
         grabPlannedItem,
+        buyWish,
         moveWishes,
         addGroup,
         renameGroup,

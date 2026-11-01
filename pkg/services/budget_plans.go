@@ -680,6 +680,35 @@ func (s *BudgetPlanService) UnassignWish(c core.Context, uid int64, itemId int64
 	})
 }
 
+// BuyWish takes something planned from the wishlist off it once it has been bought. It stays planned
+// in its month, so the purchase is measured against it there, and takes the category and account it
+// was bought with. Clearing the group as well keeps BackfillPlannedWishes from putting it back.
+// ponytail: an account in another currency reads the planned amount in that currency
+func (s *BudgetPlanService) BuyWish(c core.Context, uid int64, itemId int64, categoryId int64, accountId int64) error {
+	if uid <= 0 {
+		return errs.ErrUserIdInvalid
+	}
+
+	updateModel := &models.BudgetPlanItem{
+		FromWishlist:    false,
+		WishGroupId:     0,
+		CategoryId:      categoryId,
+		AccountId:       accountId,
+		UpdatedUnixTime: time.Now().Unix(),
+	}
+
+	updatedRows, err := s.UserDataDB(uid).NewSession(c).ID(itemId).Cols("from_wishlist", "wish_group_id", "category_id", "account_id", "updated_unix_time").
+		Where("uid=? AND deleted=? AND wished=? AND from_wishlist=?", uid, false, false, true).Update(updateModel)
+
+	if err != nil {
+		return err
+	} else if updatedRows < 1 {
+		return errs.ErrBudgetPlanItemNotFound
+	}
+
+	return nil
+}
+
 // ModifyItem changes what was planned. The month it belongs to is not among the things that can
 // change: moving a plan item to another month is adding it there and removing it here, and doing it
 // as a move would let it slip past the per-month limit.

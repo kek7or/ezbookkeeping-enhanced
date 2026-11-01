@@ -86,6 +86,7 @@ import type {
     BudgetPlanWishModifyRequest,
     BudgetPlanWishAssignRequest,
     BudgetPlanWishUnassignRequest,
+    BudgetPlanWishBuyRequest,
     BudgetPlanWishAttachRequest,
     BudgetPlanWishMoveRequest,
     BudgetWishGroup,
@@ -1026,6 +1027,9 @@ export default {
     },
     unassignBudgetPlanWish: (req: BudgetPlanWishUnassignRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/unassign.json', req);
+    },
+    buyBudgetPlanWish: (req: BudgetPlanWishBuyRequest): ApiResponsePromise<boolean> => {
+        return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/buy.json', req);
     },
     attachBudgetPlanWish: (req: BudgetPlanWishAttachRequest): ApiResponsePromise<boolean> => {
         return axios.post<ApiResponse<boolean>>('v1/budget_plans/wishes/attach.json', req);
